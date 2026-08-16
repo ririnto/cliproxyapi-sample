@@ -7,6 +7,8 @@
   "editorMode": "normal",
   "effortLevel": "medium",
   "env": {
+    "ANTHROPIC_API_KEY": "sk-dummy",
+    "ANTHROPIC_BASE_URL": "http://localhost:8317",
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "85",
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "272000",
