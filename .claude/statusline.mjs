@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const LOADER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const LOADER_DIR = path.dirname(fileURLToPath(import.meta.url)); // oxlint-disable-line unicorn/prefer-import-meta-properties -- Node.js 18 compatibility
 const RESET = "[0m";
 const DIM = "[2m";
 const PCT_GREEN = 70;
