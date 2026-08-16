@@ -1,0 +1,23 @@
+disable-cooling: true
+
+openai-compatibility:
+  - name: "zai"
+    base-url: "https://api.z.ai/api/coding/paas/v4"
+    support-prompt-cache-key: true
+    disable-cooling: true
+    api-key-entries:
+      - api-key: __ZAI_API_KEY__
+    models:
+      - name: glm-5.3
+        alias: glm-5.3
+        display-name: GLM-5.3
+        max-context-length: 1000000
+        input-modalities:
+          - text
+        output-modalities:
+          - text
+        is-compat: true
+        thinking:
+          levels:
+            - high
+            - max

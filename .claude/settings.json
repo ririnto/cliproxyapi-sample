@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "allowAllClaudeAiMcps": false,
+  "askUserQuestionTimeout": "60s",
+  "disableClaudeAiConnectors": true,
+  "disallowedTools": ["AskUserQuestion", "EnterPlanMode", "TaskOutput"],
+  "editorMode": "normal",
+  "effortLevel": "medium",
+  "env": {
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "85",
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "272000",
+    "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
+    "CLAUDE_CODE_REMOTE_SEND_KEEPALIVES": "1",
+    "DISABLE_FEEDBACK_COMMAND": "1",
+    "ENABLE_TOOL_SEARCH": "true"
+  },
+  "fallbackModel": ["gpt-5.6-luna", "glm-5.3", "gpt-5.6-luna"],
+  "fastMode": false,
+  "feedbackSurveyRate": 0,
+  "includeCoAuthoredBy": false,
+  "includeGitInstructions": false,
+  "language": "Korean",
+  "model": "fable[1m]",
+  "modelOverrides": {
+    "claude-fable-5": "gpt-5.6-sol",
+    "claude-haiku-4-5-20251001": "gpt-5.6-luna",
+    "claude-opus-5": "glm-5.3",
+    "claude-sonnet-5": "gpt-5.6-luna"
+  },
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "showClearContextOnPlanAccept": true,
+  "showThinkingSummaries": true,
+  "showTurnDuration": true,
+  "skillOverrides": {
+    "claude-api": "off"
+  },
+  "skipDangerousModePermissionPrompt": true,
+  "statusLine": {
+    "command": "node ~/.claude/statusline.mjs",
+    "type": "command"
+  },
+  "statusLineAddon": [
+    {
+      "credential": "{env:ZHIPU_API_KEY}",
+      "enabled": true,
+      "hideName": true,
+      "name": "GLM Coding Plan",
+      "script": "statusline/glm-coding-plan.mjs",
+      "showAbove": 5
+    },
+    {
+      "credential": "{env:MINIMAX_API_KEY}",
+      "enabled": true,
+      "name": "MiniMax Token Plan",
+      "script": "statusline/minimax-token-plan.mjs",
+      "showAbove": {
+        "5h": 5,
+        "7d": 5
+      }
+    },
+    {
+      "enabled": true,
+      "name": "Chatgpt",
+      "script": "statusline/codex-usage.mjs",
+      "showAbove": 5
+    },
+    {
+      "enabled": true,
+      "name": "Copilot",
+      "script": "statusline/copilot-usage.mjs",
+      "showAbove": 5
+    }
+  ],
+  "teammateMode": "auto",
+  "terminalProgressBarEnabled": true,
+  "theme": "auto",
+  "verbose": true,
+  "workflowSizeGuideline": "small",
+  "worktree": {
+    "baseRef": "head"
+  }
+}

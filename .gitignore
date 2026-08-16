@@ -1,0 +1,5 @@
+auths/
+logs/
+plugins/
+node_modules/
+/config.yaml
