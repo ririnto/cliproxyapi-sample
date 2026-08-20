@@ -9,13 +9,50 @@
   "env": {
     "ANTHROPIC_API_KEY": "sk-dummy",
     "ANTHROPIC_BASE_URL": "http://localhost:8317",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "gpt-5.6-sol",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION": "GPT-5.6 Sol - flagship reasoning, routes the hardest long-horizon tasks",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "GPT-5.6 Sol",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES": "effort,interleaved_thinking,max_effort,temperature,thinking,xhigh_effort,adaptive_thinking",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-5.6-luna",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION": "GPT-5.6 Luna - fastest for quick answers and subagent sweeps",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "GPT-5.6 Luna",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES": "effort,interleaved_thinking,max_effort,temperature,thinking,xhigh_effort,adaptive_thinking",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.3",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "GLM-5.3 - main-loop coding model, best for complex everyday tasks",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "GLM-5.3",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES": "effort,interleaved_thinking,max_effort,temperature,thinking,xhigh_effort,adaptive_thinking",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-5.6-luna",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION": "GPT-5.6 Luna - balanced efficiency for routine coding tasks",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "GPT-5.6 Luna",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "effort,interleaved_thinking,max_effort,temperature,thinking,xhigh_effort,adaptive_thinking",
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "85",
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "272000",
     "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
+    "CLAUDE_CODE_DISABLE_FAST_MODE": "1",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "2",
     "CLAUDE_CODE_REMOTE_SEND_KEEPALIVES": "1",
     "DISABLE_FEEDBACK_COMMAND": "1",
+    "DISABLE_TELEMETRY": "1",
+    "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
     "ENABLE_TOOL_SEARCH": "true"
+  },
+  "extraKnownMarketplaces": {
+    "anthropic-agent-skills": {
+      "autoUpdate": true,
+      "source": {
+        "repo": "anthropics/skills",
+        "source": "github"
+      }
+    },
+    "ponytail": {
+      "autoUpdate": true,
+      "source": {
+        "repo": "DietrichGebert/ponytail",
+        "source": "github"
+      }
+    }
   },
   "fallbackModel": ["gpt-5.6-luna", "glm-5.3", "gpt-5.6-luna"],
   "fastMode": false,
@@ -31,7 +68,8 @@
     "claude-sonnet-5": "gpt-5.6-luna"
   },
   "permissions": {
-    "defaultMode": "bypassPermissions"
+    "defaultMode": "bypassPermissions",
+    "deny": ["AskUserQuestion", "EnterPlanMode", "TaskOutput"]
   },
   "showClearContextOnPlanAccept": true,
   "showThinkingSummaries": true,
