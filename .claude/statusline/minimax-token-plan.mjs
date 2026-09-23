@@ -85,7 +85,7 @@ export const fetchUsage = async (options = {}) => {
   if (typeof credential !== "string" || !credential) {
     return;
   }
-  const response = await requestJson(
+  const { payload } = await requestJson(
     USAGE_URL,
     {
       Authorization: `Bearer ${credential}`,
@@ -93,7 +93,6 @@ export const fetchUsage = async (options = {}) => {
     },
     fetchFunction(options)
   );
-  const { payload } = response;
   if (
     payload?.base_resp?.status_code !== 0 ||
     !Array.isArray(payload.model_remains)
@@ -109,25 +108,31 @@ export const fetchUsage = async (options = {}) => {
   const intervalTotal = isFiniteNumber(model.current_interval_total_count)
     ? Math.max(0, model.current_interval_total_count)
     : 0;
-  const intervalRemaining = isFiniteNumber(model.current_interval_usage_count)
-    ? model.current_interval_usage_count
-    : 0;
   const weeklyTotal = isFiniteNumber(model.current_weekly_total_count)
     ? Math.max(0, model.current_weekly_total_count)
-    : 0;
-  const weeklyRemaining = isFiniteNumber(model.current_weekly_usage_count)
-    ? model.current_weekly_usage_count
     : 0;
   return snapshot([
     usageMetric(
       "5h",
-      Math.max(0, intervalTotal - intervalRemaining),
+      Math.max(
+        0,
+        intervalTotal -
+          (isFiniteNumber(model.current_interval_usage_count)
+            ? model.current_interval_usage_count
+            : 0)
+      ),
       intervalTotal,
       isFiniteNumber(model.remains_time) ? Math.max(0, model.remains_time) : 0
     ),
     usageMetric(
       "7d",
-      Math.max(0, weeklyTotal - weeklyRemaining),
+      Math.max(
+        0,
+        weeklyTotal -
+          (isFiniteNumber(model.current_weekly_usage_count)
+            ? model.current_weekly_usage_count
+            : 0)
+      ),
       weeklyTotal,
       isFiniteNumber(model.weekly_remains_time)
         ? Math.max(0, model.weekly_remains_time)

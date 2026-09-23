@@ -7,11 +7,13 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const LOADER_DIR = path.dirname(fileURLToPath(import.meta.url)); // oxlint-disable-line unicorn/prefer-import-meta-properties -- Node.js 18 compatibility
 const RESET = "[0m";
 const DIM = "[2m";
 const PCT_GREEN = 70;
 const PCT_YELLOW = 90;
+
+const isRecord = (value) =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const metricPercentage = (metric) => {
   if (metric?.type === "usage") {
@@ -59,7 +61,6 @@ const replaceFileReferences = async (value, options) => {
         ? pathValue
         : path.resolve(baseDir, pathValue);
       try {
-        // Unreadable credential files keep the reference text in place.
         const contents = await readFile(filePath, "utf-8");
         return contents.trim();
       } catch {
@@ -169,108 +170,103 @@ const thresholdFor = (showAbove, groupLabel, metricLabel) => {
 };
 
 const renderMetric = (metric) => {
-  const percentage = metricPercent(metric);
   const reset = metric.resetsInMs ?? metric.resets_in_ms;
-  const resetPart = reset === undefined ? "" : ` (${resetText(reset)})`;
-  return `${metric.label}: ${barColor(percentage)}${metricDisplay(metric)}${RESET}${resetPart}`;
+  return `${metric.label}: ${barColor(metricPercent(metric))}${metricDisplay(metric)}${RESET}${reset === undefined ? "" : ` (${resetText(reset)})`}`;
 };
 
-const renderRateLimits = (rateLimits, nowMs) => {
-  const parts = [];
-  for (const [key, label] of [
+const renderRateLimits = (rateLimits, nowMs) =>
+  [
     ["five_hour", "5h"],
     ["seven_day", "7d"]
-  ]) {
-    const window = rateLimits?.[key];
-    if (!window || typeof window !== "object") {
-      continue;
-    }
-    parts.push(
-      renderMetric({
-        label,
-        percentage: Number(window.used_percentage || 0),
-        resetsInMs: Math.trunc(Number(window.resets_at || 0) * 1000 - nowMs),
-        type: "percentage"
-      })
-    );
-  }
-  return parts.join(" | ");
-};
+  ]
+    .map(([key, label]) => {
+      const window = rateLimits?.[key];
+      return isRecord(window)
+        ? renderMetric({
+            label,
+            percentage: Number(window.used_percentage || 0),
+            resetsInMs: Math.trunc(
+              Number(window.resets_at || 0) * 1000 - nowMs
+            ),
+            type: "percentage"
+          })
+        : "";
+    })
+    .filter(Boolean)
+    .join(" | ");
 
-const metricEntries = (group) => {
-  if (!group || typeof group !== "object" || !Array.isArray(group.metrics)) {
-    return [];
-  }
-  return group.metrics.filter(
-    (metric) =>
-      metric && typeof metric === "object" && typeof metric.label === "string"
-  );
-};
+const metricEntries = (group) =>
+  isRecord(group) && Array.isArray(group.metrics)
+    ? group.metrics.filter(
+        (metric) =>
+          metric &&
+          typeof metric === "object" &&
+          typeof metric.label === "string"
+      )
+    : [];
 
-const renderSnapshot = (addon, snapshot) => {
+const hiddenLabel = (metric, hideLabels) =>
+  Array.isArray(hideLabels) && hideLabels.includes(metric.label);
+
+export const renderSnapshot = (addon, snapshot) => {
   if (!snapshot || !Array.isArray(snapshot.groups)) {
     return "";
   }
-  const fragments = [];
-  for (const group of snapshot.groups) {
-    const metrics = metricEntries(group).filter((metric) => {
-      const percentage = metricPercent(metric);
-      return (
-        percentage >=
-        thresholdFor(addon.showAbove, group.label || "", metric.label)
+  return snapshot.groups
+    .map((group) => {
+      const metrics = metricEntries(group).filter(
+        (metric) =>
+          !hiddenLabel(metric, addon.hideLabels) &&
+          metricPercent(metric) >=
+            thresholdFor(addon.showAbove, group.label || "", metric.label)
       );
-    });
-    if (!metrics.length) {
-      continue;
-    }
-    const content = metrics.map(renderMetric).join(" | ");
-    const groupName =
-      typeof group.label === "string" && group.label ? group.label : addon.name;
-    const displayName = group.label || !addon.hideName ? groupName : "";
-    fragments.push(displayName ? `${displayName} | ${content}` : content);
-  }
-  return fragments.join(" | ");
+      if (!metrics.length) {
+        return "";
+      }
+      const content = metrics.map(renderMetric).join(" | ");
+      const groupName =
+        typeof group.label === "string" && group.label
+          ? group.label
+          : addon.name;
+      const displayName = group.label || !addon.hideName ? groupName : "";
+      return displayName ? `${displayName} | ${content}` : content;
+    })
+    .filter(Boolean)
+    .join(" | ");
 };
 
-const addonSettings = (addons) => {
-  if (!Array.isArray(addons)) {
-    return [];
-  }
-  const selected = [];
-  for (const addon of addons) {
-    if (!addon || typeof addon !== "object" || addon.enabled === false) {
-      continue;
-    }
-    const script = typeof addon.script === "string" ? addon.script.trim() : "";
-    if (!script) {
-      continue;
-    }
-    selected.push({ ...addon, script });
-  }
-  return selected;
-};
+const addonSettings = (addons) =>
+  Array.isArray(addons)
+    ? addons
+        .filter(
+          (addon) =>
+            addon &&
+            typeof addon === "object" &&
+            addon.enabled !== false &&
+            typeof addon.script === "string" &&
+            addon.script.trim()
+        )
+        .map((addon) => ({ ...addon, script: addon.script.trim() }))
+    : [];
 
 const scriptPath = (script) => {
   const home = homedir();
-  let expanded = script;
   if (script === "~") {
-    expanded = home;
-  } else if (script.startsWith("~/")) {
-    expanded = path.join(home, script.slice(2));
+    return home;
   }
+  const expanded = script.startsWith("~/")
+    ? path.join(home, script.slice(2))
+    : script;
   return path.isAbsolute(expanded)
     ? expanded
-    : path.resolve(LOADER_DIR, expanded);
+    : fileURLToPath(new URL(expanded, import.meta.url));
 };
 
 const importAddonModule = async (addon, options) => {
   const filePath = scriptPath(addon.script);
   const importFunction = options.importModule || ((url) => import(url));
   const module = await importFunction(pathToFileURL(filePath));
-  if (typeof module.fetchUsage !== "function") {
-    return;
-  }
-  return module;
+  return typeof module.fetchUsage === "function" ? module : undefined;
 };
 
 const renderAddonResults = async (addons, options = {}) => {
@@ -328,14 +324,11 @@ const renderHeader = (input, options) => {
   const percentage = Math.trunc(Number(context.used_percentage || 0));
   const size = Math.trunc(Number(context.context_window_size || 0));
   const contextPart = `${barColor(percentage)}${usageBar(percentage)}${RESET} ${percentage}%${size ? ` (${numberText(size)})` : ""}`;
-  const parts = [
-    ` [36m${header}${RESET} [1m${projectDisplay(workspace)}${RESET}`
-  ];
-  if (branch) {
-    parts.push(`[35m${branch}${RESET}`);
-  }
-  parts.push(contextPart);
-  return parts.join(" | ");
+  return [
+    `[36m${header}${RESET} [1m${projectDisplay(workspace)}${RESET}`,
+    ...(branch ? [`[35m${branch}${RESET}`] : []),
+    contextPart
+  ].join(" | ");
 };
 
 const renderCost = (input) => {
@@ -350,20 +343,23 @@ export const renderStatusline = async (input, options = {}) => {
   const addons = options.addons ?? [];
   const rate = renderRateLimits(input.rate_limits || {}, nowMs);
   const addonResults = await renderAddonResults(addons, options);
-  const addonRows = addonResults.map((result) => result.line);
-  const rows = [renderHeader(input, options), renderCost(input)];
   const hiddenIndex =
     !rate && options.mergeHidden !== false
       ? addonResults.findIndex((result) => result.hideName)
       : -1;
-  if (hiddenIndex >= 0) {
-    rows[1] += ` | ${addonRows.splice(hiddenIndex, 1)[0]}`;
-  }
-  if (rate) {
-    rows.push(rate);
-  }
-  rows.push(...addonRows);
-  return rows;
+  const visibleRows = addonResults
+    .filter((_, index) => index !== hiddenIndex)
+    .map((result) => result.line);
+  const costRow =
+    hiddenIndex >= 0
+      ? `${renderCost(input)} | ${addonResults[hiddenIndex].line}`
+      : renderCost(input);
+  return [
+    renderHeader(input, options),
+    costRow,
+    ...(rate ? [rate] : []),
+    ...visibleRows
+  ];
 };
 
 const readSettings = async (filePath) => {
@@ -378,22 +374,23 @@ export const main = async () => {
   try {
     const input = JSON.parse(readFileSync(0, "utf-8"));
     const globalSettingsDir = path.join(homedir(), ".claude");
-    let settingsDir = globalSettingsDir;
-    let settings =
-      (await readSettings(path.join(globalSettingsDir, "settings.json"))) || {};
-    if (typeof input.workspace?.project_dir === "string") {
-      const projectSettings = await readSettings(
-        path.join(input.workspace.project_dir, ".claude", "settings.json")
-      );
-      if (projectSettings && Array.isArray(projectSettings.statusLineAddon)) {
-        settings = projectSettings;
-        settingsDir = path.join(input.workspace.project_dir, ".claude");
-      }
-    }
+    const projectDir = input.workspace?.project_dir;
+    const projectSettings =
+      typeof projectDir === "string"
+        ? await readSettings(path.join(projectDir, ".claude", "settings.json"))
+        : null;
+    const useProject =
+      projectSettings && Array.isArray(projectSettings.statusLineAddon);
+    const settings = useProject
+      ? projectSettings
+      : (await readSettings(path.join(globalSettingsDir, "settings.json"))) ||
+        {};
     const rows = await renderStatusline(input, {
       addons: settings.statusLineAddon || [],
       cwd: input.workspace?.current_dir || process.cwd(),
-      settingsDir
+      settingsDir: useProject
+        ? path.join(projectDir, ".claude")
+        : globalSettingsDir
     });
     process.stdout.write(`${rows.join("\n")}\n`);
   } catch {

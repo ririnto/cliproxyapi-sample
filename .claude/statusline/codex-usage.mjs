@@ -51,8 +51,10 @@ const readJson = async (filePath) => {
   try {
     const value = JSON.parse(await readFile(filePath, "utf-8"));
     return isRecord(value) ? value : undefined;
-  } catch {
-    // Return undefined when local authentication data is unreadable.
+  } catch (error) {
+    if (process.env.STATUSLINE_DEBUG) {
+      console.error(`[codex-usage] unreadable ${filePath}`, error);
+    }
   }
 };
 
@@ -112,31 +114,34 @@ const chatgptAuth = async (options) => {
   };
 };
 
-const chatgptWindow = (window, fallback) => {
-  if (!isRecord(window)) {
-    return;
-  }
-  const percentage = window.used_percent;
-  const reset = secondsToMs(window.reset_after_seconds);
-  const seconds = window.limit_window_seconds;
-  let label = fallback;
+const windowLabel = (seconds, fallback) => {
   if (
     typeof seconds === "number" &&
     Number.isFinite(seconds) &&
     seconds > 0 &&
     seconds % 86_400 === 0
   ) {
-    label = `${seconds / 86_400}d`;
-  } else if (
+    return `${seconds / 86_400}d`;
+  }
+  if (
     typeof seconds === "number" &&
     Number.isFinite(seconds) &&
     seconds > 0 &&
     seconds % 3600 === 0
   ) {
-    label = `${seconds / 3600}h`;
+    return `${seconds / 3600}h`;
   }
-  return percentageMetric(label, percentage, reset);
+  return fallback;
 };
+
+const chatgptWindow = (window, fallback) =>
+  isRecord(window)
+    ? percentageMetric(
+        windowLabel(window.limit_window_seconds, fallback),
+        window.used_percent,
+        secondsToMs(window.reset_after_seconds)
+      )
+    : undefined;
 
 const chatgptGroup = (rateLimit, label) => {
   if (!isRecord(rateLimit)) {
@@ -155,6 +160,14 @@ const chatgptGroup = (rateLimit, label) => {
     group.label = label;
   }
   return group;
+};
+
+const chatgptPlanLabel = (planType) => {
+  const known = ["free", "plus", "pro", "team", "enterprise", "edu"];
+  if (typeof planType !== "string" || !known.includes(planType)) {
+    return "";
+  }
+  return planType.charAt(0).toUpperCase() + planType.slice(1);
 };
 
 /**
@@ -182,34 +195,33 @@ export const fetchUsage = async (options = {}) => {
   if (selected.accountId) {
     headers["ChatGPT-Account-ID"] = selected.accountId;
   }
-  const response = await requestJson(
+  const { payload } = await requestJson(
     USAGE_URL,
     headers,
     fetchFunction(options)
   );
-  const { payload } = response;
-  if (!payload) {
-    return;
-  }
-  const groups = [];
-  const primary = chatgptGroup(payload.rate_limit);
-  if (primary) {
-    groups.push(primary);
-  }
-  if (Array.isArray(payload.additional_rate_limits)) {
-    for (const limit of payload.additional_rate_limits) {
-      if (
-        !isRecord(limit) ||
-        typeof limit.limit_name !== "string" ||
-        !limit.limit_name
-      ) {
-        continue;
+  const plan = chatgptPlanLabel(payload?.plan_type);
+  return payload
+    ? {
+        groups: [
+          chatgptGroup(payload.rate_limit, plan && `ChatGPT (${plan})`),
+          ...(Array.isArray(payload.additional_rate_limits)
+            ? payload.additional_rate_limits.filter(
+                (limit) =>
+                  isRecord(limit) &&
+                  typeof limit.limit_name === "string" &&
+                  limit.limit_name
+              )
+            : []
+          ).map((limit) =>
+            chatgptGroup(
+              limit.rate_limit,
+              limit.limit_name === "gpt-5.3-codex-spark"
+                ? "Additional"
+                : limit.limit_name
+            )
+          )
+        ].filter(Boolean)
       }
-      const group = chatgptGroup(limit.rate_limit, limit.limit_name);
-      if (group) {
-        groups.push(group);
-      }
-    }
-  }
-  return groups.length ? { groups } : undefined;
+    : undefined;
 };

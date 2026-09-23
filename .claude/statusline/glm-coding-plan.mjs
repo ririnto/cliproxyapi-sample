@@ -79,6 +79,12 @@ const snapshot = (metrics, label) => {
   return { groups: [group] };
 };
 
+const TIER_LABELS = {
+  lite: "Lite",
+  max: "Max",
+  pro: "Pro"
+};
+
 /**
  * Fetch and normalize Z.AI coding plan usage.
  * @param {object} [options] Input value.
@@ -107,25 +113,24 @@ export const fetchUsage = async (options = {}) => {
     return;
   }
   const now = nowValue(options.now);
-  const metrics = [];
-  for (const limit of payload.data.limits) {
-    if (!isRecord(limit) || limit.type !== "TOKENS_LIMIT") {
-      continue;
-    }
-    let label = "";
-    if (limit.unit === 3 && limit.number === 5) {
-      label = "5h";
-    } else if (limit.unit === 6 && limit.number === 1) {
-      label = "7d";
-    }
-    if (!label) {
-      continue;
-    }
-    const reset = resetAfter(limit.nextResetTime, now);
-    const metric = percentageMetric(label, limit.percentage, reset);
-    if (metric) {
-      metrics.push(metric);
-    }
-  }
-  return snapshot(metrics);
+  const metrics = payload.data.limits
+    .filter(
+      (limit) =>
+        isRecord(limit) &&
+        (limit.type === "TOKENS_LIMIT" || limit.type === "CREDIT_LIMIT") &&
+        ((limit.unit === 3 && limit.number === 5) ||
+          (limit.unit === 6 && limit.number === 1))
+    )
+    .map((limit) =>
+      percentageMetric(
+        limit.unit === 3 ? "5h" : "7d",
+        limit.percentage,
+        resetAfter(limit.nextResetTime, now)
+      )
+    )
+    .filter(Boolean);
+  const { level } = payload.data;
+  const label =
+    typeof level === "string" ? TIER_LABELS[level.toLowerCase()] : undefined;
+  return snapshot(metrics, label ? `Z.AI (${label})` : undefined);
 };
