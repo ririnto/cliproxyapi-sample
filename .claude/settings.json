@@ -24,14 +24,14 @@
     "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION": "GPT-6 Luna - balanced efficiency for routine coding tasks",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "GPT-6 Luna",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "effort,interleaved_thinking,max_effort,temperature,thinking,xhigh_effort,adaptive_thinking",
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "85",
+    "API_FORCE_IDLE_TIMEOUT": "0",
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "272000",
     "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
     "CLAUDE_CODE_DISABLE_FAST_MODE": "1",
     "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
-    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "2",
     "CLAUDE_CODE_REMOTE_SEND_KEEPALIVES": "1",
+    "CLAUDE_STREAM_IDLE_TIMEOUT_MS": "600000",
     "DISABLE_FEEDBACK_COMMAND": "1",
     "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
     "ENABLE_TOOL_SEARCH": "true"
@@ -59,6 +59,12 @@
   "includeGitInstructions": false,
   "language": "Korean",
   "model": "opus",
+  "modelOverrides": {
+    "claude-fable-5-1": "gpt-6-astra",
+    "claude-haiku-4-5-20251001": "glm-5.3-flash",
+    "claude-opus-5-5": "gpt-6-sol",
+    "claude-sonnet-5": "gpt-6-luna"
+  },
   "modelSettings": {
     "gpt-6-luna": {
       "effortLevel": "xhigh"
