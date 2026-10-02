@@ -1,5 +1,5 @@
 # Configuration template using the v8 layout.
-# Copy this file to the CLIProxyAPI config path and replace enabled upstream keys.
+# Copy this file to config.yaml and replace the client keys and any enabled examples.
 # Optional upstream credentials and request rules remain commented until configured.
 # Existing legacy configuration files and /v0/management requests remain supported.
 # When both spellings of a field are present, the v8 value wins (including false,
@@ -13,6 +13,7 @@ config-version: 8
 server:
   # Server host/interface to bind to. Default is empty ("") to bind all interfaces (IPv4 + IPv6).
   # Use "127.0.0.1" or "localhost" to restrict access to local machine only.
+  # host: ""
   host: "127.0.0.1"
 
   # Server port
@@ -82,12 +83,12 @@ management:
   panel-github-repository: "https://github.com/router-for-me/Cli-Proxy-API-Management-Center"
 
 # Client authentication for the proxy API. These are not upstream provider keys.
-# Local client authentication is disabled on the loopback listener.
-# access:
-#   api-keys:
-#     - "your-api-key-1"
-#     - "your-api-key-2"
-#     - "your-api-key-3"
+access:
+  # API keys for authentication
+  api-keys:
+    # - "your-api-key-1"
+    # - "your-api-key-2"
+    # - "your-api-key-3"
 
 # Optional credential concurrency and observation contracts.
 
@@ -179,6 +180,7 @@ routing:
   cooldown:
     # When true, disable auth/model cooldown scheduling globally (prevents blackout windows after failure states).
     # A credential/provider disable-cooling value, when present, overrides this global value.
+    # disable-cooling: false
     disable-cooling: true
 
     # When true, persist per-auth cooldown status as .cds files next to auth files.
@@ -191,42 +193,6 @@ routing:
 
 # Shared request/response behavior.
 requests:
-  payload:
-    override:
-    - models:
-      - name: glm-5.3
-        protocol: codex
-        match:
-        - reasoning.effort: xhigh
-      - name: glm-5.3-flash
-        protocol: codex
-        match:
-        - reasoning.effort: xhigh
-      params:
-        reasoning.effort: max
-    - models:
-      - name: glm-5.3
-        protocol: codex
-        match:
-        - reasoning.effort: medium
-      - name: glm-5.3-flash
-        protocol: codex
-        match:
-        - reasoning.effort: medium
-      params:
-        reasoning.effort: high
-    - models:
-      - name: glm-5.3
-        protocol: codex
-        match:
-        - reasoning.effort: minimal
-      - name: glm-5.3-flash
-        protocol: codex
-        match:
-        - reasoning.effort: minimal
-      params:
-        reasoning.effort: low
-
   # Proxy URL. Supports socks5/http/https protocols. Example: socks5://user:pass@192.168.1.1:1080/
   # Per-entry proxy-url also supports "direct" or "none" to bypass both the global proxy-url and environment proxies explicitly.
   proxy-url: ""
@@ -307,6 +273,41 @@ requests:
   #         - 'tools.#(name=="apply_patch")'
   #         # Nested additional_tools structure in input[] (Codex CLI >= 0.154 "Responses Lite"):
   #         - 'input.#(type=="additional_tools")#.tools.#(name=="functions")#.tools.#(name=="apply_patch")#'
+  payload:
+    override:
+      - models:
+          - name: glm-5.3
+            protocol: codex
+            match:
+              - reasoning.effort: xhigh
+          - name: glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: xhigh
+        params:
+          reasoning.effort: max
+      - models:
+          - name: glm-5.3
+            protocol: codex
+            match:
+              - reasoning.effort: medium
+          - name: glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: medium
+        params:
+          reasoning.effort: high
+      - models:
+          - name: glm-5.3
+            protocol: codex
+            match:
+              - reasoning.effort: minimal
+          - name: glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: minimal
+        params:
+          reasoning.effort: low
 
 # API-key upstreams are separate from access.api-keys (client authentication).
 # Each provider contains named groups: one base-url, shared settings, and a keys list.
@@ -323,42 +324,6 @@ requests:
 # Replace placeholder keys/URLs before using them.
 
 # BEGIN API KEY EXAMPLES
-# Replace __ZAI_API_KEY__ with your Z.AI API key.
-api-keys:
-  codex:
-  - name: zai
-    base-url: https://api.z.ai/api/v1
-    disable-cooling: true
-    keys:
-    - api-key: __ZAI_API_KEY__
-    models:
-    - name: glm-5.3
-      alias: glm-5.3
-      display-name: GLM-5.3
-      max-context-length: 1000000
-      is-compat: true
-      thinking:
-        levels:
-        - max
-        - xhigh
-        - high
-        - medium
-        - low
-        - minimal
-    - name: glm-5.3-flash
-      alias: glm-5.3-flash
-      display-name: GLM-5.3 Flash
-      max-context-length: 1000000
-      is-compat: true
-      thinking:
-        levels:
-        - max
-        - xhigh
-        - high
-        - medium
-        - low
-        - minimal
-
 
 # api-keys:
 #
@@ -762,6 +727,37 @@ api-keys:
 #           alias: "claude-opus-4.66"
 #         - name: "kimi-k2.5"
 #           alias: "claude-opus-4.66"
+api-keys:
+  codex:
+    - name: zai
+      base-url: https://api.z.ai/api/v1
+      models:
+        - name: glm-5.3
+          alias: glm-5.3
+          display-name: GLM 5.3
+          is-compat: true
+          thinking:
+            levels:
+              - max
+              - xhigh
+              - high
+              - medium
+              - low
+              - minimal
+        - name: glm-5.3-flash
+          alias: glm-5.3-flash
+          display-name: GLM 5.3 Flash
+          is-compat: true
+          thinking:
+            levels:
+              - max
+              - xhigh
+              - high
+              - medium
+              - low
+              - minimal
+      keys:
+        - api-key: __ZAI_API_KEY__
 
 # END API KEY EXAMPLES
 
@@ -829,6 +825,16 @@ oauth:
   #   sample-provider:                  # plugin provider keys are supported for OAuth plugins
   #     - name: "sample-model-latest"
   #       alias: "sample-latest"
+
+  # OAuth provider model settings (per channel)
+  # Allows overriding model-level capabilities (such as context window) for OAuth credentials.
+  # Supported channels: vertex, aistudio, antigravity, claude, codex, kimi, xai, meta.
+  # settings:
+  #   codex:
+  #     - name: "gpt-6-sol"
+  #       max-context-length: 524288 # overrides context window advertised to Codex clients
+  #     - name: "gpt-6-astra"
+  #       max-context-length: 1048576
 
   # OAuth provider excluded models
   # excluded-models:
@@ -908,11 +914,6 @@ oauth:
       # Experimental full-duplex Codex Responses WebSocket steering (default: false).
       # Keeps one upstream account/model per socket; accepted input is never replayed.
       response-steering: false
-      # When true, and routing.strategy is fill-first or routing.session-affinity is true,
-      # remap Codex prompt_cache_key and installation identity per selected auth.
-      # Some superstitious users believe request tracking identifiers can be used
-      # as evidence for TOS enforcement bans; this option only satisfies those odd concerns.
-      identity-confuse: false
       # Disable forcing the official Codex User-Agent and Originator headers on HTTP/SSE and WebSocket requests.
       disable-codex-cloaking: false
       # Hold back the frames that carry nothing the client has seen - the handshake (response.created,
@@ -982,6 +983,7 @@ oauth:
       # This refreshes Codex spawn_agent model details, removes message parameter encryption,
       # normalizes encrypted agent_message content for Codex, and converts agent_message input
       # into standard user messages for non-Codex upstream protocols.
+      # optimize-multi-agent-v2: false
       optimize-multi-agent-v2: true
       # When true, enable opt-in compatibility for orphan Codex delegation outputs.
       # Converts orphan function_call_output items from codex_app/create_thread and
