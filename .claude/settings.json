@@ -16,9 +16,9 @@
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION": "GLM-5.3 Flash - fastest for quick answers and subagent sweeps",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "GLM-5.3 Flash",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES": "effort,interleaved_thinking,max_effort,temperature,thinking,xhigh_effort,adaptive_thinking",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "gpt-6-sol[1m]",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "GPT-6 Sol - main-loop coding model, best for complex everyday tasks",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "GPT-6 Sol",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "gpt-6.1-sol[1m]",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "GPT-6.1 Sol - main-loop coding model, best for complex everyday tasks",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "GPT-6.1 Sol",
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES": "effort,interleaved_thinking,max_effort,temperature,thinking,xhigh_effort,adaptive_thinking",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-6-luna[1m]",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION": "GPT-6 Luna - balanced efficiency for routine coding tasks",
@@ -62,7 +62,7 @@
   "modelOverrides": {
     "claude-fable-5-1": "gpt-6-astra",
     "claude-haiku-4-5-20251001": "glm-5.3-flash",
-    "claude-opus-5-5": "gpt-6-sol",
+    "claude-opus-5-5": "gpt-6.1-sol",
     "claude-sonnet-5": "gpt-6-luna"
   },
   "modelSettings": {

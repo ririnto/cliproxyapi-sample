@@ -195,37 +195,38 @@ requests:
     override:
     - models:
       - name: glm-5.3
-        protocol: openai
+        protocol: codex
         match:
-        - reasoning_effort: minimal
+        - reasoning.effort: xhigh
       - name: glm-5.3-flash
-        protocol: openai
+        protocol: codex
         match:
-        - reasoning_effort: minimal
+        - reasoning.effort: xhigh
       params:
-        reasoning_effort: low
+        reasoning.effort: max
     - models:
       - name: glm-5.3
-        protocol: openai
+        protocol: codex
         match:
-        - reasoning_effort: medium
+        - reasoning.effort: medium
       - name: glm-5.3-flash
-        protocol: openai
+        protocol: codex
         match:
-        - reasoning_effort: medium
+        - reasoning.effort: medium
       params:
-        reasoning_effort: high
+        reasoning.effort: high
     - models:
       - name: glm-5.3
-        protocol: openai
+        protocol: codex
         match:
-        - reasoning_effort: xhigh
+        - reasoning.effort: minimal
       - name: glm-5.3-flash
-        protocol: openai
+        protocol: codex
         match:
-        - reasoning_effort: xhigh
+        - reasoning.effort: minimal
       params:
-        reasoning_effort: max
+        reasoning.effort: low
+
   # Proxy URL. Supports socks5/http/https protocols. Example: socks5://user:pass@192.168.1.1:1080/
   # Per-entry proxy-url also supports "direct" or "none" to bypass both the global proxy-url and environment proxies explicitly.
   proxy-url: ""
@@ -324,10 +325,9 @@ requests:
 # BEGIN API KEY EXAMPLES
 # Replace __ZAI_API_KEY__ with your Z.AI API key.
 api-keys:
-  openai-compatibility:
+  codex:
   - name: zai
-    base-url: https://api.z.ai/api/coding/paas/v4
-    support-prompt-cache-key: true
+    base-url: https://api.z.ai/api/v1
     disable-cooling: true
     keys:
     - api-key: __ZAI_API_KEY__
@@ -336,39 +336,28 @@ api-keys:
       alias: glm-5.3
       display-name: GLM-5.3
       max-context-length: 1000000
-      input-modalities:
-      - text
-      output-modalities:
-      - text
       is-compat: true
       thinking:
         levels:
-        - minimal
-        - low
-        - medium
-        - high
-        - xhigh
         - max
+        - xhigh
+        - high
+        - medium
+        - low
+        - minimal
     - name: glm-5.3-flash
       alias: glm-5.3-flash
       display-name: GLM-5.3 Flash
       max-context-length: 1000000
-      input-modalities:
-      - text
-      - image
-      - video
-      - file
-      output-modalities:
-      - text
       is-compat: true
       thinking:
         levels:
-        - minimal
-        - low
-        - medium
-        - high
-        - xhigh
         - max
+        - xhigh
+        - high
+        - medium
+        - low
+        - minimal
 
 
 # api-keys:

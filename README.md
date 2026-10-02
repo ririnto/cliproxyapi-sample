@@ -10,6 +10,13 @@ CLIProxyAPI v8 이상을 설치한다.
 `__ZAI_API_KEY__`를 Z.ai API 키로 바꾼다.
 `access.api-keys`는 주석 처리되어 로컬 client 인증을 사용하지 않는다.
 GLM 두 모델의 effort는 `minimal → low`, `medium → high`, `xhigh → max`로 변환한다.
+GLM 두 모델을 `api-keys.codex`에 등록하고 `base-url`을 `https://api.z.ai/api/v1`로 지정한다.
+이 구성으로 Z.AI의 `/responses` endpoint를 호출한다.
+Payload 규칙에는 `protocol: codex`와 `reasoning.effort` 경로를 지정한다.
+Effort 목록과 매핑 규칙은 높은 값부터 나열한다.
+GLM의 `display-name`, `is-compat: true`, context 한도를 유지한다.
+Codex provider에는 `support-prompt-cache-key`, `input-modalities`, `output-modalities`를 지정하지 않는다.
+GPT 모델을 사용하려면 Codex OAuth로 로그인한다.
 
 ```bash
 brew install cliproxyapi
@@ -18,9 +25,17 @@ vi "$(brew --prefix)/etc/cliproxyapi.conf"
 
 ```bash
 brew services start cliproxyapi
-brew services restart cliproxyapi
 brew services stop cliproxyapi
 ```
+
+설정을 수정한 뒤에는 서비스를 재시작하지 않는다.
+
+### Claude Code
+
+`.claude/settings.json`에서 기본 모델을 `opus`로 선택한다.
+`ANTHROPIC_DEFAULT_OPUS_MODEL`은 `gpt-6.1-sol[1m]`로 설정한다.
+`modelOverrides`의 `claude-opus-5-5`에도 `gpt-6.1-sol`을 지정한다.
+Fable, Sonnet, Haiku의 모델 선택과 fallback은 기존 값을 사용한다.
 
 ### Codex 로그인
 
