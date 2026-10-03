@@ -44,10 +44,10 @@
         "source": "github"
       }
     },
-    "ponytail": {
+    "sinon": {
       "autoUpdate": true,
       "source": {
-        "repo": "DietrichGebert/ponytail",
+        "repo": "ririnto/sinon",
         "source": "github"
       }
     }
