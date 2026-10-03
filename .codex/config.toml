@@ -23,7 +23,7 @@ prevent_idle_sleep = true
 experimental_mode = true
 
 [features.multi_agent_v2]
-default_wait_timeout_ms = 180000
+default_wait_timeout_ms = 240000
 enabled = true
 hide_spawn_agent_metadata = false
 min_wait_timeout_ms = 120000
@@ -47,4 +47,10 @@ hide_full_access_warning = true
 hide_rate_limit_model_nudge = true
 
 [tui]
-status_line = ["model-with-reasoning", "current-dir", "git-branch", "permissions", "context-remaining"]
+status_line = [
+  "model-with-reasoning",
+  "current-dir",
+  "git-branch",
+  "permissions",
+  "context-remaining"
+]
