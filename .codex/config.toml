@@ -19,6 +19,9 @@ local_thread_store_compression = true
 memories = true
 prevent_idle_sleep = true
 
+[features.code_mode]
+default_exec_yield_time_ms = 240000
+
 [features.context_management]
 experimental_mode = true
 
