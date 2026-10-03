@@ -1,0 +1,50 @@
+approval_policy = "never"
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
+model_verbosity = "low"
+openai_base_url = "http://localhost:8317/v1"
+personality = "none"
+plan_mode_reasoning_effort = "high"
+sandbox_mode = "danger-full-access"
+service_tier = "default"
+
+[agents]
+max_concurrent_threads_per_session = 8
+
+[features]
+fast_mode = false
+memories = true
+prevent_idle_sleep = true
+
+[features.context_management]
+experimental_mode = true
+
+[features.multi_agent_v2]
+default_wait_timeout_ms = 180000
+enabled = true
+hide_spawn_agent_metadata = false
+min_wait_timeout_ms = 120000
+tool_namespace = "agents"
+
+[mcp_servers.codegraph]
+args = ["serve", "--mcp"]
+command = "codegraph"
+
+[mcp_servers.context7]
+bearer_token_env_var = "CONTEXT7_API_KEY"
+url = "https://mcp.context7.com/mcp"
+
+[mcp_servers.ddgs]
+args = ["mcp"]
+command = "ddgs"
+
+[mcp_servers.grep_app]
+url = "https://mcp.grep.app"
+
+[notice]
+fast_default_opt_out = true
+hide_full_access_warning = true
+hide_rate_limit_model_nudge = true
+
+[tui]
+status_line = ["model-with-reasoning", "current-dir", "git-branch", "permissions", "context-remaining"]
