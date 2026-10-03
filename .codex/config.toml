@@ -29,17 +29,14 @@ hide_spawn_agent_metadata = false
 min_wait_timeout_ms = 120000
 tool_namespace = "agents"
 
-[mcp_servers.codegraph]
-args = ["serve", "--mcp"]
-command = "codegraph"
+[marketplaces.sinon]
+ref = "main"
+source = "https://github.com/ririnto/sinon.git"
+source_type = "git"
 
 [mcp_servers.context7]
 bearer_token_env_var = "CONTEXT7_API_KEY"
 url = "https://mcp.context7.com/mcp"
-
-[mcp_servers.ddgs]
-args = ["mcp"]
-command = "ddgs"
 
 [mcp_servers.grep_app]
 url = "https://mcp.grep.app"
