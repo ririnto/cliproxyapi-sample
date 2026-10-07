@@ -284,11 +284,13 @@ const renderAddonResults = async (addons, options = {}) => {
         if (!module) {
           return null;
         }
-        const snapshot = await module.fetchUsage({
-          baseDir: settingsDir,
-          credential
-        });
-        const line = renderSnapshot(addon, snapshot);
+        const line = renderSnapshot(
+          addon,
+          await module.fetchUsage({
+            baseDir: settingsDir,
+            credential
+          })
+        );
         return line ? { hideName: Boolean(addon.hideName), line } : null;
       } catch {
         return null;
