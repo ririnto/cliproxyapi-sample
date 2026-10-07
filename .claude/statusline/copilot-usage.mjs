@@ -222,6 +222,11 @@ const ghCliCandidates = async (home) => {
     });
 };
 
+/**
+ * Gather tokens from explicit input, environment, and local client settings.
+ * An unreadable macOS Copilot CLI Keychain entry is ignored so remaining local
+ * credential sources can still be tried.
+ */
 const copilotCandidates = async (options, credential) => {
   const candidates = [];
   if (credential) {
@@ -299,6 +304,10 @@ const planLabel = (plan) => {
   return name.charAt(0).toUpperCase() + name.slice(1);
 };
 
+/**
+ * Convert Copilot quotas into bounded usage metrics. A remaining value of -1
+ * represents exhaustion with overage and is treated as zero remaining quota.
+ */
 const normalizeCopilot = (payload, now) => {
   const reset = copilotReset(payload, now);
   const metrics = Object.entries({
@@ -312,7 +321,6 @@ const normalizeCopilot = (payload, now) => {
     const remaining = isFiniteNumber(window.quota_remaining)
       ? window.quota_remaining
       : window.remaining;
-    // ponytail: remaining=-1 means exhausted with overage, not unlimited.
     if (!isFiniteNumber(remaining) || window.entitlement < 0) {
       return [];
     }
@@ -336,9 +344,13 @@ const copilotHeaders = (candidate) => ({
 });
 
 /**
- * Fetch and normalize Copilot usage with credential fallback discovery.
- * @param {object} [options] Input value.
- * @returns {Promise<object|undefined>} Result.
+ * Try candidates in order, advancing only after an HTTP 401 or 403 response.
+ * Other request failures stop the search without a snapshot.
+ * @param {object[]} candidates Ordered token, host, and auth-scheme records.
+ * @param {object} options Fetch and current-time overrides.
+ * @param {number} [index] First candidate to attempt.
+ * @returns {Promise<object|undefined>} Normalized usage, or undefined when no
+ * candidate succeeds or no valid metrics remain.
  */
 const fetchCandidate = async (candidates, options, index = 0) => {
   const candidate = candidates[index];
@@ -359,9 +371,14 @@ const fetchCandidate = async (candidates, options, index = 0) => {
 };
 
 /**
- * Fetch and normalize Copilot usage with credential fallback discovery.
- * @param {object} [options] Input value.
- * @returns {Promise<object|undefined>} Result.
+ * Discover and deduplicate Copilot credentials, then fetch normalized usage.
+ * Reads environment and local client settings and may query macOS Keychain.
+ * Candidates are retried only on HTTP 401/403; other request failures and
+ * snapshots without valid metrics return no result.
+ * @param {object} [options] Credential, environment, home directory, fetch and
+ * Keychain-command overrides, and current time as a Date or milliseconds.
+ * @returns {Promise<object|undefined>} Usage groups, or undefined when no
+ * candidate succeeds or usable metrics are unavailable.
  */
 export const fetchUsage = async (options = {}) => {
   const candidates = await copilotCandidates(
