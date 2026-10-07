@@ -75,9 +75,12 @@ const usageMetric = (label, used, total, resetsInMs) => {
 };
 
 /**
- * Fetch and normalize MiniMax coding plan usage.
- * @param {object} [options] Input value.
- * @returns {Promise<object|undefined>} Result.
+ * Fetch MiniMax-M* coding-plan totals and remaining usage with a supplied token.
+ * Network, HTTP, and decoding failures, unsuccessful responses, missing model
+ * data, and snapshots without valid metrics produce no result.
+ * @param {object} [options] Credential string and optional fetch override.
+ * @returns {Promise<object|undefined>} Valid five-hour and weekly usage metrics,
+ * or undefined when the credential or usage data is unavailable.
  */
 export const fetchUsage = async (options = {}) => {
   const credential =

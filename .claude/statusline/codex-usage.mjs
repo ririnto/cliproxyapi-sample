@@ -171,9 +171,13 @@ const chatgptPlanLabel = (planType) => {
 };
 
 /**
- * Fetch and normalize ChatGPT Codex usage with local auth fallback.
- * @param {object} [options] Input value.
- * @returns {Promise<object|undefined>} Result.
+ * Read local Codex/OpenCode auth and fetch normalized ChatGPT usage windows.
+ * An explicit credential overrides the discovered token. Network, HTTP, and
+ * response-decoding failures return no snapshot; unreadable auth files are
+ * ignored. A successful payload can contain an empty groups array.
+ * @param {object} [options] Credential, auth home directory, and fetch override.
+ * @returns {Promise<object|undefined>} Usage groups, or undefined when no token
+ * or usable response is available.
  */
 export const fetchUsage = async (options = {}) => {
   const auth = await chatgptAuth(options);

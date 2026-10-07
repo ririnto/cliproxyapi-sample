@@ -86,9 +86,14 @@ const TIER_LABELS = {
 };
 
 /**
- * Fetch and normalize Z.AI coding plan usage.
- * @param {object} [options] Input value.
- * @returns {Promise<object|undefined>} Result.
+ * Fetch Z.AI coding-plan quotas with a supplied token and normalize percentages.
+ * Only five-hour and weekly token/credit limits with valid percentages are kept.
+ * Missing credentials, network/HTTP/decoding failures, unsuccessful responses,
+ * and snapshots without valid metrics produce no result.
+ * @param {object} [options] Credential string, fetch override, and current time
+ * as a Date or milliseconds for computing reset intervals.
+ * @returns {Promise<object|undefined>} Normalized quota groups with an optional tier
+ * label, or undefined when no usable quota is available.
  */
 export const fetchUsage = async (options = {}) => {
   const credential =

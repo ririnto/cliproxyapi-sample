@@ -208,6 +208,14 @@ const metricEntries = (group) =>
 const hiddenLabel = (metric, hideLabels) =>
   Array.isArray(hideLabels) && hideLabels.includes(metric.label);
 
+/**
+ * Format a usage snapshot as one ANSI-colored line without fetching data.
+ * Rendering errors propagate to the caller.
+ * @param {object} addon Display name, hidden metric labels, and usage thresholds.
+ * @param {object} snapshot Usage groups containing labeled metrics.
+ * @returns {string} Visible groups joined by separators, or an empty string when
+ * the snapshot has no groups or every metric is filtered out.
+ */
 export const renderSnapshot = (addon, snapshot) => {
   if (!snapshot || !Array.isArray(snapshot.groups)) {
     return "";
@@ -300,6 +308,15 @@ const renderAddonResults = async (addons, options = {}) => {
   return results.filter(Boolean);
 };
 
+/**
+ * Load enabled addons and fetch their usage concurrently, retaining input order.
+ * Relative scripts resolve against this module; credential file references use
+ * the settings directory. Import, credential, fetch, and render failures omit
+ * only the affected addon, as do snapshots with no visible metrics.
+ * @param {object[]} addons Addon script and display settings; non-arrays are empty.
+ * @param {object} [options] Settings directory and optional module importer.
+ * @returns {Promise<string[]>} Nonempty formatted addon lines in input order.
+ */
 export const renderAddons = async (addons, options = {}) => {
   const results = await renderAddonResults(addons, options);
   return results.map((result) => result.line);
@@ -340,6 +357,17 @@ const renderCost = (input) => {
   return `${`$${Number(cost.total_cost_usd || 0).toFixed(2)}`} | ${Math.trunc(Number(cost.total_duration_ms || 0) / 60_000)}m | ${DIM}read:${numberText(context.total_input_tokens || 0)}(${numberText(usage.cache_read_input_tokens || 0)}) write:${numberText(context.total_output_tokens || 0)}(${numberText(usage.cache_creation_input_tokens || 0)})${RESET}`;
 };
 
+/**
+ * Build ANSI-colored status rows from Claude input and optional usage addons.
+ * Fetches addons concurrently and reads the Git branch unless overridden.
+ * Without built-in rate limits, the first addon hiding its name shares the cost
+ * row unless merging is disabled. Addon failures are omitted individually;
+ * errors while rendering the built-in rows reject the returned promise.
+ * @param {object} input Claude model, workspace, context, cost, and rate-limit data.
+ * @param {object} [options] Addons, current time, branch, working directory,
+ * settings directory, importer, and hidden-addon merge preference.
+ * @returns {Promise<string[]>} Header, cost, and any visible usage rows.
+ */
 export const renderStatusline = async (input, options = {}) => {
   const nowMs = options.nowMs ?? Date.now();
   const addons = options.addons ?? [];
@@ -372,6 +400,14 @@ const readSettings = async (filePath) => {
   }
 };
 
+/**
+ * Read Claude JSON from stdin, load addon settings, and write status rows.
+ * Project settings take precedence when they contain an addon array; otherwise
+ * the user's Claude settings are used. Unreadable settings fall back to global
+ * settings or an empty configuration. Rows end with a newline; input, rendering,
+ * and synchronous output failures are swallowed without diagnostic output.
+ * @returns {Promise<void>} Resolves after the output attempt, including failure.
+ */
 export const main = async () => {
   try {
     const input = JSON.parse(readFileSync(0, "utf-8"));
