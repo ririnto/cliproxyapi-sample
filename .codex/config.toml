@@ -1,10 +1,12 @@
 approval_policy = "never"
 model = "gpt-6.1-sol"
+model_catalog_json = "models.json"
 model_reasoning_effort = "medium"
 model_verbosity = "low"
 openai_base_url = "http://localhost:8317/v1"
 personality = "none"
 plan_mode_reasoning_effort = "high"
+review_model = "gpt-6-luna"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
 
@@ -43,6 +45,10 @@ url = "https://mcp.context7.com/mcp"
 
 [mcp_servers.grep_app]
 url = "https://mcp.grep.app"
+
+[memories]
+extract_model = "gpt-6-luna"
+consolidation_model = "gpt-6-luna"
 
 [notice]
 fast_default_opt_out = true
