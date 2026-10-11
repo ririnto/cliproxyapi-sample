@@ -111,3 +111,5 @@ Credential file references resolve relative to the selected settings directory.
 
 Run `npm ci`, `npm run check`, and `npm test` from the repository root.
 Tests use isolated temporary directories and local fixtures without provider credentials or service requests.
+The Checks workflow runs these commands on Node.js 24 and validates Docker Compose without starting services.
+Provider fixtures verify local normalization and failure handling, not live service compatibility.
