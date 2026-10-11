@@ -87,6 +87,10 @@ for module in ".claude/statusline/"*.mjs; do
 done
 ```
 
+The statusline command and global settings use `CLAUDE_CONFIG_DIR` when nonempty, otherwise `$HOME/.claude`.
+Project `.claude/settings.json` addon settings still take precedence.
+Credential file references resolve relative to the selected settings directory.
+
 `statusline.mjs`는 애드온 스크립트 경로를 다음 기준으로 해석한다.
 
 - 절대 경로는 그대로 사용한다.
@@ -102,3 +106,8 @@ done
 - `CLI_PROXY_AUTH_PATH`
 - `CLI_PROXY_LOG_PATH`
 - `CLI_PROXY_PLUGIN_PATH`
+
+## Development checks
+
+Run `npm ci`, `npm run check`, and `npm test` from the repository root.
+Tests use isolated temporary directories and local fixtures without provider credentials or service requests.
