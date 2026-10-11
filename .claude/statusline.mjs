@@ -443,7 +443,7 @@ export const main = async () => {
 if (
   process.argv[1] &&
   (await realpath(process.argv[1]).catch(() => "")) ===
-    (await realpath(import.meta.filename))
+    (await realpath(new URL(import.meta.url)))
 ) {
   await main();
 }
