@@ -66,19 +66,25 @@ const withSettings = async (run) => {
         )
       )
     );
-    const render = (configDir) => {
-      const result = spawnSync("sh", ["-c", settings.statusLine.command], {
-        encoding: "utf-8",
-        env: {
-          CLAUDE_CONFIG_DIR: configDir,
-          HOME: home,
-          PATH: process.env.PATH
-        },
-        input: JSON.stringify({
-          workspace: { current_dir: project, project_dir: project }
-        }),
-        timeout: 5000
-      });
+    const render = (configDir, shell = true) => {
+      const result = spawnSync(
+        shell ? "sh" : process.execPath,
+        shell
+          ? ["-c", settings.statusLine.command]
+          : ["-e", settings.statusLine.command.slice('node -e "'.length, -1)],
+        {
+          encoding: "utf-8",
+          env: {
+            CLAUDE_CONFIG_DIR: configDir,
+            HOME: home,
+            PATH: process.env.PATH
+          },
+          input: JSON.stringify({
+            workspace: { current_dir: project, project_dir: project }
+          }),
+          timeout: 5000
+        }
+      );
       assert.equal(result.error, undefined);
       assert.equal(result.status, 0, result.stderr);
       return result.stdout;
@@ -100,6 +106,14 @@ test("empty configuration directory retains the default home settings", async ()
   await withSettings(async ({ local, render }) => {
     await rm(path.join(local, "settings.json"));
     assert.match(render(""), /Default credential/u);
+  });
+});
+
+test("the launcher resolves custom paths in Node without shell expansion", async () => {
+  await withSettings(async ({ custom, local, render }) => {
+    await rm(path.join(local, "settings.json"));
+    assert.match(render(custom, false), /Custom credential/u);
+    assert.match(render(undefined, false), /Default credential/u);
   });
 });
 

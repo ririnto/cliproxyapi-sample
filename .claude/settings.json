@@ -101,7 +101,7 @@
   },
   "skipDangerousModePermissionPrompt": true,
   "statusLine": {
-    "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.mjs\"",
+    "command": "node -e \"const path = require('node:path'); import(require('node:url').pathToFileURL(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(require('node:os').homedir(), '.claude'), 'statusline.mjs'))).then(module => module.main())\"",
     "type": "command"
   },
   "statusLineAddon": [
