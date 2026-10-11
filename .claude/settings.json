@@ -101,7 +101,7 @@
   },
   "skipDangerousModePermissionPrompt": true,
   "statusLine": {
-    "command": "node ~/.claude/statusline.mjs",
+    "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.mjs\"",
     "type": "command"
   },
   "statusLineAddon": [

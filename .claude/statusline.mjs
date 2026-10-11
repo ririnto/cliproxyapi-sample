@@ -278,7 +278,10 @@ const importAddonModule = async (addon, options) => {
 };
 
 const renderAddonResults = async (addons, options = {}) => {
-  const settingsDir = options.settingsDir || path.join(homedir(), ".claude");
+  const settingsDir =
+    options.settingsDir ||
+    process.env.CLAUDE_CONFIG_DIR ||
+    path.join(homedir(), ".claude");
   const selected = addonSettings(addons);
   const results = await Promise.all(
     selected.map(async (addon) => {
@@ -411,7 +414,8 @@ const readSettings = async (filePath) => {
 export const main = async () => {
   try {
     const input = JSON.parse(readFileSync(0, "utf-8"));
-    const globalSettingsDir = path.join(homedir(), ".claude");
+    const globalSettingsDir =
+      process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude");
     const projectDir = input.workspace?.project_dir;
     const projectSettings =
       typeof projectDir === "string"
