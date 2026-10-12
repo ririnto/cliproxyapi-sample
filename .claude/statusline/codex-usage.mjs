@@ -10,8 +10,9 @@ const isRecord = (value) =>
 const requestJson = async (url, headers, fetchFunction) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3000);
+  let response;
   try {
-    const response = await fetchFunction(url, {
+    response = await fetchFunction(url, {
       headers,
       method: "GET",
       signal: controller.signal
@@ -38,7 +39,11 @@ const requestJson = async (url, headers, fetchFunction) => {
   } catch {
     return { status: undefined };
   } finally {
+    controller.abort();
     clearTimeout(timeout);
+    if (response?.body && !response.bodyUsed) {
+      await response.body.cancel().catch(() => null);
+    }
   }
 };
 
