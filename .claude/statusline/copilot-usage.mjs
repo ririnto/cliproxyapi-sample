@@ -99,7 +99,9 @@ const readJson = async (filePath, jsonc = false) => {
     return isRecord(value) ? value : undefined;
   } catch (error) {
     if (process.env.STATUSLINE_DEBUG) {
-      console.error(`[copilot-usage] unreadable ${filePath}`, error);
+      console.error(
+        `[copilot-usage] unreadable credentials (${error instanceof SyntaxError ? "invalid JSON" : "file read failed"})`
+      );
     }
   }
 };

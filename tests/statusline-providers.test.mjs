@@ -29,6 +29,60 @@ const response = (payload, status = 200) => ({
   status
 });
 
+for (const [name, fetchUsage, directory, filename] of [
+  ["codex", codex, ".codex", "auth.json"],
+  ["copilot", copilot, ".copilot", "config.json"]
+]) {
+  test(`${name} credential diagnostics omit secrets and retain fallback behavior`, async (context) => {
+    const options = await isolatedOptions(context);
+    const credentialDir = path.join(options.home, directory);
+    await mkdir(credentialDir);
+    await writeFile(path.join(credentialDir, filename), "synthetic-secret");
+    const messages = [];
+    context.mock.method(console, "error", (...args) => messages.push(args));
+    const debug = process.env.STATUSLINE_DEBUG;
+    context.after(() => {
+      if (debug === undefined) {
+        delete process.env.STATUSLINE_DEBUG;
+      } else {
+        process.env.STATUSLINE_DEBUG = debug;
+      }
+    });
+    const requests = [];
+    const fetch = (_url, { headers }) => {
+      requests.push(headers.Authorization);
+      return response(
+        name === "codex"
+          ? { rate_limit: { primary_window: { used_percent: 25 } } }
+          : { quota_snapshots: { chat: { entitlement: 10, remaining: 5 } } }
+      );
+    };
+    process.env.STATUSLINE_DEBUG = "";
+    assert.ok(await fetchUsage({ ...options, fetch }));
+    assert.deepEqual(messages, []);
+    process.env.STATUSLINE_DEBUG = "1";
+    assert.ok(await fetchUsage({ ...options, fetch }));
+    assert.deepEqual(requests, [
+      `${name === "codex" ? "Bearer" : "token"} fixture-token`,
+      `${name === "codex" ? "Bearer" : "token"} fixture-token`
+    ]);
+    assert.ok(messages.length > 0);
+    assert.ok(
+      messages.every(
+        (args) =>
+          args.length === 1 &&
+          /^\[(?:codex|copilot)-usage\] unreadable credentials \((?:invalid JSON|file read failed)\)$/u.test(
+            args[0]
+          )
+      )
+    );
+    assert.ok(messages.some(([message]) => message.includes("invalid JSON")));
+    assert.ok(
+      messages.some(([message]) => message.includes("file read failed"))
+    );
+  });
+}
+
 for (const [name, fetchUsage] of Object.entries(providers)) {
   test(`${name} skips requests without credentials`, async (context) => {
     const options = await isolatedOptions(context);
