@@ -133,6 +133,7 @@ const gitBranch = (cwd) => {
     return execFileSync("git", ["branch", "--show-current"], {
       cwd,
       encoding: "utf-8",
+      killSignal: "SIGKILL",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 3000
     }).trim();

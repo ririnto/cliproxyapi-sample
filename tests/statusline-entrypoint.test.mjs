@@ -62,7 +62,7 @@ const fixture = async (context) => {
   return { directoryLink, root, run, script, scriptLink };
 };
 
-test("Git branch lookup bounds and terminates a stalled child", async (context) => {
+test("Git branch lookup terminates a stalled child that ignores SIGTERM", async (context) => {
   const { root, run, script } = await fixture(context);
   const git = path.join(root, "git");
   const pidFile = path.join(root, "git.pid");
@@ -75,7 +75,7 @@ test("Git branch lookup bounds and terminates a stalled child", async (context) 
   assert.match(run([script], undefined, environment), /fixture-branch/u);
   await writeFile(
     git,
-    `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`
+    `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nprocess.on("SIGTERM", () => {});\nwriteFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`
   );
   let pid;
   try {
