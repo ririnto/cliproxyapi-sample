@@ -28,7 +28,12 @@ brew services start cliproxyapi
 brew services stop cliproxyapi
 ```
 
-설정을 수정한 뒤에는 서비스를 재시작하지 않는다.
+자동으로 다시 읽는 설정만 수정했다면 서비스를 재시작하지 않는다.
+`server.trusted-proxies`처럼 `config.example.yaml`에서 재시작을 요구하는 설정을 수정했다면 서비스를 재시작한다.
+
+```bash
+brew services restart cliproxyapi
+```
 
 ### Claude Code
 
