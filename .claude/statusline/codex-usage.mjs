@@ -53,7 +53,9 @@ const readJson = async (filePath) => {
     return isRecord(value) ? value : undefined;
   } catch (error) {
     if (process.env.STATUSLINE_DEBUG) {
-      console.error(`[codex-usage] unreadable ${filePath}`, error);
+      console.error(
+        `[codex-usage] unreadable credentials (${error instanceof SyntaxError ? "invalid JSON" : "file read failed"})`
+      );
     }
   }
 };
