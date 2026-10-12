@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  chmod,
   copyFile,
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rm,
   symlink,
@@ -41,10 +43,14 @@ const fixture = async (context) => {
     model: { display_name: "Fixture model" },
     workspace: { current_dir: project, project_dir: project }
   });
-  const run = (args, stdin = input) => {
+  const run = (args, stdin = input, environment = {}) => {
     const result = spawnSync(process.execPath, args, {
       encoding: "utf-8",
-      env: { HOME: root, STATUSLINE_MODULE: pathToFileURL(script).href },
+      env: {
+        HOME: root,
+        STATUSLINE_MODULE: pathToFileURL(script).href,
+        ...environment
+      },
       input: stdin,
       timeout: 5000
     });
@@ -53,8 +59,40 @@ const fixture = async (context) => {
     assert.equal(result.stderr, "");
     return result.stdout;
   };
-  return { directoryLink, run, script, scriptLink };
+  return { directoryLink, root, run, script, scriptLink };
 };
+
+test("Git branch lookup bounds and terminates a stalled child", async (context) => {
+  const { root, run, script } = await fixture(context);
+  const git = path.join(root, "git");
+  const pidFile = path.join(root, "git.pid");
+  const environment = { PATH: root };
+  await writeFile(
+    git,
+    `#!${process.execPath}\nconsole.log("fixture-branch");\n`
+  );
+  await chmod(git, 0o755);
+  assert.match(run([script], undefined, environment), /fixture-branch/u);
+  await writeFile(
+    git,
+    `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nsetInterval(() => {}, 1000);\n`
+  );
+  let pid;
+  try {
+    const output = run([script], undefined, environment);
+    pid = Number(await readFile(pidFile, "utf-8"));
+    assert.match(output, /Fixture model/u);
+    assert.equal(output.trim().split("\n").length, 2);
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  } finally {
+    pid ??= Number(await readFile(pidFile, "utf-8"));
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch (error) {
+      assert.equal(error.code, "ESRCH");
+    }
+  }
+});
 
 test("direct execution through a script or directory symlink renders exactly once", async (context) => {
   const { directoryLink, run, script, scriptLink } = await fixture(context);

@@ -29,6 +29,89 @@ const response = (payload, status = 200) => ({
   status
 });
 
+for (const [name, fetchUsage] of Object.entries(providers)) {
+  test(`${name} releases rejected streams and request timers`, async (context) => {
+    const options = await isolatedOptions(context);
+    const timers = new Set();
+    context.mock.method(globalThis, "setTimeout", () => {
+      const timer = Symbol("request timeout");
+      timers.add(timer);
+      return timer;
+    });
+    context.mock.method(globalThis, "clearTimeout", (timer) => {
+      assert.equal(timers.delete(timer), true);
+    });
+    await Promise.all(
+      [503, undefined].map(async (status) => {
+        let cancellations = 0;
+        let signal;
+        const body = new ReadableStream({
+          cancel: () => {
+            cancellations += 1;
+          }
+        });
+        const value = await fetchUsage({
+          ...options,
+          fetch: (_url, request) => {
+            ({ signal } = request);
+            return { body, status };
+          }
+        });
+        assert.equal(value, undefined);
+        assert.equal(cancellations, 1);
+        assert.equal(signal.aborted, true);
+      })
+    );
+    assert.equal(timers.size, 0);
+    await Promise.all(
+      [
+        () => response({}),
+        () => {
+          throw new Error("Fixture transport failure");
+        },
+        () => ({
+          json: () => {
+            throw new Error("Fixture decoding failure");
+          },
+          status: 200
+        })
+      ].map((fetch) => fetchUsage({ ...options, fetch }))
+    );
+    assert.equal(timers.size, 0);
+  });
+}
+
+test("Copilot releases authentication error streams before fallback even when cancellation fails", async (context) => {
+  const options = await isolatedOptions(context);
+  const events = [];
+  const value = await copilot({
+    ...options,
+    environment: { ...options.environment, GH_TOKEN: "fallback-token" },
+    fetch: (_url, { headers }) => {
+      events.push(headers.Authorization);
+      return events.length === 1
+        ? new Response(
+            new ReadableStream({
+              cancel: () => {
+                events.push("canceled");
+                throw new Error("Fixture cancellation failure");
+              }
+            }),
+            { status: 401 }
+          )
+        : response({
+            quota_snapshots: { chat: { entitlement: 10, remaining: 5 } }
+          });
+    }
+  });
+  assert.ok(value);
+  assert.deepEqual(events, [
+    "token fixture-token",
+    "canceled",
+    "token fallback-token"
+  ]);
+});
+
 for (const [name, fetchUsage, directory, filename] of [
   ["codex", codex, ".codex", "auth.json"],
   ["copilot", copilot, ".copilot", "config.json"]
