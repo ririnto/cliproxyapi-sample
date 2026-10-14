@@ -30,6 +30,73 @@ const response = (payload, status = 200) => ({
 });
 
 for (const [name, fetchUsage] of Object.entries(providers)) {
+  test(`${name} preserves status evaluation and cleanup order at HTTP boundaries`, async (context) => {
+    const options = await isolatedOptions(context);
+    await Promise.all(
+      [
+        [undefined, ["status"]],
+        ["200", ["status"]],
+        [Number.NaN, ["status", "status"]],
+        [Number.POSITIVE_INFINITY, ["status", "status"]],
+        [199, ["status", "status", "status", "status"]],
+        [200, ["status", "status", "status", "status", "json", "status"]],
+        [299, ["status", "status", "status", "status", "json", "status"]],
+        [300, ["status", "status", "status", "status", "status"]]
+      ].map(async ([status, expected]) => {
+        const events = [];
+        const value = await fetchUsage({
+          ...options,
+          fetch: (_url, { signal }) => {
+            signal.addEventListener("abort", () => events.push("abort"));
+            return {
+              body: {
+                cancel: () => {
+                  events.push("cancel");
+                  return Promise.resolve();
+                }
+              },
+              bodyUsed: false,
+              json: () => {
+                events.push("json");
+                return null;
+              },
+              get status() {
+                events.push("status");
+                return status;
+              }
+            };
+          }
+        });
+        assert.equal(value, undefined);
+        assert.deepEqual(events, [...expected, "abort", "cancel"]);
+      })
+    );
+  });
+}
+
+test("GLM rejects malformed quota payloads before reading the current time", async (context) => {
+  const options = await isolatedOptions(context);
+  await Promise.all(
+    [
+      { success: false },
+      { data: null, success: true },
+      { data: { limits: {} }, success: true }
+    ].map(async (payload) => {
+      assert.equal(
+        await glm({
+          ...options,
+          fetch: () => response(payload),
+          get now() {
+            throw new Error("Invalid payload must not read the current time");
+          }
+        }),
+        undefined
+      );
+    })
+  );
+});
+
+for (const [name, fetchUsage] of Object.entries(providers)) {
   test(`${name} releases rejected streams and request timers`, async (context) => {
     const options = await isolatedOptions(context);
     const timers = new Set();

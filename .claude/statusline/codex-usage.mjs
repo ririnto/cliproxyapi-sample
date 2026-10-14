@@ -7,10 +7,23 @@ const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const decodeResponse = async (response) => {
+  try {
+    const payload = await response.json();
+    return {
+      payload: isRecord(payload) ? payload : undefined,
+      status: response.status
+    };
+  } catch {
+    return { status: response.status };
+  }
+};
+
 const requestJson = async (url, headers, fetchFunction) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3000);
   let response;
+  let result;
   try {
     response = await fetchFunction(url, {
       headers,
@@ -22,22 +35,14 @@ const requestJson = async (url, headers, fetchFunction) => {
       typeof response.status !== "number" ||
       !Number.isFinite(response.status)
     ) {
-      return { status: undefined };
-    }
-    if (response.status < 200 || response.status >= 300) {
-      return { status: response.status };
-    }
-    try {
-      const payload = await response.json();
-      return {
-        payload: isRecord(payload) ? payload : undefined,
-        status: response.status
-      };
-    } catch {
-      return { status: response.status };
+      result = { status: undefined };
+    } else if (response.status < 200 || response.status >= 300) {
+      result = { status: response.status };
+    } else {
+      result = await decodeResponse(response);
     }
   } catch {
-    return { status: undefined };
+    result = { status: undefined };
   } finally {
     controller.abort();
     clearTimeout(timeout);
@@ -45,6 +50,7 @@ const requestJson = async (url, headers, fetchFunction) => {
       await response.body.cancel().catch(() => null);
     }
   }
+  return result;
 };
 
 const fetchFunction = (options) => options.fetch ?? globalThis.fetch;
@@ -70,40 +76,37 @@ const secondsToMs = (value) =>
     ? Math.max(0, Math.trunc(value * 1000))
     : 0;
 
-const percentageMetric = (label, percentage, resetsInMs) => {
-  if (!isFiniteNumber(percentage) || percentage < 0 || percentage > 100) {
-    return;
-  }
-  return {
-    label,
-    percentage,
-    resetsInMs: Math.max(0, resetsInMs || 0),
-    type: "percentage"
-  };
-};
+const percentageMetric = (label, percentage, resetsInMs) =>
+  isFiniteNumber(percentage) && percentage >= 0 && percentage <= 100
+    ? {
+        label,
+        percentage,
+        resetsInMs: Math.max(0, resetsInMs || 0),
+        type: "percentage"
+      }
+    : undefined;
 
 const readChatgptAuth = (data) => {
   const tokens = data?.tokens;
-  if (
-    isRecord(tokens) &&
+  return isRecord(tokens) &&
     typeof tokens.access_token === "string" &&
     tokens.access_token
-  ) {
-    return {
-      accountId: typeof tokens.account_id === "string" ? tokens.account_id : "",
-      token: tokens.access_token
-    };
-  }
+    ? {
+        accountId:
+          typeof tokens.account_id === "string" ? tokens.account_id : "",
+        token: tokens.access_token
+      }
+    : undefined;
 };
 
 const readOpenCodeOpenAiAuth = (data) => {
   const tokens = data?.openai;
-  if (isRecord(tokens) && typeof tokens.access === "string" && tokens.access) {
-    return {
-      accountId: typeof tokens.accountId === "string" ? tokens.accountId : "",
-      token: tokens.access
-    };
-  }
+  return isRecord(tokens) && typeof tokens.access === "string" && tokens.access
+    ? {
+        accountId: typeof tokens.accountId === "string" ? tokens.accountId : "",
+        token: tokens.access
+      }
+    : undefined;
 };
 
 const chatgptAuth = async (options) => {
@@ -122,23 +125,25 @@ const chatgptAuth = async (options) => {
 };
 
 const windowLabel = (seconds, fallback) => {
+  let label;
   if (
     typeof seconds === "number" &&
     Number.isFinite(seconds) &&
     seconds > 0 &&
     seconds % 86_400 === 0
   ) {
-    return `${seconds / 86_400}d`;
-  }
-  if (
+    label = `${seconds / 86_400}d`;
+  } else if (
     typeof seconds === "number" &&
     Number.isFinite(seconds) &&
     seconds > 0 &&
     seconds % 3600 === 0
   ) {
-    return `${seconds / 3600}h`;
+    label = `${seconds / 3600}h`;
+  } else {
+    label = fallback;
   }
-  return fallback;
+  return label;
 };
 
 const chatgptWindow = (window, fallback) =>
@@ -151,19 +156,14 @@ const chatgptWindow = (window, fallback) =>
     : undefined;
 
 const chatgptGroup = (rateLimit, label) => {
-  if (!isRecord(rateLimit)) {
-    return;
-  }
-  const metrics = [
-    chatgptWindow(rateLimit.secondary_window, "5h"),
-    chatgptWindow(rateLimit.primary_window, "7d")
-  ];
-  const validMetrics = metrics.filter(Boolean);
-  if (!validMetrics.length) {
-    return;
-  }
-  const group = { metrics: validMetrics };
-  if (label) {
+  const metrics = isRecord(rateLimit)
+    ? [
+        chatgptWindow(rateLimit.secondary_window, "5h"),
+        chatgptWindow(rateLimit.primary_window, "7d")
+      ].filter(Boolean)
+    : undefined;
+  const group = metrics?.length ? { metrics } : undefined;
+  if (group && label) {
     group.label = label;
   }
   return group;
@@ -171,10 +171,9 @@ const chatgptGroup = (rateLimit, label) => {
 
 const chatgptPlanLabel = (planType) => {
   const known = ["free", "plus", "pro", "team", "enterprise", "edu"];
-  if (typeof planType !== "string" || !known.includes(planType)) {
-    return "";
-  }
-  return planType.charAt(0).toUpperCase() + planType.slice(1);
+  return typeof planType === "string" && known.includes(planType)
+    ? planType.charAt(0).toUpperCase() + planType.slice(1)
+    : "";
 };
 
 /**
@@ -195,44 +194,45 @@ export const fetchUsage = async (options = {}) => {
   const selected = explicit
     ? { accountId: auth.accountId, token: explicit }
     : (auth.codex ?? auth.openCode);
-  if (!selected?.token) {
-    return;
-  }
-  const headers = {
-    Authorization: `Bearer ${selected.token}`,
-    "Content-Type": "application/json",
-    "User-Agent": "codex"
-  };
-  if (selected.accountId) {
-    headers["ChatGPT-Account-ID"] = selected.accountId;
-  }
-  const { payload } = await requestJson(
-    USAGE_URL,
-    headers,
-    fetchFunction(options)
-  );
-  const plan = chatgptPlanLabel(payload?.plan_type);
-  return payload
-    ? {
-        groups: [
-          chatgptGroup(payload.rate_limit, plan && `ChatGPT (${plan})`),
-          ...(Array.isArray(payload.additional_rate_limits)
-            ? payload.additional_rate_limits.filter(
-                (limit) =>
-                  isRecord(limit) &&
-                  typeof limit.limit_name === "string" &&
-                  limit.limit_name
+  let result;
+  if (selected?.token) {
+    const headers = {
+      Authorization: `Bearer ${selected.token}`,
+      "Content-Type": "application/json",
+      "User-Agent": "codex",
+      ...(selected.accountId
+        ? { "ChatGPT-Account-ID": selected.accountId }
+        : {})
+    };
+    const { payload } = await requestJson(
+      USAGE_URL,
+      headers,
+      fetchFunction(options)
+    );
+    const plan = chatgptPlanLabel(payload?.plan_type);
+    result = payload
+      ? {
+          groups: [
+            chatgptGroup(payload.rate_limit, plan && `ChatGPT (${plan})`),
+            ...(Array.isArray(payload.additional_rate_limits)
+              ? payload.additional_rate_limits.filter(
+                  (limit) =>
+                    isRecord(limit) &&
+                    typeof limit.limit_name === "string" &&
+                    limit.limit_name
+                )
+              : []
+            ).map((limit) =>
+              chatgptGroup(
+                limit.rate_limit,
+                limit.limit_name === "gpt-5.3-codex-spark"
+                  ? "Additional"
+                  : limit.limit_name
               )
-            : []
-          ).map((limit) =>
-            chatgptGroup(
-              limit.rate_limit,
-              limit.limit_name === "gpt-5.3-codex-spark"
-                ? "Additional"
-                : limit.limit_name
             )
-          )
-        ].filter(Boolean)
-      }
-    : undefined;
+          ].filter(Boolean)
+        }
+      : undefined;
+  }
+  return result;
 };

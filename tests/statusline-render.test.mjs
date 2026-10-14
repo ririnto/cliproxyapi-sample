@@ -13,6 +13,20 @@ const snapshot = (label, percentage = 25) => ({
   groups: [{ metrics: [{ label, percentage, type: "percentage" }] }]
 });
 
+test("invalid snapshots and empty groups do not evaluate addon display options", () => {
+  const addon = {
+    get hideName() {
+      throw new Error("Empty groups must not read display options");
+    },
+    get name() {
+      throw new Error("Empty groups must not read display options");
+    }
+  };
+  for (const value of [undefined, null, {}, { groups: [] }, { groups: [{}] }]) {
+    assert.equal(renderSnapshot(addon, value), "");
+  }
+});
+
 test("snapshot filtering respects metric thresholds, group thresholds, and hidden labels", () => {
   const output = stripVTControlCharacters(
     renderSnapshot(

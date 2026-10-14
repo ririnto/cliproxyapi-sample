@@ -16,57 +16,48 @@ const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const metricPercentage = (metric) => {
+  let percentage;
   if (metric?.type === "usage") {
-    return metric.total > 0 ? (metric.used / metric.total) * 100 : 0;
+    percentage = metric.total > 0 ? (metric.used / metric.total) * 100 : 0;
+  } else {
+    percentage = metric?.percentage ?? 0;
   }
-  return metric?.percentage ?? 0;
+  return percentage;
 };
 
-const environmentValue = (name, environment) => {
-  if (environment && Object.hasOwn(environment, name)) {
-    return environment[name] ?? "";
-  }
-  return process.env[name] ?? "";
-};
+const environmentValue = (name, environment) =>
+  environment && Object.hasOwn(environment, name)
+    ? (environment[name] ?? "")
+    : (process.env[name] ?? "");
 
-const homePath = (value, home) => {
-  if (value.startsWith("~/")) {
-    return path.join(home, value.slice(2));
-  }
-  return value;
-};
+const homePath = (value, home) =>
+  value.startsWith("~/") ? path.join(home, value.slice(2)) : value;
 
 const replaceEnvironmentReferences = (value, environment) =>
   value.replaceAll(/\{env:(?<name>[^{}]+)\}/gu, (placeholder) =>
     String(environmentValue(placeholder.slice(5, -1), environment))
   );
 
-const replaceFileReferences = async (value, options) => {
-  const home = options.home ?? homedir();
-  const baseDir = options.baseDir ?? process.cwd();
-  const references = [
-    ...value.matchAll(/\{file:(?<fileReferencePath>[^{}]*)\}/gu)
-  ];
-  if (!references.length) {
-    return value;
+const readFileReference = async (reference, home, baseDir) => {
+  const pathValue = homePath(reference[1], home);
+  const filePath = path.isAbsolute(pathValue)
+    ? pathValue
+    : path.resolve(baseDir, pathValue);
+  try {
+    const contents = await readFile(filePath, "utf-8");
+    return contents.trim();
+  } catch {
+    return reference[0];
   }
+};
+
+const substituteFileReferences = async (value, references, home, baseDir) => {
   const referenceTexts = await Promise.all(
-    references.map(async (reference) => {
-      const [, referencePath] = reference;
-      if (!referencePath) {
-        return reference[0];
-      }
-      const pathValue = homePath(referencePath, home);
-      const filePath = path.isAbsolute(pathValue)
-        ? pathValue
-        : path.resolve(baseDir, pathValue);
-      try {
-        const contents = await readFile(filePath, "utf-8");
-        return contents.trim();
-      } catch {
-        return reference[0];
-      }
-    })
+    references.map(async (reference) =>
+      reference[1]
+        ? await readFileReference(reference, home, baseDir)
+        : reference[0]
+    )
   );
   let cursor = 0;
   let result = "";
@@ -77,50 +68,63 @@ const replaceFileReferences = async (value, options) => {
   return result + value.slice(cursor);
 };
 
-const resolveCredentialReference = async (value, options = {}) => {
-  if (typeof value !== "string") {
-    return value;
-  }
-  return await replaceFileReferences(
-    replaceEnvironmentReferences(value, options.environment),
-    options
-  );
+const replaceFileReferences = async (value, options) => {
+  const home = options.home ?? homedir();
+  const baseDir = options.baseDir ?? process.cwd();
+  const references = [
+    ...value.matchAll(/\{file:(?<fileReferencePath>[^{}]*)\}/gu)
+  ];
+  return references.length
+    ? await substituteFileReferences(value, references, home, baseDir)
+    : value;
 };
+
+const resolveCredentialReference = async (value, options = {}) =>
+  typeof value === "string"
+    ? await replaceFileReferences(
+        replaceEnvironmentReferences(value, options.environment),
+        options
+      )
+    : value;
 
 const numberText = (value) => {
   const number = Number(value);
+  let result;
   if (!Number.isFinite(number)) {
-    return "0";
+    result = "0";
+  } else if (number >= 1_000_000) {
+    result = `${(number / 1_000_000).toFixed(1).replace(/\.0$/u, "")}M`;
+  } else if (number >= 1000) {
+    result = `${(number / 1000).toFixed(1).replace(/\.0$/u, "")}k`;
+  } else {
+    result = String(Math.trunc(number));
   }
-  if (number >= 1_000_000) {
-    return `${(number / 1_000_000).toFixed(1).replace(/\.0$/u, "")}M`;
-  }
-  if (number >= 1000) {
-    return `${(number / 1000).toFixed(1).replace(/\.0$/u, "")}k`;
-  }
-  return String(Math.trunc(number));
+  return result;
 };
 
 const resetText = (milliseconds) => {
   const value = Number(milliseconds);
-  if (!Number.isFinite(value) || value <= 0) {
-    return "unknown";
+  let result = "unknown";
+  if (Number.isFinite(value) && value > 0) {
+    const seconds = value / 1000;
+    const days = Math.floor(seconds / 86_400);
+    const hours = Math.floor((seconds % 86_400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    result = days < 1 ? `${hours}h ${minutes}m` : `${days}d ${hours}h`;
   }
-  const seconds = value / 1000;
-  const days = Math.floor(seconds / 86_400);
-  const hours = Math.floor((seconds % 86_400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return days < 1 ? `${hours}h ${minutes}m` : `${days}d ${hours}h`;
+  return result;
 };
 
 const barColor = (percentage) => {
+  let color;
   if (percentage <= PCT_GREEN) {
-    return "[32m";
+    color = "\u001B[32m";
+  } else if (percentage <= PCT_YELLOW) {
+    color = "\u001B[33m";
+  } else {
+    color = "\u001B[31m";
   }
-  if (percentage <= PCT_YELLOW) {
-    return "[33m";
-  }
-  return "[31m";
+  return color;
 };
 
 const usageBar = (percentage) => {
@@ -143,16 +147,17 @@ const gitBranch = (cwd) => {
 };
 
 const metricDisplay = (metric) => {
+  let display;
   if (!metric || typeof metric !== "object") {
-    return "";
+    display = "";
+  } else if (metric.type === "usage") {
+    display = `${metric.used}/${metric.total}`;
+  } else if (metric.type === "budget") {
+    display = `$${Number(metric.used || 0).toFixed(2)}/$${Number(metric.total || 0).toFixed(2)}`;
+  } else {
+    display = `${Number(metric.percentage || 0)}%`;
   }
-  if (metric.type === "usage") {
-    return `${metric.used}/${metric.total}`;
-  }
-  if (metric.type === "budget") {
-    return `$${Number(metric.used || 0).toFixed(2)}/$${Number(metric.total || 0).toFixed(2)}`;
-  }
-  return `${Number(metric.percentage || 0)}%`;
+  return display;
 };
 
 const metricPercent = (metric) => {
@@ -164,12 +169,10 @@ const metricPercent = (metric) => {
   }
 };
 
-const thresholdFor = (showAbove, groupLabel, metricLabel) => {
-  if (showAbove && typeof showAbove === "object" && !Array.isArray(showAbove)) {
-    return Number(showAbove[metricLabel] ?? showAbove[groupLabel] ?? 0);
-  }
-  return Number(showAbove || 0);
-};
+const thresholdFor = (showAbove, groupLabel, metricLabel) =>
+  showAbove && typeof showAbove === "object" && !Array.isArray(showAbove)
+    ? Number(showAbove[metricLabel] ?? showAbove[groupLabel] ?? 0)
+    : Number(showAbove || 0);
 
 const renderMetric = (metric) => {
   const reset = metric.resetsInMs ?? metric.resets_in_ms;
@@ -218,32 +221,31 @@ const hiddenLabel = (metric, hideLabels) =>
  * @returns {string} Visible groups joined by separators, or an empty string when
  * the snapshot has no groups or every metric is filtered out.
  */
-export const renderSnapshot = (addon, snapshot) => {
-  if (!snapshot || !Array.isArray(snapshot.groups)) {
-    return "";
-  }
-  return snapshot.groups
-    .map((group) => {
-      const metrics = metricEntries(group).filter(
-        (metric) =>
-          !hiddenLabel(metric, addon.hideLabels) &&
-          metricPercent(metric) >=
-            thresholdFor(addon.showAbove, group.label || "", metric.label)
-      );
-      if (!metrics.length) {
-        return "";
-      }
-      const content = metrics.map(renderMetric).join(" | ");
-      const groupName =
-        typeof group.label === "string" && group.label
-          ? group.label
-          : addon.name;
-      const displayName = group.label || !addon.hideName ? groupName : "";
-      return displayName ? `${displayName} | ${content}` : content;
-    })
-    .filter(Boolean)
-    .join(" | ");
-};
+export const renderSnapshot = (addon, snapshot) =>
+  snapshot && Array.isArray(snapshot.groups)
+    ? snapshot.groups
+        .map((group) => {
+          const metrics = metricEntries(group).filter(
+            (metric) =>
+              !hiddenLabel(metric, addon.hideLabels) &&
+              metricPercent(metric) >=
+                thresholdFor(addon.showAbove, group.label || "", metric.label)
+          );
+          let line = "";
+          if (metrics.length) {
+            const content = metrics.map(renderMetric).join(" | ");
+            const groupName =
+              typeof group.label === "string" && group.label
+                ? group.label
+                : addon.name;
+            const displayName = group.label || !addon.hideName ? groupName : "";
+            line = displayName ? `${displayName} | ${content}` : content;
+          }
+          return line;
+        })
+        .filter(Boolean)
+        .join(" | ")
+    : "";
 
 const addonSettings = (addons) =>
   Array.isArray(addons)
@@ -261,15 +263,18 @@ const addonSettings = (addons) =>
 
 const scriptPath = (script) => {
   const home = homedir();
+  let result;
   if (script === "~") {
-    return home;
+    result = home;
+  } else {
+    const expanded = script.startsWith("~/")
+      ? path.join(home, script.slice(2))
+      : script;
+    result = path.isAbsolute(expanded)
+      ? expanded
+      : fileURLToPath(new URL(expanded, import.meta.url));
   }
-  const expanded = script.startsWith("~/")
-    ? path.join(home, script.slice(2))
-    : script;
-  return path.isAbsolute(expanded)
-    ? expanded
-    : fileURLToPath(new URL(expanded, import.meta.url));
+  return result;
 };
 
 const importAddonModule = async (addon, options) => {
@@ -287,6 +292,7 @@ const renderAddonResults = async (addons, options = {}) => {
   const selected = addonSettings(addons);
   const results = await Promise.all(
     selected.map(async (addon) => {
+      let result = null;
       try {
         const credential = Object.hasOwn(addon, "credential")
           ? await resolveCredentialReference(addon.credential, {
@@ -294,20 +300,20 @@ const renderAddonResults = async (addons, options = {}) => {
             })
           : "";
         const module = await importAddonModule(addon, options);
-        if (!module) {
-          return null;
+        if (module) {
+          const line = renderSnapshot(
+            addon,
+            await module.fetchUsage({
+              baseDir: settingsDir,
+              credential
+            })
+          );
+          result = line ? { hideName: Boolean(addon.hideName), line } : null;
         }
-        const line = renderSnapshot(
-          addon,
-          await module.fetchUsage({
-            baseDir: settingsDir,
-            credential
-          })
-        );
-        return line ? { hideName: Boolean(addon.hideName), line } : null;
       } catch {
-        return null;
+        result = null;
       }
+      return result;
     })
   );
   return results.filter(Boolean);

@@ -9,10 +9,23 @@ const COPILOT_API = "https://api.github.com";
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const decodeResponse = async (response) => {
+  try {
+    const payload = await response.json();
+    return {
+      payload: isRecord(payload) ? payload : undefined,
+      status: response.status
+    };
+  } catch {
+    return { status: response.status };
+  }
+};
+
 const requestJson = async (url, headers, fetchFunction) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3000);
   let response;
+  let result;
   try {
     response = await fetchFunction(url, {
       headers,
@@ -24,22 +37,14 @@ const requestJson = async (url, headers, fetchFunction) => {
       typeof response.status !== "number" ||
       !Number.isFinite(response.status)
     ) {
-      return { status: undefined };
-    }
-    if (response.status < 200 || response.status >= 300) {
-      return { status: response.status };
-    }
-    try {
-      const payload = await response.json();
-      return {
-        payload: isRecord(payload) ? payload : undefined,
-        status: response.status
-      };
-    } catch {
-      return { status: response.status };
+      result = { status: undefined };
+    } else if (response.status < 200 || response.status >= 300) {
+      result = { status: response.status };
+    } else {
+      result = await decodeResponse(response);
     }
   } catch {
-    return { status: undefined };
+    result = { status: undefined };
   } finally {
     controller.abort();
     clearTimeout(timeout);
@@ -47,6 +52,7 @@ const requestJson = async (url, headers, fetchFunction) => {
       await response.body.cancel().catch(() => null);
     }
   }
+  return result;
 };
 
 const fetchFunction = (options) => options.fetch ?? globalThis.fetch;
@@ -55,10 +61,15 @@ const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
 const nowValue = (value) => {
+  let now;
   if (value instanceof Date) {
-    return value.getTime();
+    now = value.getTime();
+  } else if (isFiniteNumber(value)) {
+    now = value;
+  } else {
+    now = Date.now();
   }
-  return isFiniteNumber(value) ? value : Date.now();
+  return now;
 };
 
 const stripJsonc = (text) => {
@@ -118,33 +129,23 @@ const resetAfter = (timestamp, now) =>
 
 const snapshot = (metrics, label) => {
   const validMetrics = metrics.filter(Boolean);
-  if (!validMetrics.length) {
-    return;
-  }
-  const group = { metrics: validMetrics };
-  if (label) {
+  const group = validMetrics.length ? { metrics: validMetrics } : undefined;
+  if (group && label) {
     group.label = label;
   }
-  return { groups: [group] };
+  return group ? { groups: [group] } : undefined;
 };
 
-const usageMetric = (label, used, total, resetsInMs) => {
-  if (
-    !isFiniteNumber(used) ||
-    !isFiniteNumber(total) ||
-    used < 0 ||
-    total < 0
-  ) {
-    return;
-  }
-  return {
-    label,
-    resetsInMs: Math.max(0, resetsInMs || 0),
-    total,
-    type: "usage",
-    used
-  };
-};
+const usageMetric = (label, used, total, resetsInMs) =>
+  isFiniteNumber(used) && isFiniteNumber(total) && used >= 0 && total >= 0
+    ? {
+        label,
+        resetsInMs: Math.max(0, resetsInMs || 0),
+        total,
+        type: "usage",
+        used
+      }
+    : undefined;
 
 const candidateEnvironmentTokens = (environment) =>
   ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"]
@@ -152,11 +153,12 @@ const candidateEnvironmentTokens = (environment) =>
     .filter((token) => typeof token === "string" && token);
 
 const normalizeHost = (host) => {
-  if (typeof host !== "string" || !host) {
-    return GITHUB_COM;
+  let result = GITHUB_COM;
+  if (typeof host === "string" && host) {
+    const trimmed = host.trim().replace(/\/$/u, "");
+    result = trimmed.includes("://") ? trimmed : `https://${trimmed}`;
   }
-  const trimmed = host.trim().replace(/\/$/u, "");
-  return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
+  return result;
 };
 
 const copilotApiHost = (host) => {
@@ -195,14 +197,15 @@ const openCodeCopilotCandidates = async (home) => {
   );
   const oauth = openCode?.["github-copilot"];
   const candidates = [];
-  if (oauth?.type !== "oauth") {
-    return candidates;
-  }
-  const host = copilotApiHost(oauth.enterpriseUrl || GITHUB_COM);
-  if (typeof oauth.access === "string" && oauth.access) {
+  const host =
+    oauth?.type === "oauth"
+      ? copilotApiHost(oauth.enterpriseUrl || GITHUB_COM)
+      : undefined;
+  if (host !== undefined && typeof oauth.access === "string" && oauth.access) {
     candidates.push({ host, scheme: "token", token: oauth.access });
   }
   if (
+    host !== undefined &&
     typeof oauth.refresh === "string" &&
     oauth.refresh &&
     oauth.refresh !== oauth.access
@@ -282,16 +285,19 @@ const copilotCandidates = async (options, credential) => {
 };
 
 const copilotReset = (payload, now) => {
+  let reset;
   if (
     typeof payload.quota_reset_date_utc === "string" &&
     payload.quota_reset_date_utc
   ) {
     const timestamp = Date.parse(payload.quota_reset_date_utc);
-    if (Number.isFinite(timestamp)) {
-      return Math.max(0, timestamp - now);
-    }
+    reset = Number.isFinite(timestamp)
+      ? Math.max(0, timestamp - now)
+      : undefined;
   }
-  return resetAfter(Number(payload.limited_user_reset_date) * 1000, now);
+  return (
+    reset ?? resetAfter(Number(payload.limited_user_reset_date) * 1000, now)
+  );
 };
 
 const planLabel = (plan) => {
@@ -304,11 +310,12 @@ const planLabel = (plan) => {
     "enterprise",
     "team"
   ];
-  if (typeof plan !== "string" || !known.includes(plan)) {
-    return "";
+  let label = "";
+  if (typeof plan === "string" && known.includes(plan)) {
+    const name = plan.replaceAll("_", " ");
+    label = name.charAt(0).toUpperCase() + name.slice(1);
   }
-  const name = plan.replaceAll("_", " ");
-  return name.charAt(0).toUpperCase() + name.slice(1);
+  return label;
 };
 
 /**
@@ -322,21 +329,35 @@ const normalizeCopilot = (payload, now) => {
     Completions: payload.quota_snapshots?.completions,
     Premium: payload.quota_snapshots?.premium_interactions
   }).flatMap(([label, window]) => {
-    if (!isRecord(window) || !isFiniteNumber(window.entitlement)) {
-      return [];
+    let result;
+    if (isRecord(window) && isFiniteNumber(window.entitlement)) {
+      const remaining = isFiniteNumber(window.quota_remaining)
+        ? window.quota_remaining
+        : window.remaining;
+      const total =
+        !isFiniteNumber(remaining) || window.entitlement < 0
+          ? undefined
+          : Math.max(0, window.entitlement);
+      result =
+        total === undefined
+          ? []
+          : [
+              usageMetric(
+                label,
+                Math.min(
+                  total,
+                  Math.round(
+                    Math.max(0, total - Math.max(0, remaining)) * 100
+                  ) / 100
+                ),
+                total,
+                reset
+              )
+            ];
+    } else {
+      result = [];
     }
-    const remaining = isFiniteNumber(window.quota_remaining)
-      ? window.quota_remaining
-      : window.remaining;
-    if (!isFiniteNumber(remaining) || window.entitlement < 0) {
-      return [];
-    }
-    const total = Math.max(0, window.entitlement);
-    const used = Math.min(
-      total,
-      Math.round(Math.max(0, total - Math.max(0, remaining)) * 100) / 100
-    );
-    return [usageMetric(label, used, total, reset)];
+    return result;
   });
   const plan = planLabel(payload.copilot_plan);
   return snapshot(metrics, plan && `Copilot (${plan})`);
@@ -361,20 +382,29 @@ const copilotHeaders = (candidate) => ({
  */
 const fetchCandidate = async (candidates, options, index = 0) => {
   const candidate = candidates[index];
-  if (!candidate) {
-    return;
+  const response = candidate
+    ? await requestJson(
+        `${copilotApiHost(candidate.host)}/copilot_internal/user`,
+        copilotHeaders(candidate),
+        fetchFunction(options)
+      )
+    : undefined;
+  let result;
+  if (!response) {
+    result = undefined;
+  } else if (response.status === 401 || response.status === 403) {
+    result = fetchCandidate(candidates, options, index + 1);
+  } else {
+    const failed =
+      response.status === undefined ||
+      response.status < 200 ||
+      response.status >= 300 ||
+      !response.payload;
+    result = failed
+      ? undefined
+      : normalizeCopilot(response.payload, nowValue(options.now));
   }
-  const { status, payload } = await requestJson(
-    `${copilotApiHost(candidate.host)}/copilot_internal/user`,
-    copilotHeaders(candidate),
-    fetchFunction(options)
-  );
-  if (status === 401 || status === 403) {
-    return fetchCandidate(candidates, options, index + 1);
-  }
-  const failed =
-    status === undefined || status < 200 || status >= 300 || !payload;
-  return failed ? undefined : normalizeCopilot(payload, nowValue(options.now));
+  return result;
 };
 
 /**
