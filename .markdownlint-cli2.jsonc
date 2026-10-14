@@ -1,7 +1,7 @@
 {
   "config": {
-    "MD060": {
-      "table-column-style": "compact"
+    "table-column-style": {
+      "style": "compact"
     }
   },
   "globs": ["**/*.md"],
