@@ -15,7 +15,8 @@ GLM 두 모델을 `api-keys.codex`에 등록하고 `base-url`을 `https://api.z.
 Payload 규칙에는 `protocol: codex`와 `reasoning.effort` 경로를 지정한다.
 Effort 목록과 매핑 규칙은 높은 값부터 나열한다.
 GLM의 `display-name`, `is-compat: true`, context 한도를 유지한다.
-Codex provider에는 `support-prompt-cache-key`, `input-modalities`, `output-modalities`를 지정하지 않는다.
+Codex provider에는 `support-prompt-cache-key`를 지정하지 않는다.
+`input-modalities`, `output-modalities`도 지정하지 않는다.
 GPT 모델을 사용하려면 Codex OAuth로 로그인한다.
 
 ```bash
@@ -42,7 +43,7 @@ brew services restart cliproxyapi
 `modelOverrides`의 `claude-opus-5-5`에도 `gpt-6.1-sol`을 지정한다.
 Fable, Sonnet, Haiku의 모델 선택과 fallback은 기존 값을 사용한다.
 
-### Codex 로그인
+### 로컬 Codex 로그인
 
 ```bash
 cliproxyapi --codex-device-login
@@ -71,7 +72,7 @@ $EDITOR "config.yaml"
 docker compose up -d
 ```
 
-### Codex 로그인
+### 컨테이너 Codex 로그인
 
 ```bash
 docker compose exec cli-proxy-api /CLIProxyAPI/CLIProxyAPI -no-browser --codex-device-login
@@ -92,7 +93,8 @@ for module in ".claude/statusline/"*.mjs; do
 done
 ```
 
-The statusline command and global settings use `CLAUDE_CONFIG_DIR` when nonempty, otherwise `$HOME/.claude`.
+The statusline command and global settings use a nonempty `CLAUDE_CONFIG_DIR`.
+Otherwise, they use `$HOME/.claude`.
 Project `.claude/settings.json` addon settings still take precedence.
 Credential file references resolve relative to the selected settings directory.
 
@@ -114,7 +116,34 @@ Credential file references resolve relative to the selected settings directory.
 
 ## Development checks
 
-Run `npm ci`, `npm run check`, and `npm test` from the repository root.
-Tests use isolated temporary directories and local fixtures without provider credentials or service requests.
-The Checks workflow runs these commands on Node.js 24 and validates Docker Compose without starting services.
-Provider fixtures verify local normalization and failure handling, not live service compatibility.
+Use Node.js 24 LTS and the pnpm version declared in `package.json`.
+Run `pnpm install --frozen-lockfile` from the repository root.
+Installation activates Husky's Git hooks.
+The hooks run `pnpm run pre-commit` and `pnpm run pre-push` respectively.
+Both scripts run Markdownlint, Ultracite and the offline regression tests.
+The pnpm overrides select patched TOML and math parser dependencies.
+Run `pnpm run fix` to apply Markdownlint and Ultracite fixes.
+Run `pnpm run pre-push` to repeat the complete local gate.
+The Checks workflow uses the same gate on Node.js 24.
+It also validates Docker Compose without starting services.
+Tests use isolated temporary directories and local fixtures.
+They do not require provider credentials or service requests.
+Provider fixtures verify local normalization and failure handling.
+They do not establish live service compatibility.
+
+### Change lifecycle
+
+Define the expected behavior and acceptance command before editing.
+For statusline defects, reproduce the failure with an offline fixture first.
+Preserve behavior with the existing regression tests during refactoring.
+Keep the diff focused and remove obsolete paths with their consumers.
+Run the complete local gate before review and publication.
+Review the full proposed diff and record actual checks and untested behavior.
+Confirm the merged change on `main` and clean up owned temporary resources.
+Keep live CLIProxyAPI services, settings and authentication assets untouched.
+
+These practices follow [pstack's lifecycle guide][pstack-lifecycle].
+The check scripts align with [Sinon's harness tooling][sinon-tooling].
+
+[pstack-lifecycle]: https://github.com/cursor/plugins/blob/main/pstack/docs/guide/06-verify-and-ship.md
+[sinon-tooling]: https://github.com/ririnto/sinon/tree/main/plugins/harness/tooling/pnpm
