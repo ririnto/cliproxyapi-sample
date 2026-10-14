@@ -4,6 +4,6 @@
       "style": "compact"
     }
   },
-  "globs": ["**/*.md"],
-  "ignores": ["node_modules/**"]
+  "gitignore": true,
+  "globs": ["**/*.md"]
 }
