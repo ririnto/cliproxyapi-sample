@@ -1,0 +1,9 @@
+{
+  "config": {
+    "table-column-style": {
+      "style": "compact"
+    }
+  },
+  "globs": ["**/*.md"],
+  "ignores": ["node_modules/**"]
+}

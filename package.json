@@ -2,13 +2,27 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "ultracite check",
-    "fix": "ultracite fix",
+    "check": "run-p check:*",
+    "check:markdownlint-cli2": "markdownlint-cli2",
+    "check:ultracite": "ultracite check",
+    "fix": "run-p fix:*",
+    "fix:markdownlint-cli2": "markdownlint-cli2 --fix",
+    "fix:ultracite": "ultracite fix",
+    "pre-commit": "run-s check test",
+    "pre-push": "run-s check test",
+    "prepare": "husky",
     "test": "node --test tests/*.test.mjs"
   },
   "devDependencies": {
+    "husky": "^9.1.7",
+    "markdownlint-cli2": "^0.23.3",
+    "npm-run-all2": "^9.0.3",
     "oxfmt": "^0.70.0",
     "oxlint": "^1.85.0",
     "ultracite": "^7.12.0"
-  }
+  },
+  "engines": {
+    "node": "^24.15.0"
+  },
+  "packageManager": "pnpm@11.28.2"
 }
