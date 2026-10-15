@@ -4,6 +4,27 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    husky:
+      specifier: ^9.1.7
+      version: 9.1.7
+    markdownlint-cli2:
+      specifier: ^0.23.3
+      version: 0.23.3
+    npm-run-all2:
+      specifier: ^9.0.3
+      version: 9.0.3
+    oxfmt:
+      specifier: ^0.70.0
+      version: 0.70.0
+    oxlint:
+      specifier: ^1.85.0
+      version: 1.85.0
+    ultracite:
+      specifier: ^7.12.0
+      version: 7.12.0
+
 overrides:
   markdownlint-cli2>smol-toml: 1.9.1
   micromark-extension-math>katex: 0.18.2
@@ -13,22 +34,22 @@ importers:
   .:
     devDependencies:
       husky:
-        specifier: ^9.1.7
+        specifier: 'catalog:'
         version: 9.1.7
       markdownlint-cli2:
-        specifier: ^0.23.3
+        specifier: 'catalog:'
         version: 0.23.3
       npm-run-all2:
-        specifier: ^9.0.3
+        specifier: 'catalog:'
         version: 9.0.3
       oxfmt:
-        specifier: ^0.70.0
+        specifier: 'catalog:'
         version: 0.70.0
       oxlint:
-        specifier: ^1.85.0
+        specifier: 'catalog:'
         version: 1.85.0
       ultracite:
-        specifier: ^7.12.0
+        specifier: 'catalog:'
         version: 7.12.0(oxfmt@0.70.0)(oxlint@1.85.0)
 
 packages:
