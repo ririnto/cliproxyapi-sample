@@ -30,6 +30,6 @@ Avoid deeper nesting, and let lint requirements take precedence over this guidan
 
 `markdownlint-cli2>smol-toml` selects 1.9.1 for GHSA-r4xh-jqrq-34v2.
 It fixes a TOML parsing denial of service.
-`micromark-extension-math>katex` selects 0.18.2 for GHSA-238p-pmpm-9mq7.
+`micromark-extension-math>katex` selects 0.19.0 for GHSA-238p-pmpm-9mq7.
 It fixes a trust restriction bypass.
 Remove each override when its parent supports the patched release without it.
