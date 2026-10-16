@@ -1,5 +1,16 @@
 # Repository Conventions
 
+## Agent Guidance
+
+Use the installed Workgraph Main Agent Contract in main sessions.
+In Codex, read its bundled `references/codex.md`.
+In Claude Code, read its bundled `references/claude.md`.
+Skip reads only when the complete selected instructions are already loaded.
+Keep operational policy in the matching installed host reference.
+That policy covers model choices, workloads, roles, and effort.
+Preserve explicit user choices and the Sample's product selectors.
+Preserve provider mappings.
+
 ## Dependencies And Checks
 
 Reference direct dependencies with `catalog:`.
