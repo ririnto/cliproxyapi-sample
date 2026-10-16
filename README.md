@@ -41,7 +41,20 @@ brew services restart cliproxyapi
 `.claude/settings.json`에서 기본 모델을 `opus`로 선택한다.
 `ANTHROPIC_DEFAULT_OPUS_MODEL`은 `gpt-6.1-sol[1m]`로 설정한다.
 `modelOverrides`의 `claude-opus-5-5`에도 `gpt-6.1-sol`을 지정한다.
-Fable, Sonnet, Haiku의 모델 선택과 fallback은 기존 값을 사용한다.
+Fable, Sonnet, Haiku의 provider 매핑과 native 모델 선택자는 유지한다.
+
+### Agent guidance
+
+Use the installed Workgraph Main Agent Contract in main sessions.
+In Codex, read its bundled `references/codex.md`.
+In Claude Code, read its bundled `references/claude.md`.
+Skip reads only when the complete selected instructions are already loaded.
+Instruction reads do not import config or activate plugins.
+Keep model choices, workload tiers, roles, and effort policy in that reference.
+The Sample preserves product selectors and provider mappings.
+Supported-capability metadata also remains unchanged.
+Omitted operational overrides use native host behavior.
+Explicit user choices still apply.
 
 ### 로컬 Codex 로그인
 

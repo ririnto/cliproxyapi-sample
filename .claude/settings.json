@@ -8,19 +8,19 @@
     "ANTHROPIC_API_KEY": "sk-dummy",
     "ANTHROPIC_BASE_URL": "http://localhost:8317",
     "ANTHROPIC_DEFAULT_FABLE_MODEL": "gpt-6-astra[1m]",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION": "GPT-6 Astra - flagship reasoning, routes the hardest long-horizon tasks",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION": "GPT-6 Astra",
     "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "GPT-6 Astra",
     "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES": "effort,interleaved_thinking,max_effort,temperature,thinking,xhigh_effort,adaptive_thinking",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-5.3-flash[1m]",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION": "GLM-5.3 Flash - fastest for quick answers and subagent sweeps",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION": "GLM-5.3 Flash",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "GLM-5.3 Flash",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES": "effort,interleaved_thinking,max_effort,temperature,thinking,xhigh_effort,adaptive_thinking",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "gpt-6.1-sol[1m]",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "GPT-6.1 Sol - main-loop coding model, best for complex everyday tasks",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "GPT-6.1 Sol",
     "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "GPT-6.1 Sol",
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES": "effort,interleaved_thinking,max_effort,temperature,thinking,xhigh_effort,adaptive_thinking",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-6-luna[1m]",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION": "GPT-6 Luna - balanced efficiency for routine coding tasks",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION": "GPT-6 Luna",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "GPT-6 Luna",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "effort,interleaved_thinking,max_effort,temperature,thinking,xhigh_effort,adaptive_thinking",
     "API_FORCE_IDLE_TIMEOUT": "0",
@@ -51,7 +51,6 @@
       }
     }
   },
-  "fallbackModel": ["gpt-6-luna", "glm-5.3-flash"],
   "feedbackSurveyRate": 0,
   "includeCoAuthoredBy": false,
   "includeGitInstructions": false,
@@ -62,32 +61,6 @@
     "claude-haiku-5-5": "glm-5.3-flash",
     "claude-opus-5-5": "gpt-6.1-sol",
     "claude-sonnet-5": "gpt-6-luna"
-  },
-  "modelSettings": {
-    "claude-fable-5-1": {
-      "effortLevel": "high"
-    },
-    "claude-haiku-5-5": {
-      "effortLevel": "xhigh"
-    },
-    "claude-sonnet-5-5": {
-      "effortLevel": "medium"
-    },
-    "glm-5.3": {
-      "effortLevel": "xhigh"
-    },
-    "glm-5.3-flash": {
-      "effortLevel": "xhigh"
-    },
-    "gpt-6-astra": {
-      "effortLevel": "low"
-    },
-    "gpt-6-luna": {
-      "effortLevel": "xhigh"
-    },
-    "gpt-6.1-sol": {
-      "effortLevel": "medium"
-    }
   },
   "permissions": {
     "defaultMode": "bypassPermissions",
@@ -144,7 +117,6 @@
   "teammateMode": "auto",
   "theme": "auto",
   "verbose": true,
-  "workflowSizeGuideline": "small",
   "worktree": {
     "baseRef": "head"
   }
