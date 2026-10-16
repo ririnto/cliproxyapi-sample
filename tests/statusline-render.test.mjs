@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { stripVTControlCharacters } from "node:util";
@@ -132,6 +134,150 @@ test("status header display text does not change row shape", async () => {
     rows[0],
     "\u001B[36m[Model Name (high Reason)]\u001B[0m \u001B[1mProject Name(Working Tree)\u001B[0m | \u001B[35mfeature safe \u001B[0m | \u001B[32m▓▓▓░░░░░░░\u001B[0m 25% (100k)"
   );
+});
+
+test("addon credentials preserve file-reference text and expansion order", async () => {
+  const settingsDir = await mkdtemp(path.join(tmpdir(), "statusline-render-"));
+  try {
+    await Promise.all([
+      writeFile(path.join(settingsDir, "first.txt"), " left \n"),
+      writeFile(path.join(settingsDir, "second.txt"), " right \n"),
+      writeFile(path.join(settingsDir, "empty.txt"), " \n\t"),
+      writeFile(path.join(settingsDir, "literal.txt"), "keep {file:second.txt}")
+    ]);
+    const environmentName = `STATUSLINE_FILE_REFERENCE_${process.pid}_${Date.now()}`;
+    const previousEnvironmentValue = process.env[environmentName];
+    try {
+      process.env[environmentName] = "{file:second.txt}";
+      let capturedCredential;
+      const output = await renderAddons(
+        [
+          {
+            credential: [
+              "\u{1F6F0}{file:first.txt}{file:second.txt}{file:first.txt}",
+              "{file:empty.txt}",
+              "{file:missing.txt}",
+              "{file:}",
+              "{file:literal.txt}",
+              `{env:${environmentName}}`
+            ].join("|"),
+            name: "Fixture",
+            script: "fixture.mjs"
+          }
+        ],
+        {
+          importModule: () => ({
+            fetchUsage: ({ credential: value }) => {
+              capturedCredential = value;
+              return snapshot("Fixture");
+            }
+          }),
+          settingsDir
+        }
+      );
+      assert.equal(
+        capturedCredential,
+        "\u{1F6F0}leftrightleft||{file:missing.txt}|{file:}|keep {file:second.txt}|right"
+      );
+      assert.deepEqual(output.map(stripVTControlCharacters), [
+        "Fixture | Fixture: 25%"
+      ]);
+    } finally {
+      if (previousEnvironmentValue === undefined) {
+        Reflect.deleteProperty(process.env, environmentName);
+      } else {
+        process.env[environmentName] = previousEnvironmentValue;
+      }
+    }
+  } finally {
+    await rm(settingsDir, { force: true, recursive: true });
+  }
+});
+
+test("status header preserves context and workspace evaluation order", async () => {
+  const events = [];
+  const rows = await renderStatusline(
+    {
+      context_window: {
+        context_window_size: {
+          [Symbol.toPrimitive]() {
+            events.push("context size");
+            return 100_000;
+          }
+        },
+        used_percentage: {
+          [Symbol.toPrimitive]() {
+            events.push("context percentage");
+            return 25;
+          }
+        }
+      },
+      model: { display_name: "Fixture" },
+      workspace: {
+        get current_dir() {
+          events.push("current_dir");
+          return "/project/work";
+        },
+        get project_dir() {
+          events.push("project_dir");
+          return "/project/root";
+        }
+      }
+    },
+    {
+      branch: {
+        [Symbol.toPrimitive]() {
+          events.push("branch display");
+          return "feature";
+        }
+      },
+      cwd: "/explicit-cwd",
+      nowMs: 1000
+    }
+  );
+  assert.deepEqual(events, [
+    "context percentage",
+    "context size",
+    "current_dir",
+    "project_dir",
+    "branch display"
+  ]);
+  assert.equal(
+    stripVTControlCharacters(rows[0]),
+    "[Fixture] root(work) | feature | ▓▓▓░░░░░░░ 25% (100k)"
+  );
+});
+
+test("context coercion failures do not access workspace directories", async () => {
+  const events = [];
+  const contextError = new Error("Fixture context coercion failure");
+  await assert.rejects(
+    renderStatusline(
+      {
+        context_window: {
+          used_percentage: {
+            [Symbol.toPrimitive]() {
+              events.push("context percentage");
+              throw contextError;
+            }
+          }
+        },
+        workspace: {
+          get current_dir() {
+            events.push("current_dir");
+            return "/project/work";
+          },
+          get project_dir() {
+            events.push("project_dir");
+            return "/project/root";
+          }
+        }
+      },
+      { branch: "feature", cwd: "/explicit-cwd", nowMs: 1000 }
+    ),
+    (error) => error === contextError
+  );
+  assert.deepEqual(events, ["context percentage"]);
 });
 
 test("addon fetching is concurrent, preserves order, and isolates import and fetch failures", async () => {

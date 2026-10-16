@@ -46,7 +46,7 @@ const replaceEnvironmentReferences = (value, environment) =>
   );
 
 const readFileReference = async (reference, home, baseDir) => {
-  const pathValue = homePath(reference[1], home);
+  const pathValue = homePath(reference.groups.fileReferencePath, home);
   const filePath = path.isAbsolute(pathValue)
     ? pathValue
     : path.resolve(baseDir, pathValue);
@@ -54,23 +54,23 @@ const readFileReference = async (reference, home, baseDir) => {
     const contents = await readFile(filePath, "utf-8");
     return contents.trim();
   } catch {
-    return reference[0];
+    return reference.groups.fileReference;
   }
 };
 
 const substituteFileReferences = async (value, references, home, baseDir) => {
   const referenceTexts = await Promise.all(
     references.map(async (reference) =>
-      reference[1]
+      reference.groups.fileReferencePath
         ? await readFileReference(reference, home, baseDir)
-        : reference[0]
+        : reference.groups.fileReference
     )
   );
   let cursor = 0;
   let result = "";
   for (const [index, reference] of references.entries()) {
     result += value.slice(cursor, reference.index) + referenceTexts[index];
-    cursor = reference.index + reference[0].length;
+    cursor = reference.index + reference.groups.fileReference.length;
   }
   return result + value.slice(cursor);
 };
@@ -79,7 +79,9 @@ const replaceFileReferences = async (value, options) => {
   const home = options.home ?? homedir();
   const baseDir = options.baseDir ?? process.cwd();
   const references = [
-    ...value.matchAll(/\{file:(?<fileReferencePath>[^{}]*)\}/gu)
+    ...value.matchAll(
+      /(?<fileReference>\{file:(?<fileReferencePath>[^{}]*)\})/gu
+    )
   ];
   return references.length
     ? await substituteFileReferences(value, references, home, baseDir)
@@ -342,15 +344,6 @@ export const renderAddons = async (addons, options = {}) => {
   return results.map((result) => result.line);
 };
 
-const projectDisplay = (workspace) => {
-  const currentDir = workspace?.current_dir || "";
-  const projectDir = workspace?.project_dir || "";
-  const projectName = path.basename(projectDir);
-  return currentDir === projectDir
-    ? projectName
-    : `${projectName}(${path.basename(currentDir)})`;
-};
-
 const renderHeader = (input, options) => {
   const model = input.model || {};
   const modelName = displayText(model.display_name || "");
@@ -363,8 +356,11 @@ const renderHeader = (input, options) => {
   const percentage = Math.trunc(Number(context.used_percentage || 0));
   const size = Math.trunc(Number(context.context_window_size || 0));
   const contextPart = `${barColor(percentage)}${usageBar(percentage)}${RESET} ${percentage}%${size ? ` (${numberText(size)})` : ""}`;
+  const currentDir = workspace.current_dir || "";
+  const projectDir = workspace.project_dir || "";
+  const projectName = path.basename(projectDir);
   return [
-    `[36m${header}${RESET} [1m${displayText(projectDisplay(workspace))}${RESET}`,
+    `[36m${header}${RESET} [1m${displayText(currentDir === projectDir ? projectName : `${projectName}(${path.basename(currentDir)})`)}${RESET}`,
     ...(branch ? [`[35m${displayText(branch)}${RESET}`] : []),
     contextPart
   ].join(" | ");
