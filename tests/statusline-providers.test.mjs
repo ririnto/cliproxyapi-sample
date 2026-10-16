@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { renderSnapshot } from "../.claude/statusline.mjs";
 import { fetchUsage as codex } from "../.claude/statusline/codex-usage.mjs";
 import { fetchUsage as copilot } from "../.claude/statusline/copilot-usage.mjs";
 import { fetchUsage as glm } from "../.claude/statusline/glm-coding-plan.mjs";
@@ -27,6 +28,52 @@ const isolatedOptions = async (context) => {
 const response = (payload, status = 200) => ({
   json: () => payload,
   status
+});
+
+test("Codex limit names stay inert when rendered from fetched usage", async (context) => {
+  const options = await isolatedOptions(context);
+  const limitName = "Extra\r\nLimit\u001B[2J";
+  const requests = [];
+  const usage = await codex({
+    ...options,
+    fetch: (url, request) => {
+      requests.push({ authorization: request.headers.Authorization, url });
+      return response({
+        additional_rate_limits: [
+          {
+            limit_name: limitName,
+            rate_limit: {
+              primary_window: {
+                reset_after_seconds: 3600,
+                used_percent: 25
+              }
+            }
+          }
+        ]
+      });
+    }
+  });
+  assert.deepEqual(requests, [
+    {
+      authorization: "Bearer fixture-token",
+      url: "https://chatgpt.com/backend-api/wham/usage"
+    }
+  ]);
+  assert.deepEqual(usage.groups[0], {
+    label: limitName,
+    metrics: [
+      {
+        label: "7d",
+        percentage: 25,
+        resetsInMs: 3_600_000,
+        type: "percentage"
+      }
+    ]
+  });
+  assert.equal(
+    renderSnapshot({}, usage),
+    "Extra Limit | 7d: \u001B[32m25%\u001B[0m (1h 0m)"
+  );
 });
 
 for (const [name, fetchUsage] of Object.entries(providers)) {
