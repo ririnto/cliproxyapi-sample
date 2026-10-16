@@ -6,11 +6,18 @@ import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { stripVTControlCharacters } from "node:util";
 
 const RESET = "[0m";
 const DIM = "[2m";
 const PCT_GREEN = 70;
 const PCT_YELLOW = 90;
+
+const displayText = (value) =>
+  stripVTControlCharacters(String(value)).replaceAll(
+    /[\p{Cc}\u2028\u2029]+/gu,
+    " "
+  );
 
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -176,7 +183,7 @@ const thresholdFor = (showAbove, groupLabel, metricLabel) =>
 
 const renderMetric = (metric) => {
   const reset = metric.resetsInMs ?? metric.resets_in_ms;
-  return `${metric.label}: ${barColor(metricPercent(metric))}${metricDisplay(metric)}${RESET}${reset === undefined ? "" : ` (${resetText(reset)})`}`;
+  return `${displayText(metric.label)}: ${barColor(metricPercent(metric))}${displayText(metricDisplay(metric))}${RESET}${reset === undefined ? "" : ` (${resetText(reset)})`}`;
 };
 
 const renderRateLimits = (rateLimits, nowMs) =>
@@ -239,7 +246,9 @@ export const renderSnapshot = (addon, snapshot) =>
                 ? group.label
                 : addon.name;
             const displayName = group.label || !addon.hideName ? groupName : "";
-            line = displayName ? `${displayName} | ${content}` : content;
+            line = displayName
+              ? `${displayText(displayName)} | ${content}`
+              : content;
           }
           return line;
         })
@@ -344,8 +353,8 @@ const projectDisplay = (workspace) => {
 
 const renderHeader = (input, options) => {
   const model = input.model || {};
-  const modelName = model.display_name || "";
-  const effort = input.effort?.level || model.effort || "";
+  const modelName = displayText(model.display_name || "");
+  const effort = displayText(input.effort?.level || model.effort || "");
   const header = effort ? `[${modelName} (${effort})]` : `[${modelName}]`;
   const workspace = input.workspace || {};
   const cwd = options.cwd || workspace.current_dir || process.cwd();
@@ -355,8 +364,8 @@ const renderHeader = (input, options) => {
   const size = Math.trunc(Number(context.context_window_size || 0));
   const contextPart = `${barColor(percentage)}${usageBar(percentage)}${RESET} ${percentage}%${size ? ` (${numberText(size)})` : ""}`;
   return [
-    `[36m${header}${RESET} [1m${projectDisplay(workspace)}${RESET}`,
-    ...(branch ? [`[35m${branch}${RESET}`] : []),
+    `[36m${header}${RESET} [1m${displayText(projectDisplay(workspace))}${RESET}`,
+    ...(branch ? [`[35m${displayText(branch)}${RESET}`] : []),
     contextPart
   ].join(" | ");
 };

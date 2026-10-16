@@ -58,6 +58,82 @@ test("snapshot filtering respects metric thresholds, group thresholds, and hidde
   assert.equal(renderSnapshot({}), "");
 });
 
+test("snapshot display text is safe while trusted color formatting and Unicode remain", () => {
+  const hostileText =
+    "A\nB\rC\u0000\u001FD\u007FE\u0085\u009FF\u009B2J-C1CSI-\u009D0;title\u009C-C1OSC-\u001B[2J-G-\u001B]0;title\u0007-O-\u001BPpayload\u001B\\-D-\u2028L\u2029Cafe\u0301 👩‍🚀\u001B";
+  const safeText =
+    "A B C D E F-C1CSI- 0;title -C1OSC--G--O-payload \\-D- L Cafe\u0301 👩‍🚀 ";
+  const output = renderSnapshot(
+    { name: hostileText },
+    {
+      groups: [
+        {
+          label: hostileText,
+          metrics: [
+            { label: hostileText, percentage: 25, type: "percentage" },
+            { label: "Usage", total: "10", type: "usage", used: "5\n" }
+          ]
+        },
+        { metrics: [{ label: "Usage", percentage: 25, type: "percentage" }] }
+      ]
+    }
+  );
+  assert.equal(
+    output,
+    `${safeText} | ${safeText}: \u001B[32m25%\u001B[0m | Usage: \u001B[32m5 /10\u001B[0m | ${safeText} | Usage: \u001B[32m25%\u001B[0m`
+  );
+});
+
+test("snapshot filtering uses original hidden labels and threshold keys", () => {
+  const hiddenLabel = "Hidden\rMetric";
+  const thresholdLabel = "Threshold\nMetric\u001B[2J";
+  assert.equal(
+    renderSnapshot(
+      {
+        hideLabels: [hiddenLabel],
+        name: "Fallback",
+        showAbove: { [thresholdLabel]: 50, Group: 20 }
+      },
+      {
+        groups: [
+          {
+            label: "Group",
+            metrics: [
+              { label: hiddenLabel, percentage: 100, type: "percentage" },
+              { label: thresholdLabel, percentage: 49, type: "percentage" },
+              { label: "Visible", percentage: 25, type: "percentage" }
+            ]
+          }
+        ]
+      }
+    ),
+    "Group | Visible: \u001B[32m25%\u001B[0m"
+  );
+});
+
+test("status header display text does not change row shape", async () => {
+  const rows = await renderStatusline(
+    {
+      context_window: {
+        context_window_size: 100_000,
+        used_percentage: 25
+      },
+      effort: { level: "high\u0085Reason" },
+      model: { display_name: "Model\nName\u001B[2J" },
+      workspace: {
+        current_dir: "/workspace/Working\rTree",
+        project_dir: "/project/Project\u2028Name"
+      }
+    },
+    { branch: "feature\u2029safe\u001B", nowMs: 1000 }
+  );
+  assert.equal(rows.length, 2);
+  assert.equal(
+    rows[0],
+    "\u001B[36m[Model Name (high Reason)]\u001B[0m \u001B[1mProject Name(Working Tree)\u001B[0m | \u001B[35mfeature safe \u001B[0m | \u001B[32m▓▓▓░░░░░░░\u001B[0m 25% (100k)"
+  );
+});
+
 test("addon fetching is concurrent, preserves order, and isolates import and fetch failures", async () => {
   const { promise: firstReady, resolve: releaseFirst } =
     Promise.withResolvers();
