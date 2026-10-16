@@ -55,3 +55,9 @@ test("reports one violation per physical line", () => {
     { lineNumber: 1, range: [1, 1] }
   ]);
 });
+
+test("reports diagnostic coordinates after an astral prefix", () => {
+  assert.deepEqual(violations(`\u{1F6F0}${String.fromCodePoint(0x25_00)}\n`), [
+    { lineNumber: 1, range: [3, 1] }
+  ]);
+});

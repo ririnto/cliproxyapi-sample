@@ -19,6 +19,11 @@ Use the commands and lifecycle documented in README's Development checks section
 
 Write one sentence per source line in Markdown prose.
 Test documentation contracts without hard-pinning prose wording.
+Use named regex captures and access full matches and subgroups by name.
+Prefer literal operations or parsers when they express matching more clearly.
+Inline genuine single-use logic when lint and behavior allow it.
+Test production interfaces without adding test-only seams.
+Do not retain production helpers solely for tests or hypothetical reuse.
 Use documentation comments only.
 Preserve required semantic directives and license notices.
 Prefer `await` and error handling over `void` used to discard return values.

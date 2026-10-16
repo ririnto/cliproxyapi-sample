@@ -1,6 +1,6 @@
 import type { Rule } from "markdownlint";
 
-const boxDrawingPattern = /[\u2500-\u257F]/u;
+const boxDrawingPattern = /(?<boxDrawing>[\u2500-\u257F])/u;
 
 /**
  * Markdownlint rule rejecting Unicode box drawing characters for ESM and CommonJS loaders.
@@ -10,12 +10,12 @@ const rule: Rule = {
   function: (params, onError) => {
     for (const [index, line] of params.lines.entries()) {
       const match = boxDrawingPattern.exec(line);
-      if (match) {
+      if (match !== null && match.groups !== undefined) {
         onError({
           context: line.trim(),
           detail: "Use ASCII tree markers such as +-- and | instead.",
           lineNumber: index + 1,
-          range: [match.index + 1, match[0].length]
+          range: [match.index + 1, match.groups.boxDrawing.length]
         });
       }
     }
