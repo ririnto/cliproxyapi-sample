@@ -51,12 +51,13 @@ brew services restart cliproxyapi
 기본 모델은 `opus`로 유지한다.
 모델별 `modelSettings.autoCompactWindow` 설정에는 Claude Code v2.1.288 이상이 필요하다.
 
-### Managed pricing
+### Model pricing
 
-`.claude/managed-settings.json`은 모델별 백만 토큰당 USD 가격을 담은 관리형 설정 템플릿이다.
-이 저장소의 프로젝트 설정은 `modelPricing`을 적용하지 않는다.
-가격을 적용하려면 템플릿을 지원되는 관리형 설정 범위에 배포해야 한다.
-Claude Code는 사용자, 프로젝트, 로컬 설정과 `--settings`에서 `modelPricing`을 무시한다.
+`.claude/settings.json`의 `modelPricing.overrides`는 모델별 백만 토큰당 USD 가격을 담는다.
+가격 데이터는 기존 `.claude/managed-settings.json` 템플릿에서 일반 프로젝트 설정으로 통합되었고 템플릿 파일은 삭제되었다.
+Claude Code 2.1.302는 사용자, 프로젝트, 로컬 설정과 `--settings`에서 `modelPricing`을 무시한다.
+따라서 이 값은 요청된 표시용 데이터이고 실제 비용 계산을 활성화하지 않는다.
+가격을 적용하려면 지원되는 관리형 설정 범위에 배포해야 한다.
 macOS 시스템 관리형 설정 파일 경로는 `/Library/Application Support/ClaudeCode/managed-settings.json`이다.
 네이티브 네 가격 필드는 GPT의 272K 초과 컨텍스트 계층을 표현하거나 공급자 청구액을 증명하지 않는다.
 자세한 내용은 [Claude Code settings reference][managed-pricing]를 참조한다.
