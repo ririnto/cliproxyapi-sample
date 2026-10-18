@@ -38,10 +38,27 @@ brew services restart cliproxyapi
 
 ### Claude Code
 
-`.claude/settings.json`에서 기본 모델을 `opus`로 선택한다.
-`ANTHROPIC_DEFAULT_OPUS_MODEL`은 `gpt-6.1-sol`로 설정한다.
-`modelOverrides`의 `claude-opus-5-5`에도 `gpt-6.1-sol`을 지정한다.
-Fable, Sonnet, Haiku의 provider 매핑과 native 모델 선택자는 유지한다.
+`.claude/settings.json`에서 기본 모델은 `opus`로 선택한다.
+
+| 선택자 | 대상 |
+| --- | --- |
+| `ANTHROPIC_DEFAULT_FABLE_MODEL` | `gpt-6-astra` |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `glm-5.3-flash` |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | `gpt-6.1-sol` |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | `gpt-6-luna` |
+
+`modelOverrides`는 아래 native model ID를 provider ID에 연결한다.
+
+| Claude 모델 ID | Provider 모델 |
+| --- | --- |
+| `claude-fable-5-1` | `gpt-6-astra` |
+| `claude-haiku-5-5` | `glm-5.3-flash` |
+| `claude-opus-5-5` | `gpt-6.1-sol` |
+| `claude-sonnet-5-5` | `gpt-6-luna` |
+| `claude-sonnet-5` | `gpt-6-luna` |
+
+`ANTHROPIC_CUSTOM_MODEL_OPTION`은 `glm-5.3`을 모델 선택기에 추가한다.
+기본 모델은 `opus`로 유지한다.
 `modelSettings`의 모델별 `autoCompactWindow` 설정은 Claude Code v2.1.288 이상이 필요하다.
 
 ### Agent guidance
@@ -53,7 +70,7 @@ Skip reads only when the complete selected instructions are already loaded.
 Instruction reads do not import config or activate plugins.
 Keep model choices, workload tiers, roles, and effort policy in that reference.
 The Sample preserves product selectors and provider mappings.
-Supported-capability metadata also remains unchanged.
+Supported-capability metadata uses the explicitly requested conservative declarations.
 Omitted operational overrides use native host behavior.
 Explicit user choices still apply.
 
