@@ -42,6 +42,7 @@ brew services restart cliproxyapi
 `ANTHROPIC_DEFAULT_OPUS_MODEL`은 `gpt-6.1-sol[1m]`로 설정한다.
 `modelOverrides`의 `claude-opus-5-5`에도 `gpt-6.1-sol`을 지정한다.
 Fable, Sonnet, Haiku의 provider 매핑과 native 모델 선택자는 유지한다.
+`modelSettings`의 모델별 `autoCompactWindow` 설정은 Claude Code v2.1.288 이상이 필요하다.
 
 ### Agent guidance
 
