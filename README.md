@@ -47,19 +47,22 @@ brew services restart cliproxyapi
 | `ANTHROPIC_DEFAULT_OPUS_MODEL` | `gpt-6.1-sol` |
 | `ANTHROPIC_DEFAULT_SONNET_MODEL` | `gpt-6-luna` |
 
-`modelOverrides`는 아래 native model ID를 provider ID에 연결한다.
-
-| Claude 모델 ID | Provider 모델 |
-| --- | --- |
-| `claude-fable-5-1` | `gpt-6-astra` |
-| `claude-haiku-5-5` | `glm-5.3-flash` |
-| `claude-opus-5-5` | `gpt-6.1-sol` |
-| `claude-sonnet-5-5` | `gpt-6-luna` |
-| `claude-sonnet-5` | `gpt-6-luna` |
-
 `ANTHROPIC_CUSTOM_MODEL_OPTION`은 `glm-5.3`을 모델 선택기에 추가한다.
 기본 모델은 `opus`로 유지한다.
-`modelSettings`의 모델별 `autoCompactWindow` 설정은 Claude Code v2.1.288 이상이 필요하다.
+모델별 `modelSettings.autoCompactWindow` 설정에는 Claude Code v2.1.288 이상이 필요하다.
+
+### Managed pricing
+
+`.claude/managed-settings.json`은 모델별 백만 토큰당 USD 가격을 담은 관리형 설정 템플릿이다.
+이 저장소의 프로젝트 설정은 `modelPricing`을 적용하지 않는다.
+가격을 적용하려면 템플릿을 지원되는 관리형 설정 범위에 배포해야 한다.
+Claude Code는 사용자, 프로젝트, 로컬 설정과 `--settings`에서 `modelPricing`을 무시한다.
+macOS 시스템 관리형 설정 파일 경로는 `/Library/Application Support/ClaudeCode/managed-settings.json`이다.
+네이티브 네 가격 필드는 GPT의 272K 초과 컨텍스트 계층을 표현하거나 공급자 청구액을 증명하지 않는다.
+자세한 내용은 [Claude Code settings reference][managed-pricing]를 참조한다.
+
+[managed-pricing]:
+  https://code.claude.com/docs/en/settings-reference#modelpricing
 
 ### Agent guidance
 
