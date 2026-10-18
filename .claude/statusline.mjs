@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -13,6 +13,12 @@ const DIM = "[2m";
 const BOLD = "[1m";
 const PCT_GREEN = 70;
 const PCT_YELLOW = 90;
+
+const displayText = (value) =>
+  stripVTControlCharacters(String(value)).replaceAll(
+    /[\p{Cc}\u2028\u2029]+/gu,
+    " "
+  );
 
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -143,7 +149,9 @@ const gitBranch = (cwd) => {
     return execFileSync("git", ["branch", "--show-current"], {
       cwd,
       encoding: "utf-8",
-      stdio: ["ignore", "pipe", "ignore"]
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 3000
     }).trim();
   } catch {
     return "";
@@ -186,7 +194,7 @@ const thresholdFor = (showAbove, groupLabel, metricLabel) =>
 
 const renderMetric = (metric) => {
   const reset = metric.resetsInMs ?? metric.resets_in_ms;
-  return `${metric.label}: ${barColor(metricPercent(metric))}${metricDisplay(metric)}${RESET}${reset === undefined ? "" : ` (${resetText(reset)})`}`;
+  return `${displayText(metric.label)}: ${barColor(metricPercent(metric))}${displayText(metricDisplay(metric))}${RESET}${reset === undefined ? "" : ` (${resetText(reset)})`}`;
 };
 
 const isFiniteNumber = (value) =>
@@ -308,7 +316,7 @@ export const renderSnapshot = (addon, snapshot) => {
           : addon.name;
       const displayName = group.label || !addon.hideName ? groupName : "";
       return displayName
-        ? `${BOLD}${displayName}${RESET} | ${content}`
+        ? `${BOLD}${displayText(displayName)}${RESET} | ${content}`
         : content;
     })
     .filter(Boolean)
@@ -393,8 +401,8 @@ const projectDisplay = (workspace) => {
 
 const renderHeader = (input, options) => {
   const model = input.model || {};
-  const modelName = model.display_name || "";
-  const effort = input.effort?.level || model.effort || "";
+  const modelName = displayText(model.display_name || "");
+  const effort = displayText(input.effort?.level || model.effort || "");
   const workspace = input.workspace || {};
   const branch =
     options.branch === undefined
@@ -404,8 +412,8 @@ const renderHeader = (input, options) => {
   const percentage = Math.trunc(Number(context.used_percentage || 0));
   const size = Math.trunc(Number(context.context_window_size || 0));
   return [
-    `[36m[${modelName}${effort ? ` (${effort})` : ""}][0m [1m${projectDisplay(workspace)}[0m`,
-    ...(branch ? [`[35m${branch}[0m`] : []),
+    `[36m[${modelName}${effort ? ` (${effort})` : ""}][0m [1m${displayText(projectDisplay(workspace))}[0m`,
+    ...(branch ? [`[35m${displayText(branch)}[0m`] : []),
     `${barColor(percentage)}${usageBar(percentage)}[0m ${percentage}%${size ? ` (${numberText(size)})` : ""}`
   ].join(" | ");
 };
@@ -505,7 +513,8 @@ export const main = async () => {
 
 if (
   process.argv[1] &&
-  pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
+  (await realpath(process.argv[1]).catch(() => "")) ===
+    (await realpath(new URL(import.meta.url)))
 ) {
   await main();
 }
