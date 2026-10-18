@@ -3,31 +3,19 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { withUsageCache } from "./usage-cache.mjs";
+
 const GITHUB_COM = "https://github.com";
 const COPILOT_API = "https://api.github.com";
 
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const decodeResponse = async (response) => {
-  try {
-    const payload = await response.json();
-    return {
-      payload: isRecord(payload) ? payload : undefined,
-      status: response.status
-    };
-  } catch {
-    return { status: response.status };
-  }
-};
-
-const requestJson = async (url, headers, fetchFunction) => {
+const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3000);
-  let response;
-  let result;
   try {
-    response = await fetchFunction(url, {
+    const response = await fetchFunction(url, {
       headers,
       method: "GET",
       signal: controller.signal
@@ -37,22 +25,27 @@ const requestJson = async (url, headers, fetchFunction) => {
       typeof response.status !== "number" ||
       !Number.isFinite(response.status)
     ) {
-      result = { status: undefined };
-    } else if (response.status < 200 || response.status >= 300) {
-      result = { status: response.status };
-    } else {
-      result = await decodeResponse(response);
+      return { status: undefined };
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return { status: response.status };
+    }
+    try {
+      const payload = await response.json();
+      if (!isRecord(payload)) {
+        onUsageError?.();
+        return { status: response.status };
+      }
+      return { payload, status: response.status };
+    } catch {
+      onUsageError?.();
+      return { status: response.status };
     }
   } catch {
-    result = { status: undefined };
+    return { status: undefined };
   } finally {
-    controller.abort();
     clearTimeout(timeout);
-    if (response?.body && !response.bodyUsed) {
-      await response.body.cancel().catch(() => null);
-    }
   }
-  return result;
 };
 
 const fetchFunction = (options) => options.fetch ?? globalThis.fetch;
@@ -61,15 +54,10 @@ const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
 const nowValue = (value) => {
-  let now;
   if (value instanceof Date) {
-    now = value.getTime();
-  } else if (isFiniteNumber(value)) {
-    now = value;
-  } else {
-    now = Date.now();
+    return value.getTime();
   }
-  return now;
+  return isFiniteNumber(value) ? value : Date.now();
 };
 
 const stripJsonc = (text) => {
@@ -115,9 +103,7 @@ const readJson = async (filePath, jsonc = false) => {
     return isRecord(value) ? value : undefined;
   } catch (error) {
     if (process.env.STATUSLINE_DEBUG) {
-      console.error(
-        `[copilot-usage] unreadable credentials (${error instanceof SyntaxError ? "invalid JSON" : "file read failed"})`
-      );
+      console.error(`[copilot-usage] unreadable ${filePath}`, error);
     }
   }
 };
@@ -129,11 +115,10 @@ const resetAfter = (timestamp, now) =>
 
 const snapshot = (metrics, label) => {
   const validMetrics = metrics.filter(Boolean);
-  const group = validMetrics.length ? { metrics: validMetrics } : undefined;
-  if (group && label) {
-    group.label = label;
-  }
-  return group ? { groups: [group] } : undefined;
+  const group = label
+    ? { label, metrics: validMetrics }
+    : { metrics: validMetrics };
+  return validMetrics.length ? { groups: [group] } : undefined;
 };
 
 const usageMetric = (label, used, total, resetsInMs) =>
@@ -147,18 +132,30 @@ const usageMetric = (label, used, total, resetsInMs) =>
       }
     : undefined;
 
-const candidateEnvironmentTokens = (environment) =>
-  ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"]
-    .map((name) => environment?.[name] ?? process.env[name] ?? "")
-    .filter((token) => typeof token === "string" && token);
+const ENVIRONMENT_TOKEN_NAMES = [
+  "COPILOT_GITHUB_TOKEN",
+  "GH_TOKEN",
+  "GITHUB_TOKEN"
+];
+
+const candidateEnvironmentTokens = (environment, index = 0) => {
+  if (index >= ENVIRONMENT_TOKEN_NAMES.length) {
+    return [];
+  }
+  const token =
+    environment?.[ENVIRONMENT_TOKEN_NAMES[index]] ??
+    process.env[ENVIRONMENT_TOKEN_NAMES[index]] ??
+    "";
+  const rest = candidateEnvironmentTokens(environment, index + 1);
+  return typeof token === "string" && token ? [token, ...rest] : rest;
+};
 
 const normalizeHost = (host) => {
-  let result = GITHUB_COM;
-  if (typeof host === "string" && host) {
-    const trimmed = host.trim().replace(/\/$/u, "");
-    result = trimmed.includes("://") ? trimmed : `https://${trimmed}`;
+  if (typeof host !== "string" || !host) {
+    return GITHUB_COM;
   }
-  return result;
+  const trimmed = host.trim().replace(/\/$/u, "");
+  return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
 };
 
 const copilotApiHost = (host) => {
@@ -172,11 +169,8 @@ const intellijCandidates = async (home) => {
   );
   return Object.entries(oauth ?? {})
     .filter(([, entries]) => Array.isArray(entries))
-    .flatMap(([authority, entries]) => {
-      const host = authority.endsWith("/login/oauth")
-        ? authority.slice(0, -12)
-        : authority;
-      return entries
+    .flatMap(([authority, entries]) =>
+      entries
         .filter(
           (entry) =>
             isRecord(entry) &&
@@ -184,11 +178,15 @@ const intellijCandidates = async (home) => {
             entry.accessToken
         )
         .map((entry) => ({
-          host: copilotApiHost(host),
+          host: copilotApiHost(
+            authority.endsWith("/login/oauth")
+              ? authority.slice(0, -12)
+              : authority
+          ),
           scheme: "token",
           token: entry.accessToken
-        }));
-    });
+        }))
+    );
 };
 
 const openCodeCopilotCandidates = async (home) => {
@@ -196,23 +194,20 @@ const openCodeCopilotCandidates = async (home) => {
     path.join(home, ".local", "share", "opencode", "auth.json")
   );
   const oauth = openCode?.["github-copilot"];
-  const candidates = [];
-  const host =
-    oauth?.type === "oauth"
-      ? copilotApiHost(oauth.enterpriseUrl || GITHUB_COM)
-      : undefined;
-  if (host !== undefined && typeof oauth.access === "string" && oauth.access) {
-    candidates.push({ host, scheme: "token", token: oauth.access });
+  if (oauth?.type !== "oauth") {
+    return [];
   }
-  if (
-    host !== undefined &&
-    typeof oauth.refresh === "string" &&
+  const host = copilotApiHost(oauth.enterpriseUrl || GITHUB_COM);
+  return [
+    ...(typeof oauth.access === "string" && oauth.access
+      ? [{ host, scheme: "token", token: oauth.access }]
+      : []),
+    ...(typeof oauth.refresh === "string" &&
     oauth.refresh &&
     oauth.refresh !== oauth.access
-  ) {
-    candidates.push({ host, scheme: "token", token: oauth.refresh });
-  }
-  return candidates;
+      ? [{ host, scheme: "token", token: oauth.refresh }]
+      : [])
+  ];
 };
 
 const ghCliCandidates = async (home) => {
@@ -232,19 +227,29 @@ const ghCliCandidates = async (home) => {
     });
 };
 
-/**
- * Gather tokens from explicit input, environment, and local client settings.
- * An unreadable macOS Copilot CLI Keychain entry is ignored so remaining local
- * credential sources can still be tried.
- */
+const keychainToken = (options, home) => {
+  if (
+    (options.platform ?? process.platform) !== "darwin" ||
+    !(home === homedir() || options.execFile)
+  ) {
+    return "";
+  }
+  try {
+    return (options.execFile ?? execFileSync)(
+      "security",
+      ["find-generic-password", "-s", "copilot-cli", "-w"],
+      {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 3000
+      }
+    ).trim();
+  } catch {
+    return "";
+  }
+};
+
 const copilotCandidates = async (options, credential) => {
-  const candidates = [];
-  if (credential) {
-    candidates.push({ host: COPILOT_API, scheme: "token", token: credential });
-  }
-  for (const token of candidateEnvironmentTokens(options.environment)) {
-    candidates.push({ host: COPILOT_API, scheme: "token", token });
-  }
   const home = options.home ?? homedir();
   const config = await readJson(
     path.join(home, ".copilot", "config.json"),
@@ -252,116 +257,107 @@ const copilotCandidates = async (options, credential) => {
   );
   const login = config?.lastLoggedInUser?.login;
   const session = login && config.copilotTokens?.[`${GITHUB_COM}:${login}`];
-  if (typeof session === "string" && session) {
-    candidates.push({ host: COPILOT_API, scheme: "Bearer", token: session });
-  }
-  if (
-    process.platform === "darwin" &&
-    (home === homedir() || options.execFile)
-  ) {
-    try {
-      const token = (options.execFile ?? execFileSync)(
-        "security",
-        ["find-generic-password", "-s", "copilot-cli", "-w"],
-        {
-          encoding: "utf-8",
-          stdio: ["ignore", "pipe", "ignore"],
-          timeout: 3000
-        }
-      ).trim();
-      if (token) {
-        candidates.push({ host: COPILOT_API, scheme: "token", token });
-      }
-    } catch {
-      // No readable Copilot CLI Keychain token; try other credentials.
-    }
-  }
-  candidates.push(
+  const keychain = keychainToken(options, home);
+  return [
+    ...(credential
+      ? [{ host: COPILOT_API, scheme: "token", token: credential }]
+      : []),
+    ...candidateEnvironmentTokens(options.environment).map((token) => ({
+      host: COPILOT_API,
+      scheme: "token",
+      token
+    })),
+    ...(typeof session === "string" && session
+      ? [{ host: COPILOT_API, scheme: "Bearer", token: session }]
+      : []),
+    ...(keychain
+      ? [{ host: COPILOT_API, scheme: "token", token: keychain }]
+      : []),
     ...(await intellijCandidates(home)),
     ...(await openCodeCopilotCandidates(home)),
     ...(await ghCliCandidates(home))
-  );
-  return candidates;
+  ];
 };
 
 const copilotReset = (payload, now) => {
-  let reset;
   if (
     typeof payload.quota_reset_date_utc === "string" &&
     payload.quota_reset_date_utc
   ) {
     const timestamp = Date.parse(payload.quota_reset_date_utc);
-    reset = Number.isFinite(timestamp)
-      ? Math.max(0, timestamp - now)
-      : undefined;
+    if (Number.isFinite(timestamp)) {
+      return Math.max(0, timestamp - now);
+    }
   }
-  return (
-    reset ?? resetAfter(Number(payload.limited_user_reset_date) * 1000, now)
-  );
+  return resetAfter(Number(payload.limited_user_reset_date) * 1000, now);
 };
+
+const COPILOT_PLANS = new Set([
+  "free",
+  "individual",
+  "pro",
+  "pro_plus",
+  "business",
+  "enterprise",
+  "team"
+]);
 
 const planLabel = (plan) => {
-  const known = [
-    "free",
-    "individual",
-    "pro",
-    "pro_plus",
-    "business",
-    "enterprise",
-    "team"
-  ];
-  let label = "";
-  if (typeof plan === "string" && known.includes(plan)) {
-    const name = plan.replaceAll("_", " ");
-    label = name.charAt(0).toUpperCase() + name.slice(1);
-  }
-  return label;
+  const name = COPILOT_PLANS.has(plan) ? plan.replaceAll("_", " ") : "";
+  return name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
 };
 
-/**
- * Convert Copilot quotas into bounded usage metrics. A remaining value of -1
- * represents exhaustion with overage and is treated as zero remaining quota.
- */
-const normalizeCopilot = (payload, now) => {
-  const reset = copilotReset(payload, now);
-  const metrics = Object.entries({
-    Chat: payload.quota_snapshots?.chat,
-    Completions: payload.quota_snapshots?.completions,
-    Premium: payload.quota_snapshots?.premium_interactions
-  }).flatMap(([label, window]) => {
-    let result;
-    if (isRecord(window) && isFiniteNumber(window.entitlement)) {
-      const remaining = isFiniteNumber(window.quota_remaining)
-        ? window.quota_remaining
-        : window.remaining;
-      const total =
-        !isFiniteNumber(remaining) || window.entitlement < 0
-          ? undefined
-          : Math.max(0, window.entitlement);
-      result =
-        total === undefined
-          ? []
-          : [
-              usageMetric(
-                label,
-                Math.min(
-                  total,
-                  Math.round(
-                    Math.max(0, total - Math.max(0, remaining)) * 100
-                  ) / 100
-                ),
-                total,
-                reset
-              )
-            ];
-    } else {
-      result = [];
-    }
-    return result;
-  });
+const groupLabel = (payload) => {
+  if (payload.access_type_sku === "free_limited_copilot") {
+    return "Copilot (Free)";
+  }
   const plan = planLabel(payload.copilot_plan);
-  return snapshot(metrics, plan && `Copilot (${plan})`);
+  return plan && `Copilot (${plan})`;
 };
+
+const QUOTA_METRICS = [
+  ["Chat", "chat"],
+  ["Completions", "completions"],
+  ["Premium", "premium_interactions"]
+];
+
+const quotaMetric = (label, window, reset) => {
+  const entitlement =
+    isRecord(window) && isFiniteNumber(window.entitlement)
+      ? window.entitlement
+      : Number.NaN;
+  const total = Math.max(0, entitlement);
+  const remaining = isFiniteNumber(window?.quota_remaining)
+    ? window.quota_remaining
+    : window?.remaining;
+  return isFiniteNumber(remaining) && entitlement > 0
+    ? usageMetric(
+        label,
+        Math.min(
+          total,
+          Math.round(Math.max(0, total - Math.max(0, remaining)) * 100) / 100
+        ),
+        total,
+        reset
+      )
+    : undefined;
+};
+
+const quotaMetrics = (payload, reset, index = 0) => {
+  if (index >= QUOTA_METRICS.length) {
+    return [];
+  }
+  const [label, key] = QUOTA_METRICS[index];
+  const metric = quotaMetric(label, payload.quota_snapshots?.[key], reset);
+  const rest = quotaMetrics(payload, reset, index + 1);
+  return metric ? [metric, ...rest] : rest;
+};
+
+const normalizeCopilot = (payload, now) =>
+  snapshot(
+    quotaMetrics(payload, copilotReset(payload, now)),
+    groupLabel(payload)
+  );
 
 const copilotHeaders = (candidate) => ({
   Accept: "application/vnd.github+json",
@@ -371,51 +367,34 @@ const copilotHeaders = (candidate) => ({
   "X-GitHub-Api-Version": "2025-04-01"
 });
 
-/**
- * Try candidates in order, advancing only after an HTTP 401 or 403 response.
- * Other request failures stop the search without a snapshot.
- * @param {object[]} candidates Ordered token, host, and auth-scheme records.
- * @param {object} options Fetch and current-time overrides.
- * @param {number} [index] First candidate to attempt.
- * @returns {Promise<object|undefined>} Normalized usage, or undefined when no
- * candidate succeeds or no valid metrics remain.
- */
 const fetchCandidate = async (candidates, options, index = 0) => {
   const candidate = candidates[index];
-  const response = candidate
-    ? await requestJson(
-        `${copilotApiHost(candidate.host)}/copilot_internal/user`,
-        copilotHeaders(candidate),
-        fetchFunction(options)
-      )
-    : undefined;
-  let result;
-  if (!response) {
-    result = undefined;
-  } else if (response.status === 401 || response.status === 403) {
-    result = fetchCandidate(candidates, options, index + 1);
-  } else {
-    const failed =
-      response.status === undefined ||
-      response.status < 200 ||
-      response.status >= 300 ||
-      !response.payload;
-    result = failed
-      ? undefined
-      : normalizeCopilot(response.payload, nowValue(options.now));
+  if (candidate) {
+    const { status, payload } = await requestJson(
+      `${copilotApiHost(candidate.host)}/copilot_internal/user`,
+      copilotHeaders(candidate),
+      fetchFunction(options),
+      options.onUsageError
+    );
+    if (status === 401 || status === 403) {
+      options.onUsageError?.();
+      return fetchCandidate(candidates, options, index + 1);
+    }
+    if (status === undefined || status < 200 || status >= 300 || !payload) {
+      return;
+    }
+    if (!isRecord(payload.quota_snapshots)) {
+      options.onUsageError?.();
+      return;
+    }
+    return normalizeCopilot(payload, nowValue(options.now));
   }
-  return result;
 };
 
 /**
- * Discover and deduplicate Copilot credentials, then fetch normalized usage.
- * Reads environment and local client settings and may query macOS Keychain.
- * Candidates are retried only on HTTP 401/403; other request failures and
- * snapshots without valid metrics return no result.
- * @param {object} [options] Credential, environment, home directory, fetch and
- * Keychain-command overrides, and current time as a Date or milliseconds.
- * @returns {Promise<object|undefined>} Usage groups, or undefined when no
- * candidate succeeds or usable metrics are unavailable.
+ * Fetch and normalize Copilot usage with credential fallback discovery.
+ * @param {object} [options] Input value.
+ * @returns {Promise<object|undefined>} Result.
  */
 export const fetchUsage = async (options = {}) => {
   const candidates = await copilotCandidates(
@@ -431,5 +410,16 @@ export const fetchUsage = async (options = {}) => {
     ]);
     return seen.has(identity) ? false : seen.add(identity);
   });
-  return fetchCandidate(usable, options);
+  return usable.length
+    ? withUsageCache(
+        "copilot",
+        usable.map((candidate) => [
+          candidate.token,
+          copilotApiHost(candidate.host),
+          candidate.scheme
+        ]),
+        options,
+        (cachedOptions) => fetchCandidate(usable, cachedOptions)
+      )
+    : undefined;
 };

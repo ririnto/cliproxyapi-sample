@@ -1,10 +1,36 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "askUserQuestionTimeout": "60s",
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "autoCompactWindow": 305000,
+  "cleanupPeriodDays": 7,
   "disableClaudeAiConnectors": true,
-  "disallowedTools": ["AskUserQuestion", "EnterPlanMode"],
   "effortLevel": "high",
+  "enableWorkflows": true,
+  "enabledPlugins": {
+    "code-simplifier@claude-plugins-official": true,
+    "codegraph@sinon": true,
+    "codex-app-server@sinon": false,
+    "context7@claude-plugins-official": true,
+    "ddgs@sinon": true,
+    "discernment-nudge@anthropic-agent-skills": true,
+    "feature-dev@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "github@claude-plugins-official": true,
+    "gopls-lsp@claude-plugins-official": true,
+    "gpt-agents@sinon": false,
+    "i-have-adhd@i-have-adhd": true,
+    "kotlin-lsp@claude-plugins-official": true,
+    "playwright@claude-plugins-official": false,
+    "plugin-dev@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true,
+    "swift-lsp@claude-plugins-official": false,
+    "typescript-lsp@claude-plugins-official": true,
+    "workgraph@sinon": true
+  },
   "env": {
     "ANTHROPIC_API_KEY": "sk-dummy",
     "ANTHROPIC_BASE_URL": "http://localhost:8317",
@@ -29,16 +55,19 @@
     "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "GPT-6-Luna",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking",
     "API_FORCE_IDLE_TIMEOUT": "0",
+    "API_TIMEOUT_MS": "1800000",
     "BASH_DEFAULT_TIMEOUT_MS": "240000",
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
     "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING": "1",
     "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "CLAUDE_CODE_GATEWAY_HINT_HEADERS": "true",
     "CLAUDE_CODE_GOAL_CHECKIN_MINUTES": "4",
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "400000",
     "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "270000",
     "CLAUDE_CODE_REMOTE_SEND_KEEPALIVES": "1",
     "CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS": "4",
-    "CLAUDE_STREAM_IDLE_TIMEOUT_MS": "600000",
+    "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS": "1800000",
+    "CLAUDE_STREAM_IDLE_TIMEOUT_MS": "1800000",
     "DISABLE_FEEDBACK_COMMAND": "1",
     "ENABLE_TOOL_SEARCH": "true"
   },
@@ -79,12 +108,56 @@
       }
     }
   },
+  "fallbackModel": ["glm-5.3", "claude-sonnet-5-5", "gpt-6.1-sol"],
   "feedbackSurveyRate": 0,
-  "includeCoAuthoredBy": false,
   "includeGitInstructions": false,
   "language": "Korean",
-  "model": "opus",
-  "fallbackModel": ["glm-5.3", "claude-sonnet-5-5", "gpt-6.1-sol"],
+  "modelPricing": {
+    "overrides": {
+      "gemini-3.8-flash": {
+        "cacheRead": 0.075,
+        "cacheWrite": 0,
+        "input": 0.75,
+        "output": 3.75
+      },
+      "gemini-4-argon": {
+        "cacheRead": 0.1,
+        "cacheWrite": 0,
+        "input": 2,
+        "output": 10
+      },
+      "glm-5.3": {
+        "cacheRead": 0.26,
+        "cacheWrite": 0,
+        "input": 1.4,
+        "output": 4.4
+      },
+      "glm-5.3-flash": {
+        "cacheRead": 0.03,
+        "cacheWrite": 0,
+        "input": 0.15,
+        "output": 0.5
+      },
+      "gpt-6-astra": {
+        "cacheRead": 1,
+        "cacheWrite": 12.5,
+        "input": 10,
+        "output": 50
+      },
+      "gpt-6-luna": {
+        "cacheRead": 0.01,
+        "cacheWrite": 0.125,
+        "input": 0.1,
+        "output": 0.5
+      },
+      "gpt-6.1-sol": {
+        "cacheRead": 0.1,
+        "cacheWrite": 2.5,
+        "input": 2,
+        "output": 10
+      }
+    }
+  },
   "modelSettings": {
     "claude-fable-5-1": {
       "autoCompactWindow": 305000,
@@ -102,6 +175,16 @@
       "maxEffortLevel": "high"
     },
     "claude-sonnet-5-5": {
+      "autoCompactWindow": 305000,
+      "effortLevel": "medium",
+      "maxEffortLevel": "high"
+    },
+    "gemini-3.8-flash": {
+      "autoCompactWindow": 305000,
+      "effortLevel": "medium",
+      "maxEffortLevel": "high"
+    },
+    "gemini-4-argon": {
       "autoCompactWindow": 305000,
       "effortLevel": "medium",
       "maxEffortLevel": "high"
@@ -134,13 +217,15 @@
   },
   "permissions": {
     "defaultMode": "bypassPermissions",
-    "deny": ["Agent(claude)"]
+    "deny": ["Agent(claude)", "AskUserQuestion", "EnterPlanMode"]
   },
   "promptSuggestionEnabled": false,
+  "respondToBashCommands": false,
   "sandbox": {
     "allowUnsandboxedCommands": true
   },
   "showClearContextOnPlanAccept": true,
+  "showMessageTimestamps": true,
   "showThinkingSummaries": true,
   "skillOverrides": {
     "code-review": "off"
@@ -149,24 +234,25 @@
   "skipDangerousModePermissionPrompt": true,
   "skipWebFetchPreflight": true,
   "statusLine": {
-    "command": "node -e \"const path = require('node:path'); import(require('node:url').pathToFileURL(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(require('node:os').homedir(), '.claude'), 'statusline.mjs'))).then(module => module.main())\"",
+    "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.mjs\"",
     "type": "command"
   },
   "statusLineAddon": [
     {
+      "name": "Claude",
+      "primary": true,
+      "provider": "claude",
+      "script": "statusline/claude-usage.mjs"
+    },
+    {
       "credential": "{env:ZHIPU_API_KEY}",
-      "enabled": true,
       "hideName": true,
       "name": "GLM Coding Plan",
-      "provider": "zai",
-      "script": "statusline/glm-coding-plan.mjs",
-      "showAbove": 0
+      "script": "statusline/glm-coding-plan.mjs"
     },
     {
       "credential": "{env:MINIMAX_API_KEY}",
-      "enabled": true,
       "name": "MiniMax Token Plan",
-      "provider": "minimax",
       "script": "statusline/minimax-token-plan.mjs",
       "showAbove": {
         "5h": 5,
@@ -174,25 +260,20 @@
       }
     },
     {
-      "enabled": true,
       "name": "Chatgpt",
-      "provider": "chatgpt",
-      "script": "statusline/codex-usage.mjs",
-      "showAbove": 0
+      "script": "statusline/codex-usage.mjs"
     },
     {
-      "enabled": true,
-      "hideLabels": ["Completions"],
       "name": "Copilot",
-      "provider": "copilot",
-      "script": "statusline/copilot-usage.mjs",
-      "showAbove": 0
+      "script": "statusline/copilot-usage.mjs"
     }
   ],
   "teammateMode": "auto",
   "theme": "auto",
   "totalTokensReminder": "countdown",
+  "tui": "fullscreen",
   "verbose": true,
+  "viewMode": "focus",
   "worktree": {
     "baseRef": "head"
   }

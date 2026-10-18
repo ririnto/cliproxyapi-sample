@@ -11,7 +11,7 @@
     "pre-commit": "run-s check test",
     "pre-push": "run-s check test",
     "prepare": "husky",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs .claude/statusline.test.mjs .claude/statusline/*.test.mjs"
   },
   "devDependencies": {
     "husky": "catalog:",

@@ -38,7 +38,7 @@ brew services restart cliproxyapi
 
 ### Claude Code
 
-`.claude/settings.json`에서 기본 모델은 `opus`로 선택한다.
+`.claude/settings.json`은 `model` 키를 지정하지 않는다.
 
 | 선택자 | 대상 |
 | --- | --- |
@@ -48,21 +48,48 @@ brew services restart cliproxyapi
 | `ANTHROPIC_DEFAULT_SONNET_MODEL` | `gpt-6-luna` |
 
 `ANTHROPIC_CUSTOM_MODEL_OPTION`은 `glm-5.3`을 모델 선택기에 추가한다.
-기본 모델은 `opus`로 유지한다.
 모델별 `modelSettings.autoCompactWindow` 설정에는 Claude Code v2.1.288 이상이 필요하다.
 
-### Managed pricing
+### Model pricing
 
-`.claude/managed-settings.json`은 모델별 백만 토큰당 USD 가격을 담은 관리형 설정 템플릿이다.
-이 저장소의 프로젝트 설정은 `modelPricing`을 적용하지 않는다.
-가격을 적용하려면 템플릿을 지원되는 관리형 설정 범위에 배포해야 한다.
-Claude Code는 사용자, 프로젝트, 로컬 설정과 `--settings`에서 `modelPricing`을 무시한다.
+`.claude/settings.json`의 `modelPricing.overrides`는 모델별 백만 토큰당 USD 가격을 담는다.
+가격 데이터는 기존 `.claude/managed-settings.json` 템플릿에서 일반 프로젝트 설정으로 통합되었고 템플릿 파일은 삭제되었다.
+Claude Code 2.1.302는 사용자, 프로젝트, 로컬 설정과 `--settings`에서 `modelPricing`을 무시한다.
+따라서 이 값은 이 범위에서 효과가 없는 요청된 구성 데이터다.
+가격을 적용하려면 지원되는 관리형 설정 범위에 배포해야 한다.
 macOS 시스템 관리형 설정 파일 경로는 `/Library/Application Support/ClaudeCode/managed-settings.json`이다.
 네이티브 네 가격 필드는 GPT의 272K 초과 컨텍스트 계층을 표현하거나 공급자 청구액을 증명하지 않는다.
 자세한 내용은 [Claude Code settings reference][managed-pricing]를 참조한다.
 
+Gemini 두 모델의 가격은 [Copilot models and pricing][copilot-pricing]에 게시된 현재 프로모션 표시 가격이다.
+`gemini-3.8-flash`는 입력 0.75, 캐시 입력 0.075, 출력 3.75이고 2026-12-31까지 프로모션이다.
+`gemini-4-argon`은 입력 2.00, 캐시 입력 0.10, 출력 10.00이고 2026-12-01까지 프로모션이다.
+이 가격은 이후 기간의 보장 가격이나 Google 직접 API 가격이 아니다.
+Google 표에는 별도의 캐시 쓰기 가격이 없어 두 모델의 `cacheWrite` 0은 별도 과금 항목이 없음을 나타낸다.
+이 0은 공개된 Google 캐시 쓰기 가격이나 실제 게이트웨이 과금 측정값이 아니다.
+
 [managed-pricing]:
   https://code.claude.com/docs/en/settings-reference#modelpricing
+[copilot-pricing]:
+  https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing
+
+### Gemini effort and compaction
+
+Gemini 두 모델의 `modelSettings`는 `effortLevel` `medium`과 `maxEffortLevel` `high`를 사용한다.
+공식 지원 사고 수준은 low, medium, high이고 기본값은 medium이다.
+자세한 내용은 [Gemini thinking reference][gemini-thinking]를 참조한다.
+이 설정은 출처가 지원하는 기본값과 상한이지 측정된 최적값이 아니다.
+`autoCompactWindow` 305000은 인식된 모델 용량으로 클램프된 뒤 안전 버퍼가 적용된다.
+Claude Code 2.1.302는 인식되지 않는 커스텀 모델 ID의 용량을 순서대로 가정한다.
+먼저 검증된 내장 카탈로그 매핑이 있으면 그 용량을 사용한다.
+매핑이 없으면 양수 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 400000을 가정 용량으로 쓴다.
+이 값이 없어야 기본 용량 200000 폴백이 적용된다.
+가정 용량은 공급자가 실제로 제공하는 용량을 증명하지 않는다.
+임의의 공급자 응답 메타데이터가 이 순서를 덮어쓰지 않는다.
+따라서 305000 토큰 컴팩션 트리거는 보장되지 않는다.
+
+[gemini-thinking]:
+  https://ai.google.dev/gemini-api/docs/thinking
 
 ### Agent guidance
 
@@ -72,7 +99,7 @@ In Claude Code, read its bundled `references/claude.md`.
 Skip reads only when the complete selected instructions are already loaded.
 Instruction reads do not import config or activate plugins.
 Keep model choices, workload tiers, roles, and effort policy in that reference.
-The Sample preserves product selectors and provider mappings.
+The Sample preserves product selectors.
 Supported-capability metadata uses the explicitly requested conservative declarations.
 Omitted operational overrides use native host behavior.
 Explicit user choices still apply.
@@ -123,14 +150,22 @@ dest="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 mkdir -p "$dest/statusline"
 cp ".claude/statusline.mjs" "$dest/statusline.mjs"
 for module in ".claude/statusline/"*.mjs; do
+  case "$module" in
+    *.test.mjs) continue ;;
+  esac
   cp "$module" "$dest/statusline/$(basename "$module")"
 done
 ```
 
-The statusline command and global settings use a nonempty `CLAUDE_CONFIG_DIR`.
-Otherwise, they use `$HOME/.claude`.
-Project `.claude/settings.json` addon settings still take precedence.
-Credential file references resolve relative to the selected settings directory.
+런타임은 진입점과 `.claude/statusline/`의 여섯 실행 모듈이다.
+테스트 파일과 `README.md`는 설치 대상이 아니다.
+사용량 캐시와 수집기 동작은 [statusline README](.claude/statusline/README.md)를 참고한다.
+
+statusline 명령은 비어 있지 않은 `CLAUDE_CONFIG_DIR`를 사용한다.
+설정되지 않으면 `$HOME/.claude`를 사용한다.
+프로젝트 `.claude/settings.json`에 배열형 `statusLineAddon`이 있으면 프로젝트 설정이 우선한다.
+이때 자격 증명 파일 참조는 프로젝트 `.claude` 디렉터리를 기준으로 해석한다.
+그 외에는 선택된 설정 디렉터리를 기준으로 해석한다.
 
 `statusline.mjs`는 애드온 스크립트 경로를 다음 기준으로 해석한다.
 

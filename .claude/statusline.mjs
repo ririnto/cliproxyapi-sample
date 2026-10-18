@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { readFile, realpath } from "node:fs/promises";
+import { readFileSync, realpathSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,12 +10,13 @@ import { stripVTControlCharacters } from "node:util";
 
 const RESET = "[0m";
 const DIM = "[2m";
+const BOLD = "[1m";
 const PCT_GREEN = 70;
 const PCT_YELLOW = 90;
 
 const displayText = (value) =>
-  stripVTControlCharacters(String(value)).replaceAll(
-    /[\p{Cc}\u2028\u2029]+/gu,
+  stripVTControlCharacters(`${value}`).replaceAll(
+    /[\p{Cc}\u{2028}\u{2029}]+/gu,
     " "
   );
 
@@ -23,13 +24,10 @@ const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const metricPercentage = (metric) => {
-  let percentage;
   if (metric?.type === "usage") {
-    percentage = metric.total > 0 ? (metric.used / metric.total) * 100 : 0;
-  } else {
-    percentage = metric?.percentage ?? 0;
+    return metric.total > 0 ? (metric.used / metric.total) * 100 : 0;
   }
-  return percentage;
+  return metric?.percentage ?? 0;
 };
 
 const environmentValue = (name, environment) =>
@@ -45,8 +43,12 @@ const replaceEnvironmentReferences = (value, environment) =>
     String(environmentValue(placeholder.slice(5, -1), environment))
   );
 
-const readFileReference = async (reference, home, baseDir) => {
-  const pathValue = homePath(reference.groups.fileReferencePath, home);
+const referenceText = async (reference, home, baseDir) => {
+  const [, referencePath] = reference;
+  if (!referencePath) {
+    return reference[0];
+  }
+  const pathValue = homePath(referencePath, home);
   const filePath = path.isAbsolute(pathValue)
     ? pathValue
     : path.resolve(baseDir, pathValue);
@@ -54,86 +56,87 @@ const readFileReference = async (reference, home, baseDir) => {
     const contents = await readFile(filePath, "utf-8");
     return contents.trim();
   } catch {
-    return reference.groups.fileReference;
+    return reference[0];
   }
 };
 
-const substituteFileReferences = async (value, references, home, baseDir) => {
-  const referenceTexts = await Promise.all(
-    references.map(async (reference) =>
-      reference.groups.fileReferencePath
-        ? await readFileReference(reference, home, baseDir)
-        : reference.groups.fileReference
-    )
+const spliceReferences = (value, references, texts) => {
+  const last = references.at(-1);
+  return (
+    references
+      .map(
+        (reference, index) =>
+          value.slice(
+            index
+              ? references[index - 1].index + references[index - 1][0].length
+              : 0,
+            reference.index
+          ) + texts[index]
+      )
+      .join("") + value.slice(last.index + last[0].length)
   );
-  let cursor = 0;
-  let result = "";
-  for (const [index, reference] of references.entries()) {
-    result += value.slice(cursor, reference.index) + referenceTexts[index];
-    cursor = reference.index + reference.groups.fileReference.length;
-  }
-  return result + value.slice(cursor);
 };
 
 const replaceFileReferences = async (value, options) => {
   const home = options.home ?? homedir();
   const baseDir = options.baseDir ?? process.cwd();
   const references = [
-    ...value.matchAll(
-      /(?<fileReference>\{file:(?<fileReferencePath>[^{}]*)\})/gu
-    )
+    ...value.matchAll(/\{file:(?<fileReferencePath>[^{}]*)\}/gu)
   ];
-  return references.length
-    ? await substituteFileReferences(value, references, home, baseDir)
-    : value;
+  if (!references.length) {
+    return value;
+  }
+  const texts = await Promise.all(
+    references.map((reference) => referenceText(reference, home, baseDir))
+  );
+  return spliceReferences(value, references, texts);
 };
 
-const resolveCredentialReference = async (value, options = {}) =>
+const resolveCredentialReference = (value, options = {}) =>
   typeof value === "string"
-    ? await replaceFileReferences(
+    ? replaceFileReferences(
         replaceEnvironmentReferences(value, options.environment),
         options
       )
     : value;
 
+const scaledText = (number, divisor, suffix) =>
+  `${(number / divisor).toFixed(1).replace(/\.0$/u, "")}${suffix}`;
+
 const numberText = (value) => {
   const number = Number(value);
-  let result;
   if (!Number.isFinite(number)) {
-    result = "0";
-  } else if (number >= 1_000_000) {
-    result = `${(number / 1_000_000).toFixed(1).replace(/\.0$/u, "")}M`;
-  } else if (number >= 1000) {
-    result = `${(number / 1000).toFixed(1).replace(/\.0$/u, "")}k`;
-  } else {
-    result = String(Math.trunc(number));
+    return "0";
   }
-  return result;
+  if (number >= 1_000_000) {
+    return scaledText(number, 1_000_000, "M");
+  }
+  return number >= 1000
+    ? scaledText(number, 1000, "k")
+    : String(Math.trunc(number));
 };
 
 const resetText = (milliseconds) => {
   const value = Number(milliseconds);
-  let result = "unknown";
-  if (Number.isFinite(value) && value > 0) {
-    const seconds = value / 1000;
-    const days = Math.floor(seconds / 86_400);
-    const hours = Math.floor((seconds % 86_400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    result = days < 1 ? `${hours}h ${minutes}m` : `${days}d ${hours}h`;
+  if (!Number.isFinite(value) || value <= 0) {
+    return "unknown";
   }
-  return result;
+  const seconds = value / 1000;
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3600);
+  return days < 1
+    ? `${hours}h ${Math.floor((seconds % 3600) / 60)}m`
+    : `${days}d ${hours}h`;
 };
 
 const barColor = (percentage) => {
-  let color;
-  if (percentage <= PCT_GREEN) {
-    color = "\u001B[32m";
-  } else if (percentage <= PCT_YELLOW) {
-    color = "\u001B[33m";
-  } else {
-    color = "\u001B[31m";
+  if (!Number.isFinite(percentage)) {
+    return "";
   }
-  return color;
+  if (percentage <= PCT_GREEN) {
+    return "[32m";
+  }
+  return percentage <= PCT_YELLOW ? "[33m" : "[31m";
 };
 
 const usageBar = (percentage) => {
@@ -146,9 +149,7 @@ const gitBranch = (cwd) => {
     return execFileSync("git", ["branch", "--show-current"], {
       cwd,
       encoding: "utf-8",
-      killSignal: "SIGKILL",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 3000
+      stdio: ["ignore", "pipe", "ignore"]
     }).trim();
   } catch {
     return "";
@@ -156,21 +157,27 @@ const gitBranch = (cwd) => {
 };
 
 const metricDisplay = (metric) => {
-  let display;
   if (!metric || typeof metric !== "object") {
-    display = "";
-  } else if (metric.type === "usage") {
-    display = `${metric.used}/${metric.total}`;
-  } else if (metric.type === "budget") {
-    display = `$${Number(metric.used || 0).toFixed(2)}/$${Number(metric.total || 0).toFixed(2)}`;
-  } else {
-    display = `${Number(metric.percentage || 0)}%`;
+    return "";
   }
-  return display;
+  if (metric.type === "usage") {
+    return `${metric.used}/${metric.total}`;
+  }
+  if (metric.type === "credit") {
+    return metric.currency === "USD"
+      ? `$${metric.remaining.toFixed(2)}`
+      : String(metric.remaining);
+  }
+  return metric.type === "budget"
+    ? `$${Number(metric.used || 0).toFixed(2)}/$${Number(metric.total || 0).toFixed(2)}`
+    : `${Number(metric.percentage || 0)}%`;
 };
 
 const metricPercent = (metric) => {
   try {
+    if (metric.type === "credit") {
+      return Number.POSITIVE_INFINITY;
+    }
     const value = Number(metricPercentage(metric));
     return Number.isFinite(value) ? value : 0;
   } catch {
@@ -188,26 +195,89 @@ const renderMetric = (metric) => {
   return `${displayText(metric.label)}: ${barColor(metricPercent(metric))}${displayText(metricDisplay(metric))}${RESET}${reset === undefined ? "" : ` (${resetText(reset)})`}`;
 };
 
+const isFiniteNumber = (value) =>
+  typeof value === "number" && Number.isFinite(value);
+
+const windowPercentage = (window) => {
+  const percentage = window?.used_percentage;
+  return isFiniteNumber(percentage) && percentage >= 0 ? percentage : null;
+};
+
+const spendDollarPair = (window) => {
+  const used = window?.used_usd;
+  const limit = window?.limit_usd;
+  return isFiniteNumber(used) && used >= 0 && isFiniteNumber(limit) && limit > 0
+    ? { limit, used }
+    : null;
+};
+
+const spendPercentage = (window) => {
+  const percentage = window?.used_percentage;
+  return isFiniteNumber(percentage) && percentage >= 0 ? percentage : null;
+};
+
+const nativeUsageFor = (rateLimits) => {
+  if (!isRecord(rateLimits)) {
+    return null;
+  }
+  const windows = [rateLimits.five_hour, rateLimits.seven_day].some(
+    (window) => windowPercentage(window) !== null
+  );
+  return (
+    windows ||
+    spendPercentage(rateLimits.spend_limit) !== null ||
+    spendDollarPair(rateLimits.spend_limit) !== null
+  );
+};
+
+const windowRow = (key, label, rateLimits, nowMs) => {
+  const window = rateLimits?.[key];
+  const percentage = windowPercentage(window);
+  if (percentage === null) {
+    return "";
+  }
+  return renderMetric({
+    label,
+    percentage,
+    resetsInMs: Math.trunc(Number(window.resets_at || 0) * 1000 - nowMs),
+    type: "percentage"
+  });
+};
+
+const spendMetric = (dollars, percentage) =>
+  dollars
+    ? {
+        label: "spend",
+        percentage: (dollars.used / dollars.limit) * 100,
+        total: dollars.limit,
+        type: "budget",
+        used: dollars.used
+      }
+    : { label: "spend", percentage, type: "percentage" };
+
+const spendRow = (rateLimits, nowMs) => {
+  const spend = rateLimits?.spend_limit;
+  const dollars = spendDollarPair(spend);
+  const percentage = dollars
+    ? (dollars.used / dollars.limit) * 100
+    : spendPercentage(spend);
+  if (percentage === null) {
+    return "";
+  }
+  const metric = spendMetric(dollars, percentage);
+  return renderMetric(
+    isFiniteNumber(spend?.resets_at)
+      ? { ...metric, resetsInMs: Math.trunc(spend.resets_at * 1000 - nowMs) }
+      : metric
+  );
+};
+
 const renderRateLimits = (rateLimits, nowMs) =>
   [
-    ["five_hour", "5h"],
-    ["seven_day", "7d"]
-  ]
-    .map(([key, label]) => {
-      const window = rateLimits?.[key];
-      return isRecord(window)
-        ? renderMetric({
-            label,
-            percentage: Number(window.used_percentage || 0),
-            resetsInMs: Math.trunc(
-              Number(window.resets_at || 0) * 1000 - nowMs
-            ),
-            type: "percentage"
-          })
-        : "";
-    })
-    .filter(Boolean)
-    .join(" | ");
+    windowRow("five_hour", "5h", rateLimits, nowMs),
+    windowRow("seven_day", "7d", rateLimits, nowMs),
+    spendRow(rateLimits, nowMs)
+  ].filter(Boolean);
 
 const metricEntries = (group) =>
   isRecord(group) && Array.isArray(group.metrics)
@@ -222,41 +292,34 @@ const metricEntries = (group) =>
 const hiddenLabel = (metric, hideLabels) =>
   Array.isArray(hideLabels) && hideLabels.includes(metric.label);
 
-/**
- * Format a usage snapshot as one ANSI-colored line without fetching data.
- * Rendering errors propagate to the caller.
- * @param {object} addon Display name, hidden metric labels, and usage thresholds.
- * @param {object} snapshot Usage groups containing labeled metrics.
- * @returns {string} Visible groups joined by separators, or an empty string when
- * the snapshot has no groups or every metric is filtered out.
- */
-export const renderSnapshot = (addon, snapshot) =>
-  snapshot && Array.isArray(snapshot.groups)
-    ? snapshot.groups
-        .map((group) => {
-          const metrics = metricEntries(group).filter(
-            (metric) =>
-              !hiddenLabel(metric, addon.hideLabels) &&
-              metricPercent(metric) >=
-                thresholdFor(addon.showAbove, group.label || "", metric.label)
-          );
-          let line = "";
-          if (metrics.length) {
-            const content = metrics.map(renderMetric).join(" | ");
-            const groupName =
-              typeof group.label === "string" && group.label
-                ? group.label
-                : addon.name;
-            const displayName = group.label || !addon.hideName ? groupName : "";
-            line = displayName
-              ? `${displayText(displayName)} | ${content}`
-              : content;
-          }
-          return line;
-        })
-        .filter(Boolean)
-        .join(" | ")
-    : "";
+export const renderSnapshot = (addon, snapshot) => {
+  if (!snapshot || !Array.isArray(snapshot.groups)) {
+    return "";
+  }
+  return snapshot.groups
+    .map((group) => {
+      const metrics = metricEntries(group).filter(
+        (metric) =>
+          !hiddenLabel(metric, addon.hideLabels) &&
+          metricPercent(metric) >=
+            thresholdFor(addon.showAbove, group.label || "", metric.label)
+      );
+      if (!metrics.length) {
+        return "";
+      }
+      const content = metrics.map(renderMetric).join(" | ");
+      const groupName =
+        typeof group.label === "string" && group.label
+          ? group.label
+          : addon.name;
+      const displayName = group.label || !addon.hideName ? groupName : "";
+      return displayName
+        ? `${BOLD}${displayText(displayName)}${RESET} | ${content}`
+        : content;
+    })
+    .filter(Boolean)
+    .join(" | ");
+};
 
 const addonSettings = (addons) =>
   Array.isArray(addons)
@@ -274,95 +337,82 @@ const addonSettings = (addons) =>
 
 const scriptPath = (script) => {
   const home = homedir();
-  let result;
   if (script === "~") {
-    result = home;
-  } else {
-    const expanded = script.startsWith("~/")
-      ? path.join(home, script.slice(2))
-      : script;
-    result = path.isAbsolute(expanded)
-      ? expanded
-      : fileURLToPath(new URL(expanded, import.meta.url));
+    return home;
   }
-  return result;
+  const expanded = script.startsWith("~/")
+    ? path.join(home, script.slice(2))
+    : script;
+  return path.isAbsolute(expanded)
+    ? expanded
+    : fileURLToPath(new URL(expanded, import.meta.url));
 };
 
 const importAddonModule = async (addon, options) => {
-  const filePath = scriptPath(addon.script);
-  const importFunction = options.importModule || ((url) => import(url));
-  const module = await importFunction(pathToFileURL(filePath));
+  const module = await (options.importModule || ((url) => import(url)))(
+    pathToFileURL(scriptPath(addon.script))
+  );
   return typeof module.fetchUsage === "function" ? module : undefined;
 };
 
 const renderAddonResults = async (addons, options = {}) => {
-  const settingsDir =
-    options.settingsDir ||
-    process.env.CLAUDE_CONFIG_DIR ||
-    path.join(homedir(), ".claude");
-  const selected = addonSettings(addons);
+  const settingsDir = options.settingsDir || path.join(homedir(), ".claude");
   const results = await Promise.all(
-    selected.map(async (addon) => {
-      let result = null;
-      try {
-        const credential = Object.hasOwn(addon, "credential")
-          ? await resolveCredentialReference(addon.credential, {
-              baseDir: settingsDir
-            })
-          : "";
-        const module = await importAddonModule(addon, options);
-        if (module) {
-          const line = renderSnapshot(
-            addon,
-            await module.fetchUsage({
-              baseDir: settingsDir,
-              credential
-            })
-          );
-          result = line ? { hideName: Boolean(addon.hideName), line } : null;
+    addonSettings(addons)
+      .filter((addon) => !(options.nativeUsage && addon.provider === "claude"))
+      .map(async (addon) => {
+        try {
+          const module = await importAddonModule(addon, options);
+          const snapshot = module
+            ? await module.fetchUsage({
+                baseDir: settingsDir,
+                credential: Object.hasOwn(addon, "credential")
+                  ? await resolveCredentialReference(addon.credential, {
+                      baseDir: settingsDir
+                    })
+                  : ""
+              })
+            : undefined;
+          const line = renderSnapshot(addon, snapshot);
+          return line ? { line, primary: Boolean(addon.primary) } : null;
+        } catch {
+          return null;
         }
-      } catch {
-        result = null;
-      }
-      return result;
-    })
+      })
   );
   return results.filter(Boolean);
 };
 
-/**
- * Load enabled addons and fetch their usage concurrently, retaining input order.
- * Relative scripts resolve against this module; credential file references use
- * the settings directory. Import, credential, fetch, and render failures omit
- * only the affected addon, as do snapshots with no visible metrics.
- * @param {object[]} addons Addon script and display settings; non-arrays are empty.
- * @param {object} [options] Settings directory and optional module importer.
- * @returns {Promise<string[]>} Nonempty formatted addon lines in input order.
- */
 export const renderAddons = async (addons, options = {}) => {
   const results = await renderAddonResults(addons, options);
   return results.map((result) => result.line);
 };
 
+const projectDisplay = (workspace) => {
+  const currentDir = workspace?.current_dir || "";
+  const projectDir = workspace?.project_dir || "";
+  const projectName = path.basename(projectDir);
+  return currentDir === projectDir
+    ? projectName
+    : `${projectName}(${path.basename(currentDir)})`;
+};
+
 const renderHeader = (input, options) => {
   const model = input.model || {};
-  const modelName = displayText(model.display_name || "");
-  const effort = displayText(input.effort?.level || model.effort || "");
-  const header = effort ? `[${modelName} (${effort})]` : `[${modelName}]`;
+  const modelName = model.display_name || "";
+  const effort = input.effort?.level || model.effort || "";
   const workspace = input.workspace || {};
-  const cwd = options.cwd || workspace.current_dir || process.cwd();
-  const branch = options.branch === undefined ? gitBranch(cwd) : options.branch;
+  const branch =
+    options.branch === undefined
+      ? gitBranch(options.cwd || workspace.current_dir || process.cwd())
+      : options.branch;
   const context = input.context_window || {};
   const percentage = Math.trunc(Number(context.used_percentage || 0));
   const size = Math.trunc(Number(context.context_window_size || 0));
-  const contextPart = `${barColor(percentage)}${usageBar(percentage)}${RESET} ${percentage}%${size ? ` (${numberText(size)})` : ""}`;
-  const currentDir = workspace.current_dir || "";
-  const projectDir = workspace.project_dir || "";
-  const projectName = path.basename(projectDir);
   return [
-    `[36m${header}${RESET} [1m${displayText(currentDir === projectDir ? projectName : `${projectName}(${path.basename(currentDir)})`)}${RESET}`,
-    ...(branch ? [`[35m${displayText(branch)}${RESET}`] : []),
-    contextPart
+    `[36m[${displayText(modelName)}${effort ? ` (${displayText(effort)})` : ""}][0m [1m${displayText(projectDisplay(workspace))}[0m`,
+    ...(branch ? [`[35m${displayText(branch)}[0m`] : []),
+    `${barColor(percentage)}${usageBar(percentage)}[0m ${percentage}%${size ? ` (${numberText(size)})` : ""}`
   ].join(" | ");
 };
 
@@ -370,42 +420,54 @@ const renderCost = (input) => {
   const context = input.context_window || {};
   const usage = context.current_usage || {};
   const cost = input.cost || {};
-  return `${`$${Number(cost.total_cost_usd || 0).toFixed(2)}`} | ${Math.trunc(Number(cost.total_duration_ms || 0) / 60_000)}m | ${DIM}read:${numberText(context.total_input_tokens || 0)}(${numberText(usage.cache_read_input_tokens || 0)}) write:${numberText(context.total_output_tokens || 0)}(${numberText(usage.cache_creation_input_tokens || 0)})${RESET}`;
+  return `$${Number(cost.total_cost_usd || 0).toFixed(2)} | ${Math.trunc(Number(cost.total_duration_ms || 0) / 60_000)}m | ${DIM}read:${numberText(context.total_input_tokens || 0)}(${numberText(usage.cache_read_input_tokens || 0)}) write:${numberText(context.total_output_tokens || 0)}(${numberText(usage.cache_creation_input_tokens || 0)})${RESET}`;
+};
+
+const packProviderRows = (rows) => {
+  const packed = [];
+  let current = "";
+  for (const row of rows) {
+    const combined = current ? `${current} | ${row}` : row;
+    if (current && stripVTControlCharacters(combined).length > 120) {
+      packed.push(current);
+      current = row;
+    } else {
+      current = combined;
+    }
+  }
+  if (current) {
+    packed.push(current);
+  }
+  return packed;
 };
 
 /**
- * Build ANSI-colored status rows from Claude input and optional usage addons.
- * Fetches addons concurrently and reads the Git branch unless overridden.
- * Without built-in rate limits, the first addon hiding its name shares the cost
- * row unless merging is disabled. Addon failures are omitted individually;
- * errors while rendering the built-in rows reject the returned promise.
- * @param {object} input Claude model, workspace, context, cost, and rate-limit data.
- * @param {object} [options] Addons, current time, branch, working directory,
- * settings directory, importer, and hidden-addon merge preference.
- * @returns {Promise<string[]>} Header, cost, and any visible usage rows.
+ * main provider의 사용량은 원가 행에 표시하고, 나머지 사용량은 120자 안에서 묶는다.
  */
 export const renderStatusline = async (input, options = {}) => {
   const nowMs = options.nowMs ?? Date.now();
-  const addons = options.addons ?? [];
-  const rate = renderRateLimits(input.rate_limits || {}, nowMs);
-  const addonResults = await renderAddonResults(addons, options);
-  const hiddenIndex =
-    !rate && options.mergeHidden !== false
-      ? addonResults.findIndex((result) => result.hideName)
-      : -1;
-  const visibleRows = addonResults
-    .filter((_, index) => index !== hiddenIndex)
-    .map((result) => result.line);
-  const costRow =
-    hiddenIndex >= 0
-      ? `${renderCost(input)} | ${addonResults[hiddenIndex].line}`
-      : renderCost(input);
-  return [
-    renderHeader(input, options),
-    costRow,
-    ...(rate ? [rate] : []),
-    ...visibleRows
-  ];
+  const nativeRate = renderRateLimits(input.rate_limits || {}, nowMs);
+  const rate = nativeRate.join(" | ");
+  const addonResults = await renderAddonResults(options.addons ?? [], {
+    ...options,
+    nativeUsage: nativeUsageFor(input.rate_limits)
+  });
+  const primaryIndex = nativeRate.length
+    ? -1
+    : addonResults.findIndex((result) => result.primary);
+  const costRow = [
+    renderCost(input),
+    rate,
+    primaryIndex >= 0 ? addonResults[primaryIndex].line : ""
+  ]
+    .filter(Boolean)
+    .join(" | ");
+  const providerRows = packProviderRows(
+    addonResults
+      .filter((_, index) => index !== primaryIndex)
+      .map((result) => result.line)
+  );
+  return [renderHeader(input, options), costRow, ...providerRows];
 };
 
 const readSettings = async (filePath) => {
@@ -416,14 +478,6 @@ const readSettings = async (filePath) => {
   }
 };
 
-/**
- * Read Claude JSON from stdin, load addon settings, and write status rows.
- * Project settings take precedence when they contain an addon array; otherwise
- * the user's Claude settings are used. Unreadable settings fall back to global
- * settings or an empty configuration. Rows end with a newline; input, rendering,
- * and synchronous output failures are swallowed without diagnostic output.
- * @returns {Promise<void>} Resolves after the output attempt, including failure.
- */
 export const main = async () => {
   try {
     const input = JSON.parse(readFileSync(0, "utf-8"));
@@ -448,15 +502,23 @@ export const main = async () => {
         : globalSettingsDir
     });
     process.stdout.write(`${rows.join("\n")}\n`);
-  } catch {
-    // The command must remain silent when input or settings are unavailable.
+  } catch (error) {
+    if (process.env.STATUSLINE_DEBUG) {
+      console.error("[statusline] unavailable input or settings", error);
+    }
   }
 };
 
-if (
-  process.argv[1] &&
-  (await realpath(process.argv[1]).catch(() => "")) ===
-    (await realpath(new URL(import.meta.url)))
-) {
-  await main();
+if (process.argv[1]) {
+  let isEntrypoint = false;
+  try {
+    isEntrypoint =
+      realpathSync(path.resolve(process.argv[1])) ===
+      realpathSync(import.meta.filename);
+  } catch {
+    isEntrypoint = false;
+  }
+  if (isEntrypoint) {
+    await main();
+  }
 }

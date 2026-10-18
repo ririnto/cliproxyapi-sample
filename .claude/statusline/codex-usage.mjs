@@ -2,30 +2,18 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { withUsageCache } from "./usage-cache.mjs";
+
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const decodeResponse = async (response) => {
-  try {
-    const payload = await response.json();
-    return {
-      payload: isRecord(payload) ? payload : undefined,
-      status: response.status
-    };
-  } catch {
-    return { status: response.status };
-  }
-};
-
-const requestJson = async (url, headers, fetchFunction) => {
+const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3000);
-  let response;
-  let result;
   try {
-    response = await fetchFunction(url, {
+    const response = await fetchFunction(url, {
       headers,
       method: "GET",
       signal: controller.signal
@@ -35,22 +23,27 @@ const requestJson = async (url, headers, fetchFunction) => {
       typeof response.status !== "number" ||
       !Number.isFinite(response.status)
     ) {
-      result = { status: undefined };
-    } else if (response.status < 200 || response.status >= 300) {
-      result = { status: response.status };
-    } else {
-      result = await decodeResponse(response);
+      return { status: undefined };
+    }
+    if (response.status < 200 || response.status >= 300) {
+      return { status: response.status };
+    }
+    try {
+      const payload = await response.json();
+      if (!isRecord(payload) || payload.error || payload.success === false) {
+        onUsageError?.();
+        return { status: response.status };
+      }
+      return { payload, status: response.status };
+    } catch {
+      onUsageError?.();
+      return { status: response.status };
     }
   } catch {
-    result = { status: undefined };
+    return { status: undefined };
   } finally {
-    controller.abort();
     clearTimeout(timeout);
-    if (response?.body && !response.bodyUsed) {
-      await response.body.cancel().catch(() => null);
-    }
   }
-  return result;
 };
 
 const fetchFunction = (options) => options.fetch ?? globalThis.fetch;
@@ -64,9 +57,7 @@ const readJson = async (filePath) => {
     return isRecord(value) ? value : undefined;
   } catch (error) {
     if (process.env.STATUSLINE_DEBUG) {
-      console.error(
-        `[codex-usage] unreadable credentials (${error instanceof SyntaxError ? "invalid JSON" : "file read failed"})`
-      );
+      console.error(`[codex-usage] unreadable ${filePath}`, error);
     }
   }
 };
@@ -125,25 +116,17 @@ const chatgptAuth = async (options) => {
 };
 
 const windowLabel = (seconds, fallback) => {
-  let label;
   if (
-    typeof seconds === "number" &&
-    Number.isFinite(seconds) &&
-    seconds > 0 &&
-    seconds % 86_400 === 0
+    typeof seconds !== "number" ||
+    !Number.isFinite(seconds) ||
+    seconds <= 0
   ) {
-    label = `${seconds / 86_400}d`;
-  } else if (
-    typeof seconds === "number" &&
-    Number.isFinite(seconds) &&
-    seconds > 0 &&
-    seconds % 3600 === 0
-  ) {
-    label = `${seconds / 3600}h`;
-  } else {
-    label = fallback;
+    return fallback;
   }
-  return label;
+  if (seconds % 86_400 === 0) {
+    return `${seconds / 86_400}d`;
+  }
+  return seconds % 3600 === 0 ? `${seconds / 3600}h` : fallback;
 };
 
 const chatgptWindow = (window, fallback) =>
@@ -155,35 +138,98 @@ const chatgptWindow = (window, fallback) =>
       )
     : undefined;
 
-const chatgptGroup = (rateLimit, label) => {
-  const metrics = isRecord(rateLimit)
-    ? [
-        chatgptWindow(rateLimit.secondary_window, "5h"),
-        chatgptWindow(rateLimit.primary_window, "7d")
-      ].filter(Boolean)
-    : undefined;
-  const group = metrics?.length ? { metrics } : undefined;
-  if (group && label) {
-    group.label = label;
+const compactMetrics = (metrics, index = 0) => {
+  if (index >= metrics.length) {
+    return [];
   }
-  return group;
+  const rest = compactMetrics(metrics, index + 1);
+  return metrics[index] ? [metrics[index], ...rest] : rest;
+};
+
+const chatgptGroup = (rateLimit, label, credit) => {
+  const metrics = compactMetrics(
+    isRecord(rateLimit)
+      ? [
+          chatgptWindow(rateLimit.secondary_window, "5h"),
+          chatgptWindow(rateLimit.primary_window, "7d"),
+          credit
+        ]
+      : [credit]
+  );
+  return metrics.length ? { metrics, ...(label ? { label } : {}) } : undefined;
+};
+
+const chatgptCredit = (credits) => {
+  if (!isRecord(credits) || credits.has_credits !== true) {
+    return;
+  }
+  const { balance: creditBalance } = credits;
+  let balance = Number.NaN;
+  if (typeof creditBalance === "number") {
+    balance = creditBalance;
+  } else if (typeof creditBalance === "string" && creditBalance.trim()) {
+    balance = Number(creditBalance);
+  }
+  return isFiniteNumber(balance) && balance > 0
+    ? { label: "credit", remaining: balance, type: "credit" }
+    : undefined;
 };
 
 const chatgptPlanLabel = (planType) => {
   const known = ["free", "plus", "pro", "team", "enterprise", "edu"];
-  return typeof planType === "string" && known.includes(planType)
-    ? planType.charAt(0).toUpperCase() + planType.slice(1)
-    : "";
+  if (typeof planType !== "string" || !known.includes(planType)) {
+    return "";
+  }
+  return planType.charAt(0).toUpperCase() + planType.slice(1);
+};
+
+const usageSnapshot = async (selected, options) => {
+  const { payload } = await requestJson(
+    USAGE_URL,
+    {
+      Authorization: `Bearer ${selected.token}`,
+      "Content-Type": "application/json",
+      "User-Agent": "codex",
+      ...(selected.accountId
+        ? { "ChatGPT-Account-ID": selected.accountId }
+        : {})
+    },
+    fetchFunction(options),
+    options.onUsageError
+  );
+  const plan = chatgptPlanLabel(payload?.plan_type);
+  const groups = payload
+    ? [
+        chatgptGroup(
+          payload.rate_limit,
+          plan && `ChatGPT (${plan})`,
+          chatgptCredit(payload.credits)
+        ),
+        ...(Array.isArray(payload.additional_rate_limits)
+          ? payload.additional_rate_limits.filter(
+              (limit) =>
+                isRecord(limit) &&
+                typeof limit.limit_name === "string" &&
+                limit.limit_name
+            )
+          : []
+        ).map((limit) =>
+          chatgptGroup(
+            limit.rate_limit,
+            limit.limit_name === "gpt-5.3-codex-spark"
+              ? "Additional"
+              : limit.limit_name
+          )
+        )
+      ].filter(Boolean)
+    : [];
+  return groups.length ? { groups } : undefined;
 };
 
 /**
- * Read local Codex/OpenCode auth and fetch normalized ChatGPT usage windows.
- * An explicit credential overrides the discovered token. Network, HTTP, and
- * response-decoding failures return no snapshot; unreadable auth files are
- * ignored. A successful payload can contain an empty groups array.
- * @param {object} [options] Credential, auth home directory, and fetch override.
- * @returns {Promise<object|undefined>} Usage groups, or undefined when no token
- * or usable response is available.
+ * Fetch and normalize ChatGPT Codex usage with local auth fallback.
+ * @param {object} [options] Input value.
+ * @returns {Promise<object|undefined>} Result.
  */
 export const fetchUsage = async (options = {}) => {
   const auth = await chatgptAuth(options);
@@ -194,45 +240,12 @@ export const fetchUsage = async (options = {}) => {
   const selected = explicit
     ? { accountId: auth.accountId, token: explicit }
     : (auth.codex ?? auth.openCode);
-  let result;
-  if (selected?.token) {
-    const headers = {
-      Authorization: `Bearer ${selected.token}`,
-      "Content-Type": "application/json",
-      "User-Agent": "codex",
-      ...(selected.accountId
-        ? { "ChatGPT-Account-ID": selected.accountId }
-        : {})
-    };
-    const { payload } = await requestJson(
-      USAGE_URL,
-      headers,
-      fetchFunction(options)
-    );
-    const plan = chatgptPlanLabel(payload?.plan_type);
-    result = payload
-      ? {
-          groups: [
-            chatgptGroup(payload.rate_limit, plan && `ChatGPT (${plan})`),
-            ...(Array.isArray(payload.additional_rate_limits)
-              ? payload.additional_rate_limits.filter(
-                  (limit) =>
-                    isRecord(limit) &&
-                    typeof limit.limit_name === "string" &&
-                    limit.limit_name
-                )
-              : []
-            ).map((limit) =>
-              chatgptGroup(
-                limit.rate_limit,
-                limit.limit_name === "gpt-5.3-codex-spark"
-                  ? "Additional"
-                  : limit.limit_name
-              )
-            )
-          ].filter(Boolean)
-        }
-      : undefined;
-  }
-  return result;
+  return selected?.token
+    ? withUsageCache(
+        "chatgpt",
+        { accountId: selected.accountId, token: selected.token },
+        options,
+        (fetchOptions) => usageSnapshot(selected, fetchOptions)
+      )
+    : undefined;
 };
