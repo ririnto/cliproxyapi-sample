@@ -84,6 +84,7 @@
   "includeGitInstructions": false,
   "language": "Korean",
   "model": "opus",
+  "fallbackModel": ["glm-5.3", "claude-sonnet-5-5", "gpt-6.1-sol"],
   "modelSettings": {
     "claude-fable-5-1": {
       "autoCompactWindow": 305000,
