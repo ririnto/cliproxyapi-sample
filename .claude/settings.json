@@ -84,6 +84,7 @@
   "includeGitInstructions": false,
   "language": "Korean",
   "model": "opus",
+  "fallbackModel": ["glm-5.3", "claude-sonnet-5-5", "gpt-6.1-sol"],
   "modelSettings": {
     "claude-fable-5-1": {
       "autoCompactWindow": 305000,
@@ -136,12 +137,17 @@
     "deny": ["Agent(claude)"]
   },
   "promptSuggestionEnabled": false,
+  "sandbox": {
+    "allowUnsandboxedCommands": true
+  },
   "showClearContextOnPlanAccept": true,
   "showThinkingSummaries": true,
   "skillOverrides": {
     "code-review": "off"
   },
+  "skipAutoPermissionPrompt": true,
   "skipDangerousModePermissionPrompt": true,
+  "skipWebFetchPreflight": true,
   "statusLine": {
     "command": "node -e \"const path = require('node:path'); import(require('node:url').pathToFileURL(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(require('node:os').homedir(), '.claude'), 'statusline.mjs'))).then(module => module.main())\"",
     "type": "command"
