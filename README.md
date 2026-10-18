@@ -147,20 +147,28 @@ dest="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 mkdir -p "$dest/statusline"
 cp ".claude/statusline.mjs" "$dest/statusline.mjs"
 for module in ".claude/statusline/"*.mjs; do
+  case "$module" in
+    *.test.mjs) continue ;;
+  esac
   cp "$module" "$dest/statusline/$(basename "$module")"
 done
 ```
 
-The statusline command and global settings use a nonempty `CLAUDE_CONFIG_DIR`.
-Otherwise, they use `$HOME/.claude`.
-Project `.claude/settings.json` addon settings still take precedence.
-Credential file references resolve relative to the selected settings directory.
+런타임은 진입점과 `.claude/statusline/`의 여섯 실행 모듈이다.
+테스트 파일과 `README.md`는 설치 대상이 아니다.
+사용량 캐시와 수집기 동작은 [statusline README](.claude/statusline/README.md)를 참고한다.
+
+statusline 명령은 비어 있지 않은 `CLAUDE_CONFIG_DIR`를 사용한다.
+설정되지 않으면 `$HOME/.claude`를 사용한다.
+프로젝트 `.claude/settings.json`에 배열형 `statusLineAddon`이 있으면 프로젝트 설정이 우선한다.
+이때 애드온 스크립트와 자격 증명 파일 참조는 프로젝트 `.claude` 디렉터리를 기준으로 해석한다.
+그 외에는 선택된 설정 디렉터리를 기준으로 해석한다.
 
 `statusline.mjs`는 애드온 스크립트 경로를 다음 기준으로 해석한다.
 
 - 절대 경로는 그대로 사용한다.
 - `~`와 `~/...`는 홈 디렉터리로 확장한다.
-- 상대 경로는 실행 중인 `statusline.mjs` 위치를 기준으로 해석한다.
+- 상대 경로는 선택된 설정 디렉터리를 기준으로 해석한다.
 
 ## 환경 변수
 

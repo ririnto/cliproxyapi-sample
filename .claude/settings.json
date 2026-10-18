@@ -3,7 +3,6 @@
   "askUserQuestionTimeout": "60s",
   "autoCompactWindow": 305000,
   "disableClaudeAiConnectors": true,
-  "disallowedTools": ["AskUserQuestion", "EnterPlanMode"],
   "effortLevel": "high",
   "env": {
     "ANTHROPIC_API_KEY": "sk-dummy",
@@ -192,7 +191,7 @@
   },
   "permissions": {
     "defaultMode": "bypassPermissions",
-    "deny": ["Agent(claude)"]
+    "deny": ["Agent(claude)", "AskUserQuestion", "EnterPlanMode"]
   },
   "promptSuggestionEnabled": false,
   "sandbox": {
@@ -207,24 +206,25 @@
   "skipDangerousModePermissionPrompt": true,
   "skipWebFetchPreflight": true,
   "statusLine": {
-    "command": "node -e \"const path = require('node:path'); import(require('node:url').pathToFileURL(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(require('node:os').homedir(), '.claude'), 'statusline.mjs'))).then(module => module.main())\"",
+    "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.mjs\"",
     "type": "command"
   },
   "statusLineAddon": [
     {
+      "name": "Claude",
+      "primary": true,
+      "provider": "claude",
+      "script": "statusline/claude-usage.mjs"
+    },
+    {
       "credential": "{env:ZHIPU_API_KEY}",
-      "enabled": true,
       "hideName": true,
       "name": "GLM Coding Plan",
-      "provider": "zai",
-      "script": "statusline/glm-coding-plan.mjs",
-      "showAbove": 0
+      "script": "statusline/glm-coding-plan.mjs"
     },
     {
       "credential": "{env:MINIMAX_API_KEY}",
-      "enabled": true,
       "name": "MiniMax Token Plan",
-      "provider": "minimax",
       "script": "statusline/minimax-token-plan.mjs",
       "showAbove": {
         "5h": 5,
@@ -232,19 +232,12 @@
       }
     },
     {
-      "enabled": true,
       "name": "Chatgpt",
-      "provider": "chatgpt",
-      "script": "statusline/codex-usage.mjs",
-      "showAbove": 0
+      "script": "statusline/codex-usage.mjs"
     },
     {
-      "enabled": true,
-      "hideLabels": ["Completions"],
       "name": "Copilot",
-      "provider": "copilot",
-      "script": "statusline/copilot-usage.mjs",
-      "showAbove": 0
+      "script": "statusline/copilot-usage.mjs"
     }
   ],
   "teammateMode": "auto",
