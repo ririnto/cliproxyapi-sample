@@ -56,7 +56,7 @@ brew services restart cliproxyapi
 `.claude/settings.json`의 `modelPricing.overrides`는 모델별 백만 토큰당 USD 가격을 담는다.
 가격 데이터는 기존 `.claude/managed-settings.json` 템플릿에서 일반 프로젝트 설정으로 통합되었고 템플릿 파일은 삭제되었다.
 Claude Code 2.1.302는 사용자, 프로젝트, 로컬 설정과 `--settings`에서 `modelPricing`을 무시한다.
-따라서 이 값은 요청된 표시용 데이터이고 실제 비용 계산을 활성화하지 않는다.
+따라서 이 값은 이 범위에서 효과가 없는 요청된 구성 데이터다.
 가격을 적용하려면 지원되는 관리형 설정 범위에 배포해야 한다.
 macOS 시스템 관리형 설정 파일 경로는 `/Library/Application Support/ClaudeCode/managed-settings.json`이다.
 네이티브 네 가격 필드는 GPT의 272K 초과 컨텍스트 계층을 표현하거나 공급자 청구액을 증명하지 않는다.
