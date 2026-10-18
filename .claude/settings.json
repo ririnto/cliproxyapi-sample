@@ -220,11 +220,13 @@
       "credential": "{env:ZHIPU_API_KEY}",
       "hideName": true,
       "name": "GLM Coding Plan",
+      "provider": "zai",
       "script": "statusline/glm-coding-plan.mjs"
     },
     {
       "credential": "{env:MINIMAX_API_KEY}",
       "name": "MiniMax Token Plan",
+      "provider": "minimax",
       "script": "statusline/minimax-token-plan.mjs",
       "showAbove": {
         "5h": 5,
@@ -233,10 +235,12 @@
     },
     {
       "name": "Chatgpt",
+      "provider": "chatgpt",
       "script": "statusline/codex-usage.mjs"
     },
     {
       "name": "Copilot",
+      "provider": "copilot",
       "script": "statusline/copilot-usage.mjs"
     }
   ],
