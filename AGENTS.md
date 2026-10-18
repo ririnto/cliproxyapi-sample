@@ -9,7 +9,6 @@ Skip reads only when the complete selected instructions are already loaded.
 Keep operational policy in the matching installed host reference.
 That policy covers model choices, workloads, roles, and effort.
 Preserve explicit user choices and the Sample's product selectors.
-Preserve provider mappings.
 
 ## Dependencies And Checks
 

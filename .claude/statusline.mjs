@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { readFile, realpath } from "node:fs/promises";
+import { readFileSync, realpathSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -15,8 +15,8 @@ const PCT_GREEN = 70;
 const PCT_YELLOW = 90;
 
 const displayText = (value) =>
-  stripVTControlCharacters(String(value)).replaceAll(
-    /[\p{Cc}\u2028\u2029]+/gu,
+  stripVTControlCharacters(`${value}`).replaceAll(
+    /[\p{Cc}\u{2028}\u{2029}]+/gu,
     " "
   );
 
@@ -149,9 +149,7 @@ const gitBranch = (cwd) => {
     return execFileSync("git", ["branch", "--show-current"], {
       cwd,
       encoding: "utf-8",
-      killSignal: "SIGKILL",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 3000
+      stdio: ["ignore", "pipe", "ignore"]
     }).trim();
   } catch {
     return "";
@@ -401,8 +399,8 @@ const projectDisplay = (workspace) => {
 
 const renderHeader = (input, options) => {
   const model = input.model || {};
-  const modelName = displayText(model.display_name || "");
-  const effort = displayText(input.effort?.level || model.effort || "");
+  const modelName = model.display_name || "";
+  const effort = input.effort?.level || model.effort || "";
   const workspace = input.workspace || {};
   const branch =
     options.branch === undefined
@@ -412,7 +410,7 @@ const renderHeader = (input, options) => {
   const percentage = Math.trunc(Number(context.used_percentage || 0));
   const size = Math.trunc(Number(context.context_window_size || 0));
   return [
-    `[36m[${modelName}${effort ? ` (${effort})` : ""}][0m [1m${displayText(projectDisplay(workspace))}[0m`,
+    `[36m[${displayText(modelName)}${effort ? ` (${displayText(effort)})` : ""}][0m [1m${displayText(projectDisplay(workspace))}[0m`,
     ...(branch ? [`[35m${displayText(branch)}[0m`] : []),
     `${barColor(percentage)}${usageBar(percentage)}[0m ${percentage}%${size ? ` (${numberText(size)})` : ""}`
   ].join(" | ");
@@ -511,10 +509,16 @@ export const main = async () => {
   }
 };
 
-if (
-  process.argv[1] &&
-  (await realpath(process.argv[1]).catch(() => "")) ===
-    (await realpath(new URL(import.meta.url)))
-) {
-  await main();
+if (process.argv[1]) {
+  let isEntrypoint = false;
+  try {
+    isEntrypoint =
+      realpathSync(path.resolve(process.argv[1])) ===
+      realpathSync(import.meta.filename);
+  } catch {
+    isEntrypoint = false;
+  }
+  if (isEntrypoint) {
+    await main();
+  }
 }

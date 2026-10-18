@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -636,6 +642,93 @@ test("no hideLabels keeps all metrics visible", async () => {
   assert.match(line, /Premium: /u);
 });
 
+test("raw labels remain available for hideLabels and showAbove", async () => {
+  const { renderSnapshot } = await import("./statusline.mjs");
+  const groupLabel = "Group\nRAW\u001B[31m";
+  const metricLabel = "Metric\nRAW\u001B[31m";
+  const rawSnapshot = {
+    groups: [
+      {
+        label: groupLabel,
+        metrics: [{ label: metricLabel, percentage: 10 }]
+      }
+    ]
+  };
+  assert.equal(renderSnapshot({ hideLabels: [metricLabel] }, rawSnapshot), "");
+  assert.equal(
+    renderSnapshot({ showAbove: { [metricLabel]: 11 } }, rawSnapshot),
+    ""
+  );
+  assert.equal(
+    renderSnapshot({ showAbove: { [groupLabel]: 11 } }, rawSnapshot),
+    ""
+  );
+  assert.equal(rawSnapshot.groups[0].label, groupLabel);
+  assert.equal(rawSnapshot.groups[0].metrics[0].label, metricLabel);
+});
+
+test("external addon names and metric values stay on one plain-text row", async () => {
+  const { renderStatusline } = await import("./statusline.mjs");
+  const rows = await renderStatusline(
+    {},
+    {
+      addons: [{ name: "Credit\nFAKE GROUP\u001B[31m", script: "credit.mjs" }],
+      branch: "",
+      importModule: () => ({
+        fetchUsage: () => ({
+          groups: [
+            {
+              metrics: [
+                {
+                  currency: "EUR",
+                  label: "Remaining",
+                  remaining:
+                    "10\nFAKE ROW\u001B[31m\u2028PARAGRAPH\u2029END\u0085C1",
+                  type: "credit"
+                }
+              ]
+            }
+          ]
+        })
+      })
+    }
+  );
+  const output = rows.join("\n");
+  assert.equal(output.split("\n").length, 3);
+  assert.ok(
+    plainText(output).includes(
+      "Credit FAKE GROUP | Remaining: 10 FAKE ROW PARAGRAPH END C1"
+    )
+  );
+  assert.equal(output.includes(RED_TEXT), false);
+  assert.ok(output.includes(`${BOLD}Credit FAKE GROUP${RESET_CODE}`));
+});
+
+test("external header strings stay on one plain-text row", async () => {
+  const { renderStatusline } = await import("./statusline.mjs");
+  const rows = await renderStatusline(
+    {
+      effort: { level: "High\r\nFAKE ROW\u001B[31m" },
+      model: { display_name: "Model\nFAKE ROW\u001B[31m" },
+      workspace: {
+        current_dir: "/workspace/current\nFAKE ROW",
+        project_dir: "/workspace/project"
+      }
+    },
+    { branch: "branch\nFAKE ROW\u001B[31m" }
+  );
+  const output = rows.join("\n");
+  assert.equal(output.split("\n").length, 2);
+  assert.ok(
+    plainText(rows[0]).includes(
+      "[Model FAKE ROW (High FAKE ROW)] project(current FAKE ROW) | branch FAKE ROW"
+    )
+  );
+  assert.equal(output.includes(RED_TEXT), false);
+  assert.ok(output.includes("\u001B[36m"));
+  assert.ok(output.includes("\u001B[35m"));
+});
+
 test("resolves large credential reference lists without stack overflow", async () => {
   const { renderAddons } = await import("./statusline.mjs");
   const credential = "{file:}".repeat(12_000);
@@ -662,6 +755,8 @@ test("public CLI resolves addon settings from the configured directory", async (
   const projectSettingsDir = path.join(projectDir, ".claude");
   const emptyProjectDir = path.join(fixtureDir, "empty-project");
   const emptyProjectSettingsDir = path.join(emptyProjectDir, ".claude");
+  const displayProjectDir = path.join(fixtureDir, "display-project");
+  const displayProjectSettingsDir = path.join(displayProjectDir, ".claude");
   const addonScript = path.join(fixtureDir, "addon.mjs");
   const configuredAddon = {
     credential: "{file:credential.txt}",
@@ -672,9 +767,20 @@ test("public CLI resolves addon settings from the configured directory", async (
   mkdirSync(fallbackProjectDir, { recursive: true });
   mkdirSync(projectSettingsDir, { recursive: true });
   mkdirSync(emptyProjectSettingsDir, { recursive: true });
+  mkdirSync(displayProjectSettingsDir, { recursive: true });
   writeFileSync(
     addonScript,
-    `export const fetchUsage = async ({ credential }) => ({ groups: [{ label: credential, metrics: [{ label: "Probe", percentage: 10 }] }] });\n`
+    `export const fetchUsage = async ({ credential }) => {
+      const [groupLabel, metricLabel = "Probe"] = credential.split("|");
+      return {
+        groups: [
+          {
+            label: groupLabel,
+            metrics: [{ label: metricLabel, percentage: 10 }]
+          }
+        ]
+      };
+    };\n`
   );
   writeFileSync(
     path.join(homeSettingsDir, "settings.json"),
@@ -698,11 +804,30 @@ test("public CLI resolves addon settings from the configured directory", async (
     path.join(emptyProjectSettingsDir, "settings.json"),
     JSON.stringify({ statusLineAddon: [] })
   );
+  writeFileSync(
+    path.join(displayProjectSettingsDir, "settings.json"),
+    JSON.stringify({ statusLineAddon: [configuredAddon] })
+  );
+  writeFileSync(
+    path.join(displayProjectSettingsDir, "credential.txt"),
+    "EVIL\nFAKE ROW\u001B[31m|5h\nSPOOF"
+  );
   const statuslinePath = fileURLToPath(
     new URL("statusline.mjs", import.meta.url)
   );
-  const run = (workspaceProjectDir, environment = {}) => {
-    const result = spawnSync(process.execPath, [statuslinePath], {
+  const scriptSymlinkPath = path.join(fixtureDir, "statusline-link.mjs");
+  const installationDir = path.join(fixtureDir, "installation");
+  const symlinkedConfigDir = path.join(fixtureDir, "installation-link");
+  mkdirSync(installationDir);
+  symlinkSync(statuslinePath, scriptSymlinkPath);
+  symlinkSync(statuslinePath, path.join(installationDir, "statusline.mjs"));
+  symlinkSync(installationDir, symlinkedConfigDir, "dir");
+  const run = (
+    workspaceProjectDir,
+    environment = {},
+    commandPath = statuslinePath
+  ) => {
+    const result = spawnSync(process.execPath, [commandPath], {
       encoding: "utf-8",
       env: { PATH: process.env.PATH ?? "", ...environment },
       input: JSON.stringify({
@@ -714,12 +839,14 @@ test("public CLI resolves addon settings from the configured directory", async (
     });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stderr, "");
-    return plainText(result.stdout);
+    return result.stdout;
   };
+  const runPlainText = (workspaceProjectDir, environment = {}) =>
+    plainText(run(workspaceProjectDir, environment));
   await t.test(
     "uses nonempty CLAUDE_CONFIG_DIR when project settings omit addons",
     () => {
-      const output = run(fallbackProjectDir, {
+      const output = runPlainText(fallbackProjectDir, {
         CLAUDE_CONFIG_DIR: configDir,
         HOME: homeDir
       });
@@ -728,7 +855,7 @@ test("public CLI resolves addon settings from the configured directory", async (
     }
   );
   await t.test("empty CLAUDE_CONFIG_DIR falls back to HOME", () => {
-    const output = run(fallbackProjectDir, {
+    const output = runPlainText(fallbackProjectDir, {
       CLAUDE_CONFIG_DIR: "",
       HOME: homeDir
     });
@@ -736,14 +863,14 @@ test("public CLI resolves addon settings from the configured directory", async (
     assert.doesNotMatch(output, /CustomFixture/u);
   });
   await t.test("unset CLAUDE_CONFIG_DIR falls back to HOME", () => {
-    const output = run(fallbackProjectDir, { HOME: homeDir });
+    const output = runPlainText(fallbackProjectDir, { HOME: homeDir });
     assert.match(output, /HomeFixture \| Probe: 10%/u);
     assert.doesNotMatch(output, /CustomFixture/u);
   });
   await t.test(
     "project addon settings take priority over global settings",
     () => {
-      const output = run(projectDir, {
+      const output = runPlainText(projectDir, {
         CLAUDE_CONFIG_DIR: configDir,
         HOME: homeDir
       });
@@ -752,14 +879,157 @@ test("public CLI resolves addon settings from the configured directory", async (
     }
   );
   await t.test("an empty project addon array disables global fallback", () => {
-    const output = run(emptyProjectDir, {
+    const output = runPlainText(emptyProjectDir, {
       CLAUDE_CONFIG_DIR: configDir,
       HOME: homeDir
     });
     assert.doesNotMatch(output, /HomeFixture|CustomFixture/u);
   });
   await t.test("project addon settings work when HOME is unset", () => {
-    const output = run(projectDir, { CLAUDE_CONFIG_DIR: configDir });
+    const output = runPlainText(projectDir, { CLAUDE_CONFIG_DIR: configDir });
     assert.match(output, /ProjectFixture \| Probe: 10%/u);
   });
+  await t.test(
+    "script symlink invocation renders configured provider output",
+    () => {
+      const output = run(
+        fallbackProjectDir,
+        { HOME: homeDir },
+        scriptSymlinkPath
+      );
+      assert.equal(output.trimEnd().split("\n").length, 3);
+      assert.ok(plainText(output).includes("HomeFixture | Probe: 10%"));
+    }
+  );
+  await t.test(
+    "directory symlink invocation renders two rows through the configured command",
+    () => {
+      const output = run(
+        fallbackProjectDir,
+        { CLAUDE_CONFIG_DIR: symlinkedConfigDir, HOME: homeDir },
+        path.join(symlinkedConfigDir, "statusline.mjs")
+      );
+      assert.equal(output.trimEnd().split("\n").length, 2);
+    }
+  );
+  await t.test(
+    "directory symlink invocation renders with preserve-symlinks-main",
+    () => {
+      const output = run(
+        fallbackProjectDir,
+        {
+          CLAUDE_CONFIG_DIR: symlinkedConfigDir,
+          HOME: homeDir,
+          NODE_OPTIONS: "--preserve-symlinks-main"
+        },
+        path.join(symlinkedConfigDir, "statusline.mjs")
+      );
+      assert.equal(output.trimEnd().split("\n").length, 2);
+    }
+  );
+  await t.test("supplied labels stay in one plain-text display row", () => {
+    const output = run(displayProjectDir, { HOME: homeDir });
+    const rows = output.trimEnd().split("\n");
+    assert.equal(rows.length, 3);
+    assert.match(plainText(output), /EVIL FAKE ROW \| 5h SPOOF: 10%/u);
+    assert.ok(output.includes(`${BOLD}EVIL FAKE ROW${RESET_CODE}`));
+    assert.ok(output.includes("\u001B[32m"));
+    assert.equal(output.includes(RED_TEXT), false);
+  });
+  await t.test("newline workspace basename stays within its header row", () => {
+    const projectWithNewline = path.join(fixtureDir, "project\nname");
+    mkdirSync(projectWithNewline);
+    const output = run(projectWithNewline, {
+      CLAUDE_CONFIG_DIR: path.join(fixtureDir, "empty-config"),
+      HOME: homeDir
+    });
+    assert.equal(output.trimEnd().split("\n").length, 2);
+    assert.match(plainText(output), /project name/u);
+  });
+  await t.test("malformed input through a symlink remains silent", () => {
+    const result = spawnSync(process.execPath, [scriptSymlinkPath], {
+      encoding: "utf-8",
+      env: { HOME: homeDir, PATH: process.env.PATH ?? "" },
+      input: "{"
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  });
+});
+
+test("module imports do not render for absent or unrelated argv", (t) => {
+  const fixtureDir = mkdtempSync(path.join(tmpdir(), "statusline-import-"));
+  t.after(() => rmSync(fixtureDir, { force: true, recursive: true }));
+  const moduleUrl = new URL("statusline.mjs", import.meta.url).href;
+  const importSource = `await import(${JSON.stringify(moduleUrl)});`;
+  const unrelatedPath = path.join(fixtureDir, "unrelated.mjs");
+  writeFileSync(unrelatedPath, "");
+  const argumentLists = [
+    [],
+    [unrelatedPath],
+    [path.join(fixtureDir, "missing.mjs")]
+  ];
+  for (const args of argumentLists) {
+    const result = spawnSync(
+      process.execPath,
+      ["--input-type=module", "-e", importSource, ...args],
+      {
+        encoding: "utf-8",
+        env: { PATH: process.env.PATH ?? "" }
+      }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "");
+  }
+});
+
+test("Codex additional-limit labels stay inside the display row", async (t) => {
+  const home = mkdtempSync(path.join(tmpdir(), "statusline-codex-"));
+  t.after(() => rmSync(home, { force: true, recursive: true }));
+  const codexDirectory = path.join(home, ".codex");
+  mkdirSync(codexDirectory);
+  writeFileSync(
+    path.join(codexDirectory, "auth.json"),
+    JSON.stringify({ tokens: { access_token: "fixture-token" } })
+  );
+  const { fetchUsage } = await import("./statusline/codex-usage.mjs");
+  const { renderStatusline } = await import("./statusline.mjs");
+  const codexSnapshot = await fetchUsage({
+    cache: false,
+    fetch: () => ({
+      json: () => ({
+        additional_rate_limits: [
+          {
+            limit_name: "Additional\nFAKE ROW\u001B[31m",
+            rate_limit: {
+              secondary_window: {
+                limit_window_seconds: 18_000,
+                used_percent: 10
+              }
+            }
+          }
+        ]
+      }),
+      status: 200
+    }),
+    home
+  });
+  assert.equal(
+    codexSnapshot?.groups[0].label,
+    "Additional\nFAKE ROW\u001B[31m"
+  );
+  const rows = await renderStatusline(
+    {},
+    {
+      addons: [{ name: "Codex", script: "./codex-usage.mjs" }],
+      branch: "",
+      importModule: () => ({ fetchUsage: () => codexSnapshot })
+    }
+  );
+  const output = rows.join("\n");
+  assert.equal(output.trimEnd().split("\n").length, 3);
+  assert.match(plainText(output), /Additional FAKE ROW \| 5h: 10%/u);
+  assert.equal(output.includes(RED_TEXT), false);
 });

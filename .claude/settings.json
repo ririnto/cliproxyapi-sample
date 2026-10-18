@@ -1,9 +1,36 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "askUserQuestionTimeout": "60s",
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "autoCompactWindow": 305000,
+  "cleanupPeriodDays": 7,
   "disableClaudeAiConnectors": true,
   "effortLevel": "high",
+  "enableWorkflows": true,
+  "enabledPlugins": {
+    "code-simplifier@claude-plugins-official": true,
+    "codegraph@sinon": true,
+    "codex-app-server@sinon": false,
+    "context7@claude-plugins-official": true,
+    "ddgs@sinon": true,
+    "discernment-nudge@anthropic-agent-skills": true,
+    "feature-dev@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "github@claude-plugins-official": true,
+    "gopls-lsp@claude-plugins-official": true,
+    "gpt-agents@sinon": false,
+    "i-have-adhd@i-have-adhd": true,
+    "kotlin-lsp@claude-plugins-official": true,
+    "playwright@claude-plugins-official": false,
+    "plugin-dev@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true,
+    "swift-lsp@claude-plugins-official": false,
+    "typescript-lsp@claude-plugins-official": true,
+    "workgraph@sinon": true
+  },
   "env": {
     "ANTHROPIC_API_KEY": "sk-dummy",
     "ANTHROPIC_BASE_URL": "http://localhost:8317",
@@ -33,6 +60,7 @@
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
     "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING": "1",
     "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "CLAUDE_CODE_GATEWAY_HINT_HEADERS": "true",
     "CLAUDE_CODE_GOAL_CHECKIN_MINUTES": "4",
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "400000",
     "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "270000",
@@ -80,12 +108,10 @@
       }
     }
   },
+  "fallbackModel": ["glm-5.3", "claude-sonnet-5-5", "gpt-6.1-sol"],
   "feedbackSurveyRate": 0,
-  "includeCoAuthoredBy": false,
   "includeGitInstructions": false,
   "language": "Korean",
-  "model": "opus",
-  "fallbackModel": ["glm-5.3", "claude-sonnet-5-5", "gpt-6.1-sol"],
   "modelPricing": {
     "overrides": {
       "gemini-3.8-flash": {
@@ -194,10 +220,12 @@
     "deny": ["Agent(claude)", "AskUserQuestion", "EnterPlanMode"]
   },
   "promptSuggestionEnabled": false,
+  "respondToBashCommands": false,
   "sandbox": {
     "allowUnsandboxedCommands": true
   },
   "showClearContextOnPlanAccept": true,
+  "showMessageTimestamps": true,
   "showThinkingSummaries": true,
   "skillOverrides": {
     "code-review": "off"
@@ -220,13 +248,11 @@
       "credential": "{env:ZHIPU_API_KEY}",
       "hideName": true,
       "name": "GLM Coding Plan",
-      "provider": "zai",
       "script": "statusline/glm-coding-plan.mjs"
     },
     {
       "credential": "{env:MINIMAX_API_KEY}",
       "name": "MiniMax Token Plan",
-      "provider": "minimax",
       "script": "statusline/minimax-token-plan.mjs",
       "showAbove": {
         "5h": 5,
@@ -235,19 +261,19 @@
     },
     {
       "name": "Chatgpt",
-      "provider": "chatgpt",
       "script": "statusline/codex-usage.mjs"
     },
     {
       "name": "Copilot",
-      "provider": "copilot",
       "script": "statusline/copilot-usage.mjs"
     }
   ],
   "teammateMode": "auto",
   "theme": "auto",
   "totalTokensReminder": "countdown",
+  "tui": "fullscreen",
   "verbose": true,
+  "viewMode": "focus",
   "worktree": {
     "baseRef": "head"
   }

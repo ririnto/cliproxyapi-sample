@@ -38,7 +38,7 @@ brew services restart cliproxyapi
 
 ### Claude Code
 
-`.claude/settings.json`에서 기본 모델은 `opus`로 선택한다.
+`.claude/settings.json`은 `model` 키를 지정하지 않는다.
 
 | 선택자 | 대상 |
 | --- | --- |
@@ -48,7 +48,6 @@ brew services restart cliproxyapi
 | `ANTHROPIC_DEFAULT_SONNET_MODEL` | `gpt-6-luna` |
 
 `ANTHROPIC_CUSTOM_MODEL_OPTION`은 `glm-5.3`을 모델 선택기에 추가한다.
-기본 모델은 `opus`로 유지한다.
 모델별 `modelSettings.autoCompactWindow` 설정에는 Claude Code v2.1.288 이상이 필요하다.
 
 ### Model pricing
@@ -81,8 +80,12 @@ Gemini 두 모델의 `modelSettings`는 `effortLevel` `medium`과 `maxEffortLeve
 자세한 내용은 [Gemini thinking reference][gemini-thinking]를 참조한다.
 이 설정은 출처가 지원하는 기본값과 상한이지 측정된 최적값이 아니다.
 `autoCompactWindow` 305000은 인식된 모델 용량으로 클램프된 뒤 안전 버퍼가 적용된다.
-이 두 Gemini ID는 설치된 내장 카탈로그에 없어 기본 용량 200000으로 처리될 수 있다.
-공급자 메타데이터가 실제 용량을 알려 주면 그 값이 우선한다.
+Claude Code 2.1.302는 인식되지 않는 커스텀 모델 ID의 용량을 순서대로 가정한다.
+먼저 검증된 내장 카탈로그 매핑이 있으면 그 용량을 사용한다.
+매핑이 없으면 양수 `CLAUDE_CODE_MAX_CONTEXT_TOKENS` 400000을 가정 용량으로 쓴다.
+이 값이 없어야 기본 용량 200000 폴백이 적용된다.
+가정 용량은 공급자가 실제로 제공하는 용량을 증명하지 않는다.
+임의의 공급자 응답 메타데이터가 이 순서를 덮어쓰지 않는다.
 따라서 305000 토큰 컴팩션 트리거는 보장되지 않는다.
 
 [gemini-thinking]:
@@ -96,7 +99,7 @@ In Claude Code, read its bundled `references/claude.md`.
 Skip reads only when the complete selected instructions are already loaded.
 Instruction reads do not import config or activate plugins.
 Keep model choices, workload tiers, roles, and effort policy in that reference.
-The Sample preserves product selectors and provider mappings.
+The Sample preserves product selectors.
 Supported-capability metadata uses the explicitly requested conservative declarations.
 Omitted operational overrides use native host behavior.
 Explicit user choices still apply.
