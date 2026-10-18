@@ -62,8 +62,31 @@ macOS 시스템 관리형 설정 파일 경로는 `/Library/Application Support/
 네이티브 네 가격 필드는 GPT의 272K 초과 컨텍스트 계층을 표현하거나 공급자 청구액을 증명하지 않는다.
 자세한 내용은 [Claude Code settings reference][managed-pricing]를 참조한다.
 
+Gemini 두 모델의 가격은 [Copilot models and pricing][copilot-pricing]에 게시된 현재 프로모션 표시 가격이다.
+`gemini-3.8-flash`는 입력 0.75, 캐시 입력 0.075, 출력 3.75이고 2026-12-31까지 프로모션이다.
+`gemini-4-argon`은 입력 2.00, 캐시 입력 0.10, 출력 10.00이고 2026-12-01까지 프로모션이다.
+이 가격은 이후 기간의 보장 가격이나 Google 직접 API 가격이 아니다.
+Google 표에는 별도의 캐시 쓰기 가격이 없어 두 모델의 `cacheWrite` 0은 별도 과금 항목이 없음을 나타낸다.
+이 0은 공개된 Google 캐시 쓰기 가격이나 실제 게이트웨이 과금 측정값이 아니다.
+
 [managed-pricing]:
   https://code.claude.com/docs/en/settings-reference#modelpricing
+[copilot-pricing]:
+  https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing
+
+### Gemini effort and compaction
+
+Gemini 두 모델의 `modelSettings`는 `effortLevel` `medium`과 `maxEffortLevel` `high`를 사용한다.
+공식 지원 사고 수준은 low, medium, high이고 기본값은 medium이다.
+자세한 내용은 [Gemini thinking reference][gemini-thinking]를 참조한다.
+이 설정은 출처가 지원하는 기본값과 상한이지 측정된 최적값이 아니다.
+`autoCompactWindow` 305000은 인식된 모델 용량으로 클램프된 뒤 안전 버퍼가 적용된다.
+이 두 Gemini ID는 설치된 내장 카탈로그에 없어 기본 용량 200000으로 처리될 수 있다.
+공급자 메타데이터가 실제 용량을 알려 주면 그 값이 우선한다.
+따라서 305000 토큰 컴팩션 트리거는 보장되지 않는다.
+
+[gemini-thinking]:
+  https://ai.google.dev/gemini-api/docs/thinking
 
 ### Agent guidance
 

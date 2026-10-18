@@ -87,6 +87,18 @@
   "fallbackModel": ["glm-5.3", "claude-sonnet-5-5", "gpt-6.1-sol"],
   "modelPricing": {
     "overrides": {
+      "gemini-3.8-flash": {
+        "cacheRead": 0.075,
+        "cacheWrite": 0,
+        "input": 0.75,
+        "output": 3.75
+      },
+      "gemini-4-argon": {
+        "cacheRead": 0.1,
+        "cacheWrite": 0,
+        "input": 2,
+        "output": 10
+      },
       "glm-5.3": {
         "cacheRead": 0.26,
         "cacheWrite": 0,
@@ -136,6 +148,16 @@
       "maxEffortLevel": "high"
     },
     "claude-sonnet-5-5": {
+      "autoCompactWindow": 305000,
+      "effortLevel": "medium",
+      "maxEffortLevel": "high"
+    },
+    "gemini-3.8-flash": {
+      "autoCompactWindow": 305000,
+      "effortLevel": "medium",
+      "maxEffortLevel": "high"
+    },
+    "gemini-4-argon": {
       "autoCompactWindow": 305000,
       "effortLevel": "medium",
       "maxEffortLevel": "high"
