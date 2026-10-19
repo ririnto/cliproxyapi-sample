@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { fetchUsage } from "./glm-coding-plan.mjs";
 
@@ -155,5 +156,54 @@ try {
 } finally {
   await rm(cacheDir, { force: true, recursive: true });
 }
+
+let cancellations = 0;
+let requestSignal;
+const httpErrorResponse = new Response(
+  new ReadableStream({
+    cancel() {
+      cancellations += 1;
+    }
+  }),
+  { status: 503 }
+);
+const unavailable = await fetchUsage({
+  cache: false,
+  credential: "test-key",
+  fetch: (_url, options) => {
+    requestSignal = options.signal;
+    return httpErrorResponse;
+  }
+});
+assert.equal(unavailable, undefined);
+assert.equal(cancellations, 1);
+assert.equal(requestSignal.aborted, true);
+assert.equal(httpErrorResponse.bodyUsed, true);
+
+let stalledCancellations = 0;
+let stalledSignal;
+const stalled = await Promise.race([
+  fetchUsage({
+    cache: false,
+    credential: "test-key",
+    fetch: (_url, options) => {
+      stalledSignal = options.signal;
+      return new Response(
+        new ReadableStream({
+          cancel() {
+            stalledCancellations += 1;
+            return Promise.withResolvers().promise;
+          }
+        }),
+        { status: 503 }
+      );
+    }
+  }),
+  delay(3500, "stalled")
+]);
+assert.notEqual(stalled, "stalled");
+assert.equal(stalled, undefined);
+assert.equal(stalledCancellations, 1);
+assert.equal(stalledSignal.aborted, true);
 
 console.log("ok");

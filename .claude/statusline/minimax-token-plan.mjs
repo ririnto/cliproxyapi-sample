@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+
 import { withUsageCache } from "./usage-cache.mjs";
 
 const USAGE_URL =
@@ -23,6 +25,16 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
       return { status: undefined };
     }
     if (response.status < 200 || response.status >= 300) {
+      try {
+        await Promise.race([
+          response.body?.cancel(),
+          delay(3000, undefined, { signal: controller.signal })
+        ]);
+      } catch {
+        controller.abort();
+        return { status: response.status };
+      }
+      controller.abort();
       return { status: response.status };
     }
     try {

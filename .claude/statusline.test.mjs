@@ -985,6 +985,132 @@ test("module imports do not render for absent or unrelated argv", (t) => {
   }
 });
 
+test("collectors handle HTTP errors without Promise.withResolvers", (t) => {
+  const home = mkdtempSync(path.join(tmpdir(), "statusline-runtime-"));
+  t.after(() => rmSync(home, { force: true, recursive: true }));
+  const codexDirectory = path.join(home, ".codex");
+  mkdirSync(codexDirectory);
+  writeFileSync(
+    path.join(codexDirectory, "auth.json"),
+    JSON.stringify({ tokens: { access_token: "synthetic-token" } })
+  );
+  const script = `
+    import { setTimeout as delay } from "node:timers/promises";
+    const cancellationController = new AbortController();
+    const pendingCancellation = delay(60_000, undefined, {
+      signal: cancellationController.signal
+    });
+    delete Promise.withResolvers;
+    const [
+      { fetchUsage: fetchCodex },
+      { fetchUsage: fetchCopilot },
+      { fetchUsage: fetchGlm },
+      { fetchUsage: fetchMinimax }
+    ] = await Promise.all([
+      import(${JSON.stringify(new URL("statusline/codex-usage.mjs", import.meta.url).href)}),
+      import(${JSON.stringify(new URL("statusline/copilot-usage.mjs", import.meta.url).href)}),
+      import(${JSON.stringify(new URL("statusline/glm-coding-plan.mjs", import.meta.url).href)}),
+      import(${JSON.stringify(new URL("statusline/minimax-token-plan.mjs", import.meta.url).href)})
+    ]);
+    const requests = {};
+    const errorFetch = (name, status) => (_url, options) => {
+      const request = { cancellations: 0, signal: options.signal };
+      request.response = new Response(
+        new ReadableStream({
+          cancel() {
+            request.cancellations += 1;
+            return pendingCancellation;
+          }
+        }),
+        { status }
+      );
+      requests[name] = request;
+      return request.response;
+    };
+    const copilotAuthorization = [];
+    let errorHookCalls = 0;
+    const copilotFetch = (_url, options) => {
+      copilotAuthorization.push(options.headers.Authorization);
+      return copilotAuthorization.length === 1
+        ? errorFetch("copilot", 401)(_url, options)
+        : new Response(
+            JSON.stringify({
+              quota_snapshots: {
+                premium_interactions: { entitlement: 100, quota_remaining: 70 }
+              }
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+    };
+    const [codex, copilot, glm, minimax] = await Promise.all([
+      fetchCodex({
+        cache: false,
+        fetch: errorFetch("codex", 503),
+        home: process.env.HOME
+      }),
+      fetchCopilot({
+        cache: false,
+        credential: "first-token",
+        environment: { COPILOT_GITHUB_TOKEN: "fallback-token" },
+        fetch: copilotFetch,
+        home: process.env.HOME,
+        onUsageError: () => (errorHookCalls += 1),
+        platform: "linux"
+      }),
+      fetchGlm({
+        cache: false,
+        credential: "synthetic-glm-token",
+        fetch: errorFetch("glm", 503)
+      }),
+      fetchMinimax({
+        cache: false,
+        credential: "synthetic-minimax-token",
+        fetch: errorFetch("minimax", 503)
+      })
+    ]);
+    cancellationController.abort();
+    process.stdout.write(JSON.stringify({
+      copilotAuthorizationUsedFallback: copilotAuthorization[1] === "token fallback-token",
+      copilotCalls: copilotAuthorization.length,
+      copilotUsed: copilot?.groups[0].metrics[0].used,
+      errorHookCalls,
+      missingSnapshots: [codex, copilot, glm, minimax].map((snapshot) => snapshot === undefined),
+      requests: Object.fromEntries(Object.entries(requests).map(([name, request]) => [
+        name,
+        {
+          aborted: request.signal.aborted,
+          bodyUsed: request.response.bodyUsed,
+          cancellations: request.cancellations
+        }
+      ]))
+    }));
+  `;
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    {
+      encoding: "utf-8",
+      env: { HOME: home },
+      timeout: 10_000
+    }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  assert.deepEqual(JSON.parse(result.stdout), {
+    copilotAuthorizationUsedFallback: true,
+    copilotCalls: 2,
+    copilotUsed: 30,
+    errorHookCalls: 1,
+    missingSnapshots: [true, false, true, true],
+    requests: {
+      codex: { aborted: true, bodyUsed: true, cancellations: 1 },
+      copilot: { aborted: true, bodyUsed: true, cancellations: 1 },
+      glm: { aborted: true, bodyUsed: true, cancellations: 1 },
+      minimax: { aborted: true, bodyUsed: true, cancellations: 1 }
+    }
+  });
+});
+
 test("Codex additional-limit labels stay inside the display row", async (t) => {
   const home = mkdtempSync(path.join(tmpdir(), "statusline-codex-"));
   t.after(() => rmSync(home, { force: true, recursive: true }));

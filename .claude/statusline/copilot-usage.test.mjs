@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { fetchUsage } from "./copilot-usage.mjs";
 
@@ -488,6 +490,292 @@ test("falls back to file credentials when Keychain lookup fails", async () => {
       ["security", "find-generic-password", "-s", "copilot-cli", "-w"]
     ]);
     assert.equal(snapshot?.groups[0].metrics[0].used, 0);
+  } finally {
+    await rm(home, { force: true, recursive: true });
+  }
+});
+
+test("disposes HTTP error response bodies before returning", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
+  let cancellations = 0;
+  let requestSignal;
+  const errorResponse = new Response(
+    new ReadableStream({
+      cancel() {
+        cancellations += 1;
+      }
+    }),
+    { status: 503 }
+  );
+  try {
+    await Promise.all(
+      [
+        [".copilot", "config.json"],
+        [".config", "github-copilot", "oauth.json"],
+        [".local", "share", "opencode", "auth.json"],
+        [".config", "gh", "hosts.json"]
+      ].map(async (parts) => {
+        const filePath = path.join(home, ...parts);
+        await mkdir(path.dirname(filePath), { recursive: true });
+        await writeFile(filePath, "{}");
+      })
+    );
+    const result = await fetchUsage({
+      cache: false,
+      credential: "synthetic-copilot-token",
+      environment: {
+        COPILOT_GITHUB_TOKEN: "",
+        GH_TOKEN: "",
+        GITHUB_TOKEN: ""
+      },
+      fetch: (_url, options) => {
+        requestSignal = options.signal;
+        return errorResponse;
+      },
+      home,
+      platform: "linux"
+    });
+    assert.equal(result, undefined);
+    assert.equal(cancellations, 1);
+    assert.equal(requestSignal.aborted, true);
+    assert.equal(errorResponse.bodyUsed, true);
+  } finally {
+    await rm(home, { force: true, recursive: true });
+  }
+});
+
+test("disposes unauthorized responses before fallback, even when cancellation rejects", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
+  try {
+    await Promise.all(
+      [
+        [".copilot", "config.json"],
+        [".config", "github-copilot", "oauth.json"],
+        [".local", "share", "opencode", "auth.json"],
+        [".config", "gh", "hosts.json"]
+      ].map(async (parts) => {
+        const filePath = path.join(home, ...parts);
+        await mkdir(path.dirname(filePath), { recursive: true });
+        await writeFile(filePath, "{}");
+      })
+    );
+    await Promise.all(
+      [401, 403].map(async (status) => {
+        const events = [];
+        const authorizations = [];
+        const fallbackStates = [];
+        let firstResponse;
+        let firstSignal;
+        let calls = 0;
+        let usageErrors = 0;
+        const snapshot = await fetchUsage({
+          cache: false,
+          credential: "first-token",
+          environment: {
+            COPILOT_GITHUB_TOKEN: "second-token",
+            GH_TOKEN: "",
+            GITHUB_TOKEN: ""
+          },
+          fetch: (_url, options) => {
+            calls += 1;
+            authorizations.push(options.headers.Authorization);
+            if (calls === 1) {
+              firstSignal = options.signal;
+              firstResponse = new Response(
+                new ReadableStream({
+                  cancel() {
+                    events.push("dispose");
+                    if (status === 403) {
+                      throw new Error("synthetic cancellation failure");
+                    }
+                  }
+                }),
+                { status }
+              );
+              events.push("first");
+              return firstResponse;
+            }
+            events.push("fallback");
+            fallbackStates.push({
+              bodyUsed: firstResponse.bodyUsed,
+              signalAborted: firstSignal.aborted
+            });
+            return Response.json(
+              {
+                quota_snapshots: {
+                  premium_interactions: {
+                    entitlement: 100,
+                    quota_remaining: 70
+                  }
+                }
+              },
+              { status: 200 }
+            );
+          },
+          home,
+          onUsageError: () => {
+            usageErrors += 1;
+            events.push("hook");
+          },
+          platform: "linux"
+        });
+        assert.equal(snapshot.groups[0].metrics[0].used, 30);
+        assert.equal(calls, 2);
+        assert.equal(usageErrors, 1);
+        assert.deepEqual(events, ["first", "dispose", "hook", "fallback"]);
+        assert.deepEqual(authorizations, [
+          "token first-token",
+          "token second-token"
+        ]);
+        assert.deepEqual(fallbackStates, [
+          { bodyUsed: true, signalAborted: true }
+        ]);
+      })
+    );
+  } finally {
+    await rm(home, { force: true, recursive: true });
+  }
+});
+
+test("continues fallback when HTTP error body cancellation stalls until timeout", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
+  const events = [];
+  let firstResponse;
+  let firstSignal;
+  let calls = 0;
+  try {
+    await Promise.all(
+      [
+        [".copilot", "config.json"],
+        [".config", "github-copilot", "oauth.json"],
+        [".local", "share", "opencode", "auth.json"],
+        [".config", "gh", "hosts.json"]
+      ].map(async (parts) => {
+        const filePath = path.join(home, ...parts);
+        await mkdir(path.dirname(filePath), { recursive: true });
+        await writeFile(filePath, "{}");
+      })
+    );
+    const snapshot = await Promise.race([
+      fetchUsage({
+        cache: false,
+        credential: "first-token",
+        environment: {
+          COPILOT_GITHUB_TOKEN: "second-token",
+          GH_TOKEN: "",
+          GITHUB_TOKEN: ""
+        },
+        fetch: (_url, options) => {
+          calls += 1;
+          if (calls === 1) {
+            firstSignal = options.signal;
+            firstResponse = new Response(
+              new ReadableStream({
+                cancel() {
+                  events.push("dispose");
+                  return Promise.withResolvers().promise;
+                }
+              }),
+              { status: 401 }
+            );
+            events.push("first");
+            return firstResponse;
+          }
+          events.push("fallback");
+          return Response.json(
+            {
+              quota_snapshots: {
+                premium_interactions: {
+                  entitlement: 100,
+                  quota_remaining: 70
+                }
+              }
+            },
+            { status: 200 }
+          );
+        },
+        home,
+        onUsageError: () => events.push("hook"),
+        platform: "linux"
+      }),
+      delay(3500, "stalled")
+    ]);
+    assert.notEqual(snapshot, "stalled");
+    assert.equal(snapshot.groups[0].metrics[0].used, 30);
+    assert.equal(calls, 2);
+    assert.deepEqual(events, ["first", "dispose", "hook", "fallback"]);
+    assert.equal(firstSignal.aborted, true);
+    assert.equal(firstResponse.bodyUsed, true);
+  } finally {
+    await rm(home, { force: true, recursive: true });
+  }
+});
+
+test("keeps optional diagnostics content-free while using environment credentials", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
+  const diagnosticContent = "SYNTHETIC_CANARY";
+  const fallbackToken = "synthetic-fallback-token";
+  try {
+    await Promise.all(
+      [
+        [[".copilot", "config.json"], diagnosticContent],
+        [[".config", "github-copilot", "oauth.json"], "{}"],
+        [[".local", "share", "opencode", "auth.json"], "{}"],
+        [[".config", "gh", "hosts.json"], "{}"]
+      ].map(async ([parts, content]) => {
+        const filePath = path.join(home, ...parts);
+        await mkdir(path.dirname(filePath), { recursive: true });
+        await writeFile(filePath, content);
+      })
+    );
+    const script = `
+      import { fetchUsage } from ${JSON.stringify(new URL("copilot-usage.mjs", import.meta.url).href)};
+      let requests = 0;
+      let fallbackUsed = false;
+      const snapshot = await fetchUsage({
+        cache: false,
+        environment: {
+          COPILOT_GITHUB_TOKEN: "${fallbackToken}",
+          GH_TOKEN: "",
+          GITHUB_TOKEN: ""
+        },
+        fetch: (_url, options) => {
+          requests += 1;
+          fallbackUsed = options.headers.Authorization === "token ${fallbackToken}";
+          return new Response(JSON.stringify({ quota_snapshots: { premium_interactions: { entitlement: 100, quota_remaining: 90 } } }), { status: 200 });
+        },
+        home: process.env.HOME,
+        platform: "linux"
+      });
+      process.stdout.write(JSON.stringify({ fallbackUsed, hasSnapshot: Boolean(snapshot), requests }));
+    `;
+    for (const debug of [undefined, "", "0"]) {
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "-e", script],
+        {
+          encoding: "utf-8",
+          env: {
+            HOME: home,
+            ...(debug === undefined ? {} : { STATUSLINE_DEBUG: debug })
+          }
+        }
+      );
+      assert.equal(result.status, 0);
+      assert.deepEqual(JSON.parse(result.stdout), {
+        fallbackUsed: true,
+        hasSnapshot: true,
+        requests: 1
+      });
+      assert.equal(result.stderr.length > 0, debug === "0");
+      assert.equal(result.stderr.includes(home), false);
+      assert.equal(result.stderr.includes(diagnosticContent), false);
+      assert.equal(result.stderr.includes(fallbackToken), false);
+      assert.equal(result.stderr.includes("SyntaxError:"), false);
+      if (debug === "0") {
+        assert.ok(result.stderr.includes("[copilot-usage]"));
+      }
+    }
   } finally {
     await rm(home, { force: true, recursive: true });
   }

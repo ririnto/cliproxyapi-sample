@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { withUsageCache } from "./usage-cache.mjs";
 
@@ -28,6 +29,16 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
       return { status: undefined };
     }
     if (response.status < 200 || response.status >= 300) {
+      try {
+        await Promise.race([
+          response.body?.cancel(),
+          delay(3000, undefined, { signal: controller.signal })
+        ]);
+      } catch {
+        controller.abort();
+        return { status: response.status };
+      }
+      controller.abort();
       return { status: response.status };
     }
     try {
@@ -101,9 +112,9 @@ const readJson = async (filePath, jsonc = false) => {
     const text = await readFile(filePath, "utf-8");
     const value = JSON.parse(jsonc ? stripJsonc(text) : text);
     return isRecord(value) ? value : undefined;
-  } catch (error) {
+  } catch {
     if (process.env.STATUSLINE_DEBUG) {
-      console.error(`[copilot-usage] unreadable ${filePath}`, error);
+      console.error("[copilot-usage] unreadable credential data");
     }
   }
 };

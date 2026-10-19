@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { fetchUsage } from "./codex-usage.mjs";
 
@@ -320,6 +322,133 @@ test("returns undefined instead of throwing when the response fails", async () =
       )
     );
     assert.deepEqual(snapshots, [undefined, undefined]);
+  } finally {
+    await rm(home, { force: true, recursive: true });
+  }
+});
+
+test("disposes HTTP error response bodies before returning", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
+  let cancellations = 0;
+  let requestSignal;
+  const errorResponse = new Response(
+    new ReadableStream({
+      cancel() {
+        cancellations += 1;
+      }
+    }),
+    { status: 503 }
+  );
+  try {
+    await writeAuth(home);
+    const result = await fetchUsage({
+      cache: false,
+      fetch: (_url, options) => {
+        requestSignal = options.signal;
+        return errorResponse;
+      },
+      home
+    });
+    assert.equal(result, undefined);
+    assert.equal(cancellations, 1);
+    assert.equal(requestSignal.aborted, true);
+    assert.equal(errorResponse.bodyUsed, true);
+  } finally {
+    await rm(home, { force: true, recursive: true });
+  }
+});
+
+test("returns when HTTP error body cancellation stalls until timeout", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
+  let cancellations = 0;
+  let requestSignal;
+  try {
+    await writeAuth(home);
+    const result = await Promise.race([
+      fetchUsage({
+        cache: false,
+        fetch: (_url, options) => {
+          requestSignal = options.signal;
+          return new Response(
+            new ReadableStream({
+              cancel() {
+                cancellations += 1;
+                return Promise.withResolvers().promise;
+              }
+            }),
+            { status: 503 }
+          );
+        },
+        home
+      }),
+      delay(3500, "stalled")
+    ]);
+    assert.notEqual(result, "stalled");
+    assert.equal(result, undefined);
+    assert.equal(cancellations, 1);
+    assert.equal(requestSignal.aborted, true);
+  } finally {
+    await rm(home, { force: true, recursive: true });
+  }
+});
+
+test("keeps optional diagnostics content-free while using OpenCode credentials", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
+  const diagnosticContent = "SYNTHETIC_CANARY";
+  const fallbackToken = "synthetic-fallback-token";
+  try {
+    await mkdir(path.join(home, ".codex"), { recursive: true });
+    await mkdir(path.join(home, ".local", "share", "opencode"), {
+      recursive: true
+    });
+    await writeFile(path.join(home, ".codex", "auth.json"), diagnosticContent);
+    await writeFile(
+      path.join(home, ".local", "share", "opencode", "auth.json"),
+      JSON.stringify({ openai: { access: fallbackToken } })
+    );
+    const fallbackAuthorization = `Bearer ${fallbackToken}`;
+    const script = `
+      import { fetchUsage } from ${JSON.stringify(new URL("codex-usage.mjs", import.meta.url).href)};
+      let requests = 0;
+      let fallbackUsed = false;
+      const snapshot = await fetchUsage({
+        cache: false,
+        fetch: (_url, options) => {
+          requests += 1;
+          fallbackUsed = options.headers.Authorization === ${JSON.stringify(fallbackAuthorization)};
+          return new Response(JSON.stringify({ credits: { balance: 5, has_credits: true } }), { status: 200 });
+        },
+        home: process.env.HOME
+      });
+      process.stdout.write(JSON.stringify({ fallbackUsed, hasSnapshot: Boolean(snapshot), requests }));
+    `;
+    for (const debug of [undefined, "", "0"]) {
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "-e", script],
+        {
+          encoding: "utf-8",
+          env: {
+            HOME: home,
+            ...(debug === undefined ? {} : { STATUSLINE_DEBUG: debug })
+          }
+        }
+      );
+      assert.equal(result.status, 0);
+      assert.deepEqual(JSON.parse(result.stdout), {
+        fallbackUsed: true,
+        hasSnapshot: true,
+        requests: 1
+      });
+      assert.equal(result.stderr.length > 0, debug === "0");
+      assert.equal(result.stderr.includes(home), false);
+      assert.equal(result.stderr.includes(diagnosticContent), false);
+      assert.equal(result.stderr.includes(fallbackToken), false);
+      assert.equal(result.stderr.includes("SyntaxError:"), false);
+      if (debug === "0") {
+        assert.ok(result.stderr.includes("[codex-usage]"));
+      }
+    }
   } finally {
     await rm(home, { force: true, recursive: true });
   }
