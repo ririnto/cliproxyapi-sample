@@ -54,3 +54,11 @@ status_line = [
   "permissions",
   "context-remaining"
 ]
+
+[marketplaces.i-have-adhd]
+source_type = "git"
+source = "https://github.com/ayghri/i-have-adhd.git"
+ref = "main"
+
+[plugins."i-have-adhd@i-have-adhd"]
+enabled = true
