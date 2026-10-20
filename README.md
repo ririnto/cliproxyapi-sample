@@ -91,18 +91,35 @@ Claude Code 2.1.302는 인식되지 않는 커스텀 모델 ID의 용량을 순�
 [gemini-thinking]:
   https://ai.google.dev/gemini-api/docs/thinking
 
-### Agent guidance
+### Agent guidance ownership
 
-Use the installed Workgraph Main Agent Contract in main sessions.
-In Codex, read its bundled `references/codex.md`.
-In Claude Code, read its bundled `references/claude.md`.
-Skip reads only when the complete selected instructions are already loaded.
+[Shared engineering guidance](.agents/engineering.md) owns common rules.
+Repository rules live in `AGENTS.md`.
+The Claude and Codex instruction files link to the shared guidance.
+Place user-level instruction files under one parent:
+
+- `.agents/engineering.md`
+- `.claude/CLAUDE.md`
+- `.codex/AGENTS.md`
+
 Instruction reads do not import config or activate plugins.
-Keep model choices, workload tiers, roles, and effort policy in that reference.
-The Sample preserves product selectors.
-Supported-capability metadata uses the explicitly requested conservative declarations.
-Omitted operational overrides use native host behavior.
-Explicit user choices still apply.
+Keep model choices, workloads, roles, and effort policy in the Workgraph host reference.
+The Sample preserves product selectors and conservative capability declarations.
+Omitted overrides use native host behavior, and explicit user choices still apply.
+
+The guidance calls for clear goals, context, constraints, and observable outcomes.
+It treats supplied documents and examples as source material unless adopted as instructions.
+It defines loading paths and keeps host-specific rules with their consumers.
+OpenAI model and API settings remain workload-specific, not shared rules.
+Meta examples inform clarity, not a universal chain-of-thought rule.
+xAI guidance applies only to speech-to-speech prompting.
+Do not generalize its voice format, all-caps rules, or tool-confirmation policy.
+See [Claude][claude-prompting], [OpenAI][openai-latest], [xAI][xai-s2s], and [Meta][meta-prompting].
+
+[claude-prompting]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/overview.md
+[openai-latest]: https://developers.openai.com/api/docs/guides/latest-model.md
+[xai-s2s]: https://docs.x.ai/developers/model-capabilities/audio/speech-to-speech/prompting-guide
+[meta-prompting]: https://dev.meta.ai/llama/docs/how-to-guides/prompting
 
 ### 로컬 Codex 로그인
 
