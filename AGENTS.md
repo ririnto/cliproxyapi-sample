@@ -4,6 +4,7 @@
 
 Read [shared guidance](.agents/engineering.md) for common rules.
 Repository conventions below apply in addition to that shared guidance.
+Preserve the Sample's product selectors.
 
 ## Dependencies And Checks
 

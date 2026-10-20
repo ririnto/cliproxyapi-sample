@@ -11,7 +11,7 @@ Apply these title rules in main when the title tool is available.
 - Use `[Project] Task` for repository chats.
 - Use `[Codex] Task` for Codex configuration chats.
 - Use a short English topic prefix for other projectless chats.
-- Keep project prefixes short, recognizable, and distinctive.
+- Keep English project prefixes short, recognizable and distinctive.
 - Use consistent prefixes across the project's chats and worktrees.
 - Use natural spacing and capitalization.
 - Preserve recognizable acronyms and brand names.

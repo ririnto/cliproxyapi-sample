@@ -103,13 +103,8 @@ Place user-level instruction files under one parent:
 - `.codex/AGENTS.md`
 
 Instruction reads do not import config or activate plugins.
-Keep model choices, workloads, roles, and effort policy in the Workgraph host reference.
-The Sample preserves product selectors and conservative capability declarations.
-Omitted overrides use native host behavior, and explicit user choices still apply.
-
-The guidance calls for clear goals, context, constraints, and observable outcomes.
-It treats supplied documents and examples as source material unless adopted as instructions.
-It defines loading paths and keeps host-specific rules with their consumers.
+The Sample preserves conservative capability declarations.
+Omitted overrides use native host behavior.
 OpenAI model and API settings remain workload-specific, not shared rules.
 Meta examples inform clarity, not a universal chain-of-thought rule.
 xAI guidance applies only to speech-to-speech prompting.
