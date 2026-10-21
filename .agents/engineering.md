@@ -5,7 +5,7 @@ Use this guidance in the repository or from a user-level instruction directory.
 ## Agent Guidance
 
 Use the active host's guidance for delegation.
-Keep model selection, workload tiers, roles, and effort policy in that guidance.
+Follow that guidance for model selection, workload tiers, roles, and effort.
 Identify each task's outcome and relevant context.
 Define constraints and observable acceptance evidence.
 Complete requested work within its authorized scope.
