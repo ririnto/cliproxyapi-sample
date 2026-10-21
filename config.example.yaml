@@ -308,6 +308,24 @@ requests:
               - reasoning.effort: minimal
         params:
           reasoning.effort: low
+    filter:
+      - models:
+          - name: github_copilot/gpt-*
+            protocol: codex
+        params:
+          - 'input.#(type=="reasoning" && encrypted_content%"gAAAA*")#'
+          - 'input.#(type=="reasoning" && encrypted_content%"rsn_*")#'
+          - 'input.#(type=="reasoning" && encrypted_content%"smry_*")#'
+          - 'input.#(type=="message")#.id'
+          - 'input.#(type=="function_call")#.id'
+          - 'input.#(type=="custom_tool_call")#.id'
+      - models:
+          - name: openai/gpt-*
+            protocol: codex
+        params:
+          - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"gAAAA*")#'
+          - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"rsn_*")#'
+          - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"smry_*")#'
 
 # Client-facing compatibility settings apply to both OAuth and API-key routes.
 client:
