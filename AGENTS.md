@@ -39,6 +39,10 @@ Avoid deeper nesting, and let lint requirements take precedence over this guidan
 
 ## Security Overrides
 
+`markdownlint-cli2>markdown-it` selects 15.0.3 to address three advisories.
+GHSA-r7fv-28h4-cvq7 affects smartquotes with unmatched closing quotes.
+GHSA-vfgh-jcmw-g37q affects inline HTML parsing with html enabled.
+GHSA-gfr2-rv44-r23c affects multiline link reference rendering.
 `markdownlint-cli2>smol-toml` selects 1.9.1 for GHSA-r4xh-jqrq-34v2.
 It fixes a TOML parsing denial of service.
 `micromark-extension-math>katex` selects 0.19.0 for GHSA-238p-pmpm-9mq7.
