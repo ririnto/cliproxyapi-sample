@@ -4,11 +4,8 @@ Use this guidance in the repository or from a user-level instruction directory.
 
 ## Agent Guidance
 
-In main sessions, use the installed Workgraph Main Agent Contract.
-In Codex, read its bundled `references/codex.md` before delegation.
-In Claude Code, read its bundled `references/claude.md` before delegation.
-Skip reads only when the complete selected instructions are already loaded.
-Keep model choices, workload tiers, roles, and effort policy in that reference.
+Use the active host's guidance for delegation.
+Keep model selection, workload tiers, roles, and effort policy in that guidance.
 Identify each task's outcome and relevant context.
 Define constraints and observable acceptance evidence.
 Complete requested work within its authorized scope.
