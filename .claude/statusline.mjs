@@ -9,8 +9,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 
 const RESET = "[0m";
-const DIM = "[2m";
+const DIM = "\u001B[38;2;132;144;156m";
 const BOLD = "[1m";
+const MODEL_COLOR = "\u001B[38;2;246;226;183m";
+const GREEN = "\u001B[38;2;171;223;167m";
+const BLUE = "\u001B[38;2;143;179;239m";
+const PROVIDER = "\u001B[38;2;166;190;211m";
+const SEPARATOR = `${DIM} · ${RESET}`;
+const GROUP_SEPARATOR = `${DIM}  │  ${RESET}`;
 const PCT_GREEN = 70;
 const PCT_YELLOW = 90;
 
@@ -113,7 +119,7 @@ const numberText = (value) => {
   }
   return number >= 1000
     ? scaledText(number, 1000, "k")
-    : String(Math.trunc(number));
+    : String(Number(number.toFixed(1)));
 };
 
 const resetText = (milliseconds) => {
@@ -124,9 +130,11 @@ const resetText = (milliseconds) => {
   const seconds = value / 1000;
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3600);
-  return days < 1
-    ? `${hours}h ${Math.floor((seconds % 3600) / 60)}m`
-    : `${days}d ${hours}h`;
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) {
+    return `${days}d${hours ? `${hours}h` : ""}`;
+  }
+  return hours > 0 ? `${hours}h${minutes ? `${minutes}m` : ""}` : `${minutes}m`;
 };
 
 const barColor = (percentage) => {
@@ -134,14 +142,19 @@ const barColor = (percentage) => {
     return "";
   }
   if (percentage <= PCT_GREEN) {
-    return "[32m";
+    return GREEN;
   }
-  return percentage <= PCT_YELLOW ? "[33m" : "[31m";
+  return percentage <= PCT_YELLOW
+    ? "\u001B[38;2;242;181;144m"
+    : "\u001B[38;2;233;144;169m";
 };
 
 const usageBar = (percentage) => {
-  const steps = Math.max(0, Math.min(10, Math.floor((percentage + 9) / 10)));
-  return "▓".repeat(steps) + "░".repeat(10 - steps);
+  const steps = Math.max(
+    percentage > 0 ? 1 : 0,
+    Math.min(8, Math.round((percentage / 100) * 8))
+  );
+  return "▰".repeat(steps) + DIM + "▱".repeat(8 - steps);
 };
 
 const gitBranch = (cwd) => {
@@ -161,16 +174,19 @@ const metricDisplay = (metric) => {
     return "";
   }
   if (metric.type === "usage") {
-    return `${metric.used}/${metric.total}`;
+    return `${numberText(metric.used)}/${numberText(metric.total)}`;
   }
   if (metric.type === "credit") {
-    return metric.currency === "USD"
-      ? `$${metric.remaining.toFixed(2)}`
+    if (metric.currency === "USD") {
+      return `$${metric.remaining.toFixed(2)}`;
+    }
+    return Number.isFinite(Number(metric.remaining))
+      ? numberText(metric.remaining)
       : String(metric.remaining);
   }
   return metric.type === "budget"
     ? `$${Number(metric.used || 0).toFixed(2)}/$${Number(metric.total || 0).toFixed(2)}`
-    : `${Number(metric.percentage || 0)}%`;
+    : `${Number(Math.max(0, 100 - Number(metric.percentage || 0)).toFixed(1))}% left`;
 };
 
 const metricPercent = (metric) => {
@@ -192,7 +208,7 @@ const thresholdFor = (showAbove, groupLabel, metricLabel) =>
 
 const renderMetric = (metric) => {
   const reset = metric.resetsInMs ?? metric.resets_in_ms;
-  return `${displayText(metric.label)}: ${barColor(metricPercent(metric))}${displayText(metricDisplay(metric))}${RESET}${reset === undefined ? "" : ` (${resetText(reset)})`}`;
+  return `${displayText(metric.label)} ${barColor(metricPercent(metric))}${displayText(metricDisplay(metric))}${RESET}${reset === undefined ? "" : ` ${DIM}↻${resetText(reset)}${RESET}`}`;
 };
 
 const isFiniteNumber = (value) =>
@@ -307,18 +323,19 @@ export const renderSnapshot = (addon, snapshot) => {
       if (!metrics.length) {
         return "";
       }
-      const content = metrics.map(renderMetric).join(" | ");
+      const content = metrics.map(renderMetric).join(SEPARATOR);
       const groupName =
         typeof group.label === "string" && group.label
           ? group.label
           : addon.name;
       const displayName = group.label || !addon.hideName ? groupName : "";
-      return displayName
-        ? `${BOLD}${displayText(displayName)}${RESET} | ${content}`
-        : content;
+      const name = displayName
+        ? `${PROVIDER}${displayText(displayName).replace(/\s+\((?:Pro|Individual)\)$/u, "")}${RESET}`
+        : "";
+      return displayName ? `${name}  ${content}` : content;
     })
     .filter(Boolean)
-    .join(" | ");
+    .join(GROUP_SEPARATOR);
 };
 
 const addonSettings = (addons) =>
@@ -389,65 +406,110 @@ export const renderAddons = async (addons, options = {}) => {
 };
 
 const projectDisplay = (workspace) => {
-  const currentDir = workspace?.current_dir || "";
-  const projectDir = workspace?.project_dir || "";
+  const currentDir =
+    workspace?.current_dir || workspace?.project_dir || process.cwd();
+  const projectDir = workspace?.project_dir || currentDir;
   const projectName = path.basename(projectDir);
   return currentDir === projectDir
     ? projectName
-    : `${projectName}(${path.basename(currentDir)})`;
+    : `${projectName}/${path.basename(currentDir)}`;
+};
+
+const renderContext = (input) => {
+  const context = input.context_window || {};
+  const value = Number(context.used_percentage);
+  const known =
+    context.used_percentage !== null &&
+    context.used_percentage !== undefined &&
+    Number.isFinite(value);
+  const percentage = known ? Math.max(0, Math.min(100, Math.trunc(value))) : 0;
+  const size = Math.trunc(Number(context.context_window_size || 0));
+  return known
+    ? `Context ${barColor(percentage)}${usageBar(percentage)}${RESET} ${barColor(percentage)}${percentage}%${RESET}${size ? ` ${DIM}/ ${numberText(size)}${RESET}` : ""}`
+    : `Context ${DIM}${size ? numberText(size) : "waiting"}${RESET}`;
 };
 
 const renderHeader = (input, options) => {
   const model = input.model || {};
-  const modelName = model.display_name || "";
+  const modelName = model.display_name || model.id || "Claude";
   const effort = input.effort?.level || model.effort || "";
   const workspace = input.workspace || {};
+  const cost = input.cost || {};
+  const dollars = Number(cost.total_cost_usd || 0);
+  const seconds = Math.trunc(Number(cost.total_duration_ms || 0) / 1000);
+  const details = [
+    ...(dollars > 0 ? [`$${dollars.toFixed(2)}`] : []),
+    ...(seconds > 0
+      ? [seconds < 60 ? `${seconds}s` : `${Math.trunc(seconds / 60)}m`]
+      : [])
+  ];
   const branch =
     options.branch === undefined
       ? gitBranch(options.cwd || workspace.current_dir || process.cwd())
       : options.branch;
-  const context = input.context_window || {};
-  const percentage = Math.trunc(Number(context.used_percentage || 0));
-  const size = Math.trunc(Number(context.context_window_size || 0));
   return [
-    `[36m[${displayText(modelName)}${effort ? ` (${displayText(effort)})` : ""}][0m [1m${displayText(projectDisplay(workspace))}[0m`,
-    ...(branch ? [`[35m${displayText(branch)}[0m`] : []),
-    `${barColor(percentage)}${usageBar(percentage)}[0m ${percentage}%${size ? ` (${numberText(size)})` : ""}`
-  ].join(" | ");
+    `${MODEL_COLOR}${BOLD}${displayText(modelName)}${RESET}${effort ? ` ${DIM}${displayText(effort)}${RESET}` : ""}`,
+    `${GREEN}${displayText(projectDisplay(workspace))}${RESET}`,
+    ...(branch ? [`${BLUE}${displayText(branch)}${RESET}`] : []),
+    ...(details.length ? [`${DIM}${details.join(" · ")}${RESET}`] : []),
+    renderContext(input)
+  ].join(SEPARATOR);
 };
 
-const renderCost = (input) => {
+const renderTokens = (input) => {
   const context = input.context_window || {};
   const usage = context.current_usage || {};
-  const cost = input.cost || {};
-  return `$${Number(cost.total_cost_usd || 0).toFixed(2)} | ${Math.trunc(Number(cost.total_duration_ms || 0) / 60_000)}m | ${DIM}read:${numberText(context.total_input_tokens || 0)}(${numberText(usage.cache_read_input_tokens || 0)}) write:${numberText(context.total_output_tokens || 0)}(${numberText(usage.cache_creation_input_tokens || 0)})${RESET}`;
+  const metrics = [
+    ["in", context.total_input_tokens],
+    ["out", context.total_output_tokens],
+    ["cache read", usage.cache_read_input_tokens],
+    ["cache write", usage.cache_creation_input_tokens]
+  ].filter(([, value]) => Number(value) > 0);
+  return metrics.length
+    ? `${DIM}${metrics.map(([label, value]) => `${label} ${numberText(value)}`).join(" · ")}${RESET}`
+    : "";
 };
 
 const packProviderRows = (rows) => {
   const packed = [];
-  let current = "";
+  let current = [];
   for (const row of rows) {
-    const combined = current ? `${current} | ${row}` : row;
-    if (current && stripVTControlCharacters(combined).length > 120) {
+    const combined = [...current, row].join(GROUP_SEPARATOR);
+    if (
+      current.length &&
+      (current.length >= 2 || stripVTControlCharacters(combined).length > 120)
+    ) {
       packed.push(current);
-      current = row;
-    } else {
-      current = combined;
+      current = [];
     }
+    current.push(row);
   }
-  if (current) {
+  if (current.length) {
     packed.push(current);
   }
-  return packed;
+  const columnWidth = Math.max(
+    0,
+    ...packed
+      .filter((group) => group.length === 2)
+      .map(([left]) => stripVTControlCharacters(left).length)
+  );
+  return packed.flatMap(([left, right]) => {
+    if (!right) {
+      return [left];
+    }
+    const padding = " ".repeat(
+      Math.max(0, columnWidth - stripVTControlCharacters(left).length)
+    );
+    const combined = `${left}${padding}${GROUP_SEPARATOR}${right}`;
+    return stripVTControlCharacters(combined).length <= 120
+      ? [combined]
+      : [left, right];
+  });
 };
 
-/**
- * main provider의 사용량은 원가 행에 표시하고, 나머지 사용량은 120자 안에서 묶는다.
- */
 export const renderStatusline = async (input, options = {}) => {
   const nowMs = options.nowMs ?? Date.now();
   const nativeRate = renderRateLimits(input.rate_limits || {}, nowMs);
-  const rate = nativeRate.join(" | ");
   const addonResults = await renderAddonResults(options.addons ?? [], {
     ...options,
     nativeUsage: nativeUsageFor(input.rate_limits)
@@ -455,19 +517,21 @@ export const renderStatusline = async (input, options = {}) => {
   const primaryIndex = nativeRate.length
     ? -1
     : addonResults.findIndex((result) => result.primary);
-  const costRow = [
-    renderCost(input),
-    rate,
-    primaryIndex >= 0 ? addonResults[primaryIndex].line : ""
-  ]
+  const header = [renderHeader(input, options), renderTokens(input)]
     .filter(Boolean)
-    .join(" | ");
+    .join(SEPARATOR);
+  const primary = nativeRate.length
+    ? `${PROVIDER}Claude${RESET}  ${nativeRate.join(SEPARATOR)}`
+    : addonResults[primaryIndex]?.line || "";
   const providerRows = packProviderRows(
-    addonResults
-      .filter((_, index) => index !== primaryIndex)
-      .map((result) => result.line)
+    [
+      primary,
+      ...addonResults
+        .filter((_, index) => index !== primaryIndex)
+        .map((result) => result.line)
+    ].filter(Boolean)
   );
-  return [renderHeader(input, options), costRow, ...providerRows];
+  return [header, ...providerRows];
 };
 
 const readSettings = async (filePath) => {
