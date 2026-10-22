@@ -13,6 +13,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 
+import { renderSnapshot, renderStatusline } from "./statusline.mjs";
+
 const snapshot = {
   groups: [
     {
@@ -25,71 +27,27 @@ const snapshot = {
     }
   ]
 };
-
 const addon = { hideLabels: ["Premium"] };
-
 const plainText = (value) => stripVTControlCharacters(String(value));
-
-const RED_TEXT = "[31m";
-const BOLD = "[1m";
-const RESET_CODE = "[0m";
-
-test("main provider의 사용량을 read 및 write와 같은 줄에 표시한다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const nowMs = 1_700_000_000_000;
-  const fiveHour = {
-    resets_at: nowMs / 1000 + 2760,
-    used_percentage: 37
-  };
-  const sevenDay = {
-    resets_at: nowMs / 1000 + 219_600,
-    used_percentage: 6
-  };
-  const cases = [
-    { rateLimits: undefined, suffix: "" },
-    { rateLimits: {}, suffix: "" },
-    { rateLimits: { five_hour: fiveHour }, suffix: " | 5h: 37% (0h 46m)" },
-    { rateLimits: { seven_day: sevenDay }, suffix: " | 7d: 6% (2d 13h)" },
-    {
-      rateLimits: { five_hour: fiveHour, seven_day: sevenDay },
-      suffix: " | 5h: 37% (0h 46m) | 7d: 6% (2d 13h)"
-    }
-  ];
-  const rowsList = await Promise.all(
-    cases.map(({ rateLimits, suffix }) =>
-      renderStatusline(
-        {
-          context_window: {
-            current_usage: {
-              cache_creation_input_tokens: 1000,
-              cache_read_input_tokens: 158_800
-            },
-            total_input_tokens: 159_800,
-            total_output_tokens: 822
-          },
-          cost: { total_cost_usd: 3.81, total_duration_ms: 1_200_000 },
-          rate_limits: rateLimits
-        },
-        { branch: "", nowMs }
-      ).then((rows) => ({ rows, suffix }))
-    )
-  );
-  for (const { rows, suffix } of rowsList) {
-    assert.equal(rows.length, 2);
-    assert.equal(
-      plainText(rows[1]),
-      `$3.81 | 20m | read:159.8k(158.8k) write:822(1k)${suffix}`
-    );
-  }
+const RED_TEXT = "\u001B[31m";
+const PROVIDER_COLOR = "\u001B[38;2;166;190;211m";
+const WARNING_COLOR = "\u001B[38;2;233;144;169m";
+const RESET_CODE = "\u001B[0m";
+const nowMs = 1_700_000_000_000;
+const percentage = (label, value, minutes) => ({
+  label,
+  percentage: value,
+  type: "percentage",
+  ...(minutes === undefined ? {} : { resetsInMs: minutes * 60_000 })
 });
 
-const renderProviderRows = async (providers, options = {}) => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  return renderStatusline(options.input || {}, {
-    addons: providers.map(({ hideName, name, primary }) => ({
+const renderProviderRows = (providers, options = {}) =>
+  renderStatusline(options.input || {}, {
+    addons: providers.map(({ name, primary, provider, hideName }) => ({
       hideName,
       name,
       primary,
+      provider,
       script: `./${name}.mjs`
     })),
     branch: "",
@@ -99,536 +57,410 @@ const renderProviderRows = async (providers, options = {}) => {
       );
       return {
         fetchUsage: () => ({
-          groups: [
-            {
-              label: provider.name,
-              metrics: [
-                {
-                  label: provider.label,
-                  percentage: provider.percentage,
-                  resetsInMs: provider.resetsInMs
-                }
-              ]
-            }
-          ]
+          groups: [{ label: provider.name, metrics: provider.metrics }]
         })
       };
     },
+    nowMs,
     ...options
   });
-};
 
-test("세 개의 짧은 제공자 사용량을 순서대로 한 줄에 묶는다", async () => {
-  const providers = [
-    { label: "5h", name: "Z.AI (Pro)", percentage: 2, resetsInMs: 4_020_000 },
+test("session information stays on the first row in priority order", async () => {
+  const rows = await renderStatusline(
     {
-      label: "7d",
-      name: "ChatGPT (Pro)",
-      percentage: 3,
-      resetsInMs: 565_200_000
+      context_window: {
+        context_window_size: 305_000,
+        current_usage: {
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 25_500
+        },
+        total_input_tokens: 26_000,
+        total_output_tokens: 15,
+        used_percentage: 9
+      },
+      cost: { total_cost_usd: 0.17, total_duration_ms: 780_000 },
+      effort: { level: "high" },
+      model: { display_name: "gpt-6.1-sol" },
+      workspace: {
+        current_dir: "/workspace/codex",
+        project_dir: "/workspace/codex"
+      }
     },
-    { label: "5h", name: "GLM", percentage: 8 }
-  ];
-  const rows = await renderProviderRows(providers, {
-    nowMs: 1_700_000_000_000
-  });
-  assert.equal(rows.length, 3);
-  assert.match(
-    plainText(rows[2]),
-    /^Z\.AI \(Pro\) \| 5h: 2% \(1h 7m\) \| ChatGPT \(Pro\) \| 7d: 3% \(6d 13h\) \| GLM \| 5h: 8%$/u
+    { branch: "main" }
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(
+    plainText(rows[0]),
+    "gpt-6.1-sol high · codex · main · $0.17 · 13m · Context ▰▱▱▱▱▱▱▱ 9% / 305k · in 26k · out 15 · cache read 25.5k"
+  );
+  assert.doesNotMatch(plainText(rows[0]), /cache write/u);
+});
+
+test("idle output omits empty metrics and distinguishes unknown context", async () => {
+  const [row] = await renderStatusline(
+    { context_window: { context_window_size: 305_000 } },
+    { branch: "" }
+  );
+  assert.match(plainText(row), /Context 305k$/u);
+  assert.doesNotMatch(plainText(row), /\$0\.00|0m|in 0|out 0|cache|▰|▱/u);
+  const [waiting] = await renderStatusline({}, { branch: "" });
+  assert.match(plainText(waiting), /Context waiting$/u);
+  const [short] = await renderStatusline(
+    { cost: { total_duration_ms: 20_000 } },
+    { branch: "" }
+  );
+  assert.match(plainText(short), /20s · Context/u);
+});
+
+test("context uses eight cells with at least one filled cell for positive usage", async () => {
+  await Promise.all(
+    [0, 1, 6, 9, 50, 100, 120, -1].map(async (value) => {
+      const [row] = await renderStatusline(
+        { context_window: { used_percentage: value } },
+        { branch: "" }
+      );
+      const text = plainText(row);
+      const match = /Context (?<bar>[▰▱]{8}) (?<percentage>\d+)%/u.exec(text);
+      assert.ok(match);
+      assert.equal(
+        Number(match.groups.percentage),
+        Math.max(0, Math.min(100, value))
+      );
+      assert.equal(match.groups.bar.includes("▰"), value > 0);
+    })
   );
 });
 
-test("제공자 행의 표시 길이가 정확히 120자이면 같은 줄에 둔다", async () => {
-  const providers = [
-    { label: "x", name: "A".repeat(30), percentage: 1 },
-    { label: "x", name: "B".repeat(71), percentage: 1 }
-  ];
-  const rows = await renderProviderRows(providers);
+test("providers use two columns with compact names and remaining percentages", async () => {
+  const rows = await renderProviderRows([
+    {
+      metrics: [percentage("5h", 26, 265), percentage("7d", 18, 8040)],
+      name: "Claude (Pro)",
+      primary: true
+    },
+    { metrics: [percentage("5h", 22, 20)], name: "Z.AI (Pro)" },
+    {
+      metrics: [
+        percentage("7d", 94, 1439),
+        { label: "credit", remaining: 57_500, type: "credit" }
+      ],
+      name: "ChatGPT (Pro)"
+    },
+    {
+      metrics: [
+        { label: "Premium", total: 1500, type: "usage", used: 211.3214152413 }
+      ],
+      name: "Copilot (Individual)"
+    }
+  ]);
   assert.equal(rows.length, 3);
-  assert.equal(plainText(rows[2]).length, 120);
+  const first = plainText(rows[1]);
+  const second = plainText(rows[2]);
+  assert.match(
+    first,
+    /^Claude {2}5h 74% left ↻4h25m · 7d 82% left ↻5d14h {2}│ {2}Z\.AI {2}5h 78% left ↻20m$/u
+  );
+  assert.match(
+    second,
+    /^ChatGPT {2}7d 6% left ↻23h59m · credit 57\.5k +│ {2}Copilot {2}Premium 211\.3\/1\.5k$/u
+  );
+  assert.equal(first.indexOf("│"), second.indexOf("│"));
 });
 
-test("결합한 제공자 행이 121자이면 다음 제공자를 새 줄에 둔다", async () => {
-  const providers = [
-    { label: "x", name: "A".repeat(30), percentage: 1 },
-    { label: "x", name: "B".repeat(72), percentage: 1 }
-  ];
-  const rows = await renderProviderRows(providers);
+test("column alignment follows reset-length transitions", async () => {
+  await Promise.all(
+    [
+      [1439, 1439],
+      [1440, 1439],
+      [1439, 1440],
+      [60, 59]
+    ].map(async ([left, right]) => {
+      const rows = await renderProviderRows([
+        { metrics: [percentage("7d", 18, left)], name: "Claude" },
+        { metrics: [percentage("5h", 21, 20)], name: "Z.AI" },
+        { metrics: [percentage("7d", 94, right)], name: "ChatGPT" },
+        { metrics: [percentage("Premium", 14)], name: "Copilot" }
+      ]);
+      assert.equal(rows.length, 3);
+      assert.equal(
+        plainText(rows[1]).indexOf("│"),
+        plainText(rows[2]).indexOf("│")
+      );
+    })
+  );
+});
+
+test("provider wrapping ignores ANSI and respects the 120-character limit", async () => {
+  await Promise.all(
+    [0, 1].map(async (extra) => {
+      const rows = await renderProviderRows([
+        { metrics: [percentage("x", 1)], name: "A".repeat(30) },
+        { metrics: [percentage("x", 1)], name: "B".repeat(61 + extra) }
+      ]);
+      assert.equal(rows.length, extra ? 3 : 2);
+      if (!extra) {
+        assert.equal(plainText(rows[1]).length, 120);
+      }
+    })
+  );
+  const rows = await renderProviderRows([
+    { metrics: [percentage("5h", 10)], name: "P".repeat(130) }
+  ]);
+  assert.equal(rows.length, 2);
+  assert.ok(plainText(rows[1]).startsWith("P".repeat(130)));
+});
+
+test("alignment padding does not push a pair beyond the row budget", async () => {
+  const rows = await renderProviderRows([
+    { metrics: [percentage("x", 1)], name: "A".repeat(55) },
+    { metrics: [percentage("x", 1)], name: "B" },
+    { metrics: [percentage("x", 1)], name: "C" },
+    { metrics: [percentage("x", 1)], name: "D".repeat(70) }
+  ]);
   assert.equal(rows.length, 4);
+  assert.ok(rows.slice(1).every((row) => plainText(row).length <= 120));
 });
 
-test("긴 제공자 행은 자르거나 나누지 않고 단독 행으로 유지한다", async () => {
-  const providers = [{ label: "5h", name: "P".repeat(130), percentage: 10 }];
-  const rows = await renderProviderRows(providers);
-  assert.equal(rows.length, 3);
-  assert.match(
-    plainText(rows[2]),
-    new RegExp(`${"P".repeat(130)} \\| 5h: `, "u")
+test("primary provider stays below session information and precedes other providers", async () => {
+  await Promise.all(
+    [
+      undefined,
+      {},
+      {
+        five_hour: { resets_at: nowMs / 1000 },
+        spend_limit: { used_percentage: null }
+      }
+    ].map(async (rateLimits) => {
+      const rows = await renderProviderRows(
+        [
+          { metrics: [percentage("7d", 20)], name: "Other" },
+          {
+            hideName: true,
+            metrics: [percentage("5h", 10)],
+            name: "Primary",
+            primary: true
+          }
+        ],
+        { input: { rate_limits: rateLimits } }
+      );
+      assert.equal(rows.length, 2);
+      assert.doesNotMatch(plainText(rows[0]), /Primary|Other/u);
+      assert.match(
+        plainText(rows[1]),
+        /^Primary {2}5h 90% left {2}│ {2}Other {2}7d 80% left$/u
+      );
+    })
   );
 });
 
-test("짧은 제공자들은 이전 예산에서와 같이 한 줄에 묶인다", async () => {
-  const providers = [
-    { label: "5h", name: "Z.AI (Pro)", percentage: 2 },
-    { label: "7d", name: "GLM", percentage: 8 }
-  ];
-  const rows = await renderProviderRows(providers);
-  assert.equal(rows.length, 3);
-  assert.equal(plainText(rows[2]), "Z.AI (Pro) | 5h: 2% | GLM | 7d: 8%");
-});
-
-test("ANSI 색상 제어 문자는 행 길이에 포함하지 않는다", async () => {
-  const providers = [
-    { label: "x", name: "A".repeat(30), percentage: 1 },
-    { label: "x", name: "B".repeat(71), percentage: 1 }
-  ];
-  const rows = await renderProviderRows(providers);
-  assert.equal(rows.length, 3);
-  assert.equal(plainText(rows[2]).length, 120);
-});
-
-test("헤더는 제공자 사용량 행과 합치지 않는다", async () => {
+test("native windows display remaining usage before addon providers", async () => {
   const rows = await renderProviderRows(
-    [{ label: "5h", name: "Short", percentage: 10 }],
-    { input: { model: { display_name: "Model" } } }
-  );
-  assert.equal(rows.length, 3);
-  assert.match(rows[0], /Model/u);
-  assert.match(plainText(rows[2]), /Short \| 5h: /u);
-});
-
-test("primary 설정은 hideName과 무관하게 사용량을 원가 행에 붙인다", async () => {
-  const rows = await renderProviderRows([
-    { label: "5h", name: "Primary", percentage: 10, primary: true }
-  ]);
-  assert.equal(rows.length, 2);
-  assert.match(plainText(rows[1]), /write:.* \| Primary \| 5h: /u);
-});
-
-test("hideName만 설정된 제공자는 원가 행에 붙이지 않는다", async () => {
-  const rows = await renderProviderRows([
-    { hideName: true, label: "5h", name: "Hidden", percentage: 10 }
-  ]);
-  assert.equal(rows.length, 3);
-  assert.match(plainText(rows[1]), /write:/u);
-  assert.match(plainText(rows[2]), /Hidden \| 5h: /u);
-});
-
-test("native rate_limits가 비어 있으면 primary 제공자를 원가 행에 붙인다", async () => {
-  const rows = await renderProviderRows(
-    [{ label: "5h", name: "Primary", percentage: 10, primary: true }],
-    { input: { rate_limits: {} } }
-  );
-  assert.equal(rows.length, 2);
-  assert.match(plainText(rows[1]), /write:.* \| Primary \| 5h: /u);
-});
-
-test("native rate_limits가 malformed여도 primary 제공자를 원가 행에 붙인다", async () => {
-  const rows = await renderProviderRows(
-    [{ label: "5h", name: "Primary", percentage: 10, primary: true }],
+    [
+      { metrics: [percentage("5h", 10)], name: "Primary", primary: true },
+      { metrics: [percentage("7d", 20)], name: "Other" }
+    ],
     {
       input: {
         rate_limits: {
-          five_hour: { resets_at: 1_700_000_000 },
-          spend_limit: { used_percentage: null }
+          five_hour: { resets_at: nowMs / 1000 + 2760, used_percentage: 37 },
+          seven_day: { resets_at: nowMs / 1000 + 219_600, used_percentage: 6 }
         }
       }
     }
-  );
-  assert.equal(rows.length, 2);
-  assert.match(plainText(rows[1]), /write:.* \| Primary \| 5h: /u);
-  assert.equal(plainText(rows[1]).match(/5h:/gu)?.length, 1);
-});
-
-test("native rate_limits가 있으면 primary 제공자를 다른 제공자와 함께 묶는다", async () => {
-  const rows = await renderProviderRows(
-    [
-      { label: "5h", name: "Primary", percentage: 10, primary: true },
-      { label: "7d", name: "Other", percentage: 20 }
-    ],
-    { input: { rate_limits: { five_hour: { used_percentage: 0 } } } }
   );
   assert.equal(rows.length, 3);
-  assert.match(rows[1], /5h:/u);
-  assert.doesNotMatch(rows[1], /Primary/u);
-  assert.equal(plainText(rows[2]), "Primary | 5h: 10% | Other | 7d: 20%");
-});
-
-test("spend_limit은 금액 쌍이 있으면 budget 형식으로 표시한다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const nowMs = 1_700_000_000_000;
-  const rows = await renderStatusline(
-    {
-      cost: {},
-      rate_limits: {
-        spend_limit: {
-          limit_usd: 500,
-          resets_at: nowMs / 1000 + 2760,
-          used_percentage: 62.8,
-          used_usd: 314.12
-        }
-      }
-    },
-    { branch: "", nowMs }
-  );
-  assert.equal(
+  assert.match(
     plainText(rows[1]),
-    "$0.00 | 0m | read:0(0) write:0(0) | spend: $314.12/$500.00 (0h 46m)"
+    /^Claude {2}5h 63% left ↻46m · 7d 94% left ↻2d13h {2}│ {2}Primary/u
   );
+  assert.match(plainText(rows[2]), /^Other/u);
 });
 
-test("spend_limit은 금액 없이 백분율만 있으면 백분율로 표시한다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const nowMs = 1_700_000_000_000;
-  const rows = await renderStatusline(
-    {
-      cost: {},
-      rate_limits: {
-        spend_limit: { resets_at: nowMs / 1000 + 2760, used_percentage: 62.8 }
-      }
-    },
-    { branch: "", nowMs }
-  );
-  assert.equal(
-    plainText(rows[1]),
-    "$0.00 | 0m | read:0(0) write:0(0) | spend: 62.8% (0h 46m)"
-  );
-});
-
-test("spend_limit 금액이 잘못되면 유효한 백분율로 표시한다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const rows = await renderStatusline(
-    {
-      cost: {},
-      rate_limits: {
-        spend_limit: { limit_usd: null, used_percentage: 40, used_usd: "12" }
-      }
-    },
-    { branch: "", nowMs: 1_700_000_000_000 }
-  );
-  assert.equal(
-    plainText(rows[1]),
-    "$0.00 | 0m | read:0(0) write:0(0) | spend: 40%"
-  );
-});
-
-test("spend 금액이 음수이거나 상한이 0 이하이면 백분율 폴백 또는 무시한다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const cases = [
-    {
-      expected: "spend: 40%",
-      spendLimit: { limit_usd: 500, used_percentage: 40, used_usd: -1 }
-    },
-    {
-      expected: "spend: 40%",
-      spendLimit: { limit_usd: 0, used_percentage: 40, used_usd: 10 }
-    },
-    {
-      expected: "spend: 40%",
-      spendLimit: { limit_usd: -500, used_percentage: 40, used_usd: 10 }
-    },
-    {
-      expected: "",
-      spendLimit: { limit_usd: 500, used_usd: -1 }
-    },
-    {
-      expected: "",
-      spendLimit: { used_percentage: -5 }
-    }
-  ];
-  const rowsList = await Promise.all(
-    cases.map(({ spendLimit }) =>
-      renderStatusline(
-        { cost: {}, rate_limits: { spend_limit: spendLimit } },
-        { branch: "", nowMs: 1_700_000_000_000 }
-      )
-    )
-  );
-  for (const [index, rows] of rowsList.entries()) {
-    const plainCost = plainText(rows[1]);
-    if (cases[index].expected) {
-      assert.ok(plainCost.includes(cases[index].expected), plainCost);
-      assert.ok(!plainCost.includes("$-"), plainCost);
-      assert.ok(!plainCost.includes("/$0.00"), plainCost);
-    } else {
-      assert.ok(!plainCost.includes("spend:"), plainCost);
-    }
-  }
-});
-
-test("음수 백분율만 있는 spend는 Claude addon 폴백을 허용한다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const imported = [];
-  const rows = await renderStatusline(
-    {
-      cost: {},
-      rate_limits: {
-        spend_limit: { limit_usd: 500, used_percentage: -1, used_usd: -10 }
-      }
-    },
-    {
-      addons: [
-        { name: "Claude", provider: "claude", script: "./claude-usage.mjs" }
-      ],
-      branch: "",
-      importModule: (url) => {
-        imported.push(decodeURIComponent(url.pathname));
-        return { fetchUsage: () => snapshot };
-      },
-      nowMs: 1_700_000_000_000
-    }
-  );
-  assert.ok(imported.some((filePath) => filePath.endsWith("claude-usage.mjs")));
-  assert.ok(!plainText(rows[1]).includes("spend:"));
-  assert.match(plainText(rows[2]), /Claude \| Chat: 1\/4/u);
-});
-
-test("spend 백분율이 100을 넘으면 붉게 표시한다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const cases = [
-    { limit_usd: 500, used_percentage: 120, used_usd: 600 },
-    { used_percentage: 120 }
-  ];
-  const rowsList = await Promise.all(
-    cases.map((spendLimit) =>
-      renderStatusline(
-        { cost: {}, rate_limits: { spend_limit: spendLimit } },
-        { branch: "", nowMs: 1_700_000_000_000 }
-      )
-    )
-  );
-  for (const rows of rowsList) {
-    const plainRow = plainText(rows[1]);
-    assert.match(plainRow, /spend: \$600\.00\/\$500\.00|spend: 120%/u);
-    assert.ok(rows[1].includes(`spend: ${RED_TEXT}`));
-  }
-});
-
-test("유효한 native 사용량이 있으면 Claude addon을 불러오지 않는다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const imported = [];
-  const rows = await renderStatusline(
-    { cost: {}, rate_limits: { five_hour: { used_percentage: 0 } } },
-    {
-      addons: [
-        { name: "Claude", provider: "claude", script: "./claude-usage.mjs" },
-        { name: "ZAI", provider: "zai", script: "./zai.mjs" }
-      ],
-      branch: "",
-      importModule: (url) => {
-        imported.push(decodeURIComponent(url.pathname));
-        return {
-          fetchUsage: () => ({
-            groups: [
-              {
-                label: "ZAI",
-                metrics: [{ label: "5h", percentage: 10 }]
-              }
-            ]
-          })
-        };
-      },
-      nowMs: 1_700_000_000_000
-    }
-  );
-  assert.ok(
-    !imported.some((filePath) => filePath.endsWith("claude-usage.mjs"))
-  );
-  assert.ok(imported.some((filePath) => filePath.endsWith("zai.mjs")));
-  assert.doesNotMatch(plainText(rows.join("\n")), /Claude/u);
-  assert.match(plainText(rows[2]), /ZAI \| 5h: 10%/u);
-});
-
-test("spend_limit 금액 쌍만 있어도 Claude addon을 불러오지 않는다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const imported = [];
-  const rows = await renderStatusline(
-    { cost: {}, rate_limits: { spend_limit: { limit_usd: 2, used_usd: 1 } } },
-    {
-      addons: [
-        { name: "Claude", provider: "claude", script: "./claude-usage.mjs" }
-      ],
-      branch: "",
-      importModule: (url) => {
-        imported.push(decodeURIComponent(url.pathname));
-        return {
-          fetchUsage: () => null
-        };
-      },
-      nowMs: 1_700_000_000_000
-    }
-  );
-  assert.deepEqual(imported, []);
-  assert.match(plainText(rows[1]), /spend: \$1\.00\/\$2\.00/u);
-});
-
-test("native rate_limits가 비어 있으면 Claude addon을 일반 제공자로 표시한다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const imported = [];
-  const rows = await renderStatusline(
-    { cost: {}, rate_limits: {} },
-    {
-      addons: [
-        { name: "Claude", provider: "claude", script: "./claude-usage.mjs" }
-      ],
-      branch: "",
-      importModule: (url) => {
-        imported.push(decodeURIComponent(url.pathname));
-        return {
-          fetchUsage: () => ({
-            groups: [
-              {
-                label: "Claude",
-                metrics: [{ label: "5h", percentage: 10 }]
-              }
-            ]
-          })
-        };
-      },
-      nowMs: 1_700_000_000_000
-    }
-  );
-  assert.ok(imported.some((filePath) => filePath.endsWith("claude-usage.mjs")));
-  assert.doesNotMatch(plainText(rows[1]), /Claude/u);
-  assert.match(plainText(rows[2]), /Claude \| 5h: 10%/u);
-});
-
-test("native 사용량이 malformed면 Claude addon fallback을 허용한다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const imported = [];
-  const rows = await renderStatusline(
-    {
-      cost: {},
-      rate_limits: {
-        five_hour: { resets_at: 1_700_000_000 },
+test("valid native usage skips the Claude collector; malformed limits allow fallback", async () => {
+  await Promise.all(
+    [
+      { five_hour: { used_percentage: 0 } },
+      { spend_limit: { limit_usd: 2, used_usd: 1 } },
+      {},
+      {
+        five_hour: { resets_at: nowMs / 1000 },
         seven_day: { used_percentage: -5 },
         spend_limit: { used_percentage: null, used_usd: "x" }
-      }
-    },
-    {
-      addons: [
-        { name: "Claude", provider: "claude", script: "./claude-usage.mjs" }
-      ],
-      branch: "",
-      importModule: (url) => {
-        imported.push(decodeURIComponent(url.pathname));
-        return { fetchUsage: () => snapshot };
       },
-      nowMs: 1_700_000_000_000
-    }
+      { spend_limit: { limit_usd: 500, used_percentage: -1, used_usd: -10 } }
+    ].map(async (rateLimits) => {
+      const imported = [];
+      const rows = await renderStatusline(
+        { rate_limits: rateLimits },
+        {
+          addons: [
+            {
+              name: "Claude",
+              provider: "claude",
+              script: "./claude-usage.mjs"
+            },
+            { name: "ZAI", script: "./zai.mjs" }
+          ],
+          branch: "",
+          importModule: (url) => {
+            imported.push(url.pathname);
+            return {
+              fetchUsage: () =>
+                url.pathname.endsWith("claude-usage.mjs")
+                  ? snapshot
+                  : {
+                      groups: [
+                        { label: "ZAI", metrics: [percentage("5h", 10)] }
+                      ]
+                    }
+            };
+          },
+          nowMs
+        }
+      );
+      const native =
+        rateLimits.five_hour?.used_percentage === 0 ||
+        rateLimits.spend_limit?.used_usd === 1;
+      assert.equal(
+        imported.some((file) => file.endsWith("claude-usage.mjs")),
+        !native
+      );
+      assert.match(plainText(rows.slice(1).join("\n")), /ZAI {2}5h 90% left/u);
+      assert.equal(
+        plainText(rows.slice(1).join("\n")).includes("Chat 1/4"),
+        !native
+      );
+    })
   );
-  assert.ok(imported.some((filePath) => filePath.endsWith("claude-usage.mjs")));
-  assert.doesNotMatch(plainText(rows[1]), /5h:|7d:|spend:/u);
-  assert.match(plainText(rows[2]), /Claude \| Chat: 1\/4/u);
 });
 
-test("배열이 아닌 addon 설정은 안전하게 무시한다", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
-  const plainRows = await renderStatusline(
-    {},
-    { addons: "claude", branch: "" }
+test("spend limits preserve budgets and fall back only to valid percentages", async () => {
+  const cases = [
+    [
+      {
+        limit_usd: 500,
+        resets_at: nowMs / 1000 + 2760,
+        used_percentage: 62.8,
+        used_usd: 314.12
+      },
+      "Claude  spend $314.12/$500.00 ↻46m"
+    ],
+    [{ used_percentage: 62.8 }, "Claude  spend 37.2% left"],
+    [
+      { limit_usd: null, used_percentage: 40, used_usd: "12" },
+      "Claude  spend 60% left"
+    ],
+    [
+      { limit_usd: 500, used_percentage: 40, used_usd: -1 },
+      "Claude  spend 60% left"
+    ],
+    [
+      { limit_usd: 0, used_percentage: 40, used_usd: 10 },
+      "Claude  spend 60% left"
+    ],
+    [
+      { limit_usd: -500, used_percentage: 40, used_usd: 10 },
+      "Claude  spend 60% left"
+    ],
+    [{ limit_usd: 500, used_usd: -1 }, ""],
+    [{ used_percentage: -5 }, ""]
+  ];
+  await Promise.all(
+    cases.map(async ([spendLimit, expected]) => {
+      const rows = await renderStatusline(
+        { rate_limits: { spend_limit: spendLimit } },
+        { branch: "", nowMs }
+      );
+      assert.equal(plainText(rows[1] || ""), expected);
+    })
   );
-  assert.equal(plainRows.length, 2);
-  const nativeRows = await renderStatusline(
-    { rate_limits: { five_hour: { used_percentage: 10 } } },
-    { addons: 42, branch: "" }
+  await Promise.all(
+    [
+      { limit_usd: 500, used_percentage: 120, used_usd: 600 },
+      { used_percentage: 120 }
+    ].map(async (spendLimit) => {
+      const rows = await renderStatusline(
+        { rate_limits: { spend_limit: spendLimit } },
+        { branch: "", nowMs }
+      );
+      assert.ok(rows[1].includes(`spend ${WARNING_COLOR}`));
+      assert.match(
+        plainText(rows[1]),
+        /spend (?:\$600\.00\/\$500\.00|0% left)/u
+      );
+    })
   );
+});
+
+test("malformed addon configuration is ignored", async () => {
+  const [plainRows, nativeRows] = await Promise.all([
+    renderStatusline({}, { addons: "claude", branch: "" }),
+    renderStatusline(
+      { rate_limits: { five_hour: { used_percentage: 10 } } },
+      { addons: 42, branch: "" }
+    )
+  ]);
+  assert.equal(plainRows.length, 1);
   assert.equal(nativeRows.length, 2);
 });
 
-test("credit 지표는 USD 금액과 일반 크레딧을 백분율 없이 표시한다", async () => {
-  const { renderSnapshot } = await import("./statusline.mjs");
-  const usdLine = renderSnapshot(
-    { name: "Claude" },
-    {
-      groups: [
-        {
-          label: "Claude",
-          metrics: [
-            {
-              currency: "USD",
-              label: "credit",
-              remaining: 12.5,
-              type: "credit"
-            }
-          ]
-        }
-      ]
-    }
-  );
-  assert.equal(plainText(usdLine), "Claude | credit: $12.50");
-  const genericLine = renderSnapshot(
-    { name: "ChatGPT" },
-    {
-      groups: [
-        {
-          label: "ChatGPT",
-          metrics: [{ label: "credit", remaining: 2500, type: "credit" }]
-        }
-      ]
-    }
-  );
-  assert.equal(plainText(genericLine), "ChatGPT | credit: 2500");
-});
-
-test("credit 지표는 showAbove 임계값에 숨겨지지 않는다", async () => {
-  const { renderSnapshot } = await import("./statusline.mjs");
+test("credits and usage counts are compact without changing raw values", () => {
+  for (const [metric, expected] of [
+    [{ currency: "USD", remaining: 12.5, type: "credit" }, "$12.50"],
+    [{ remaining: 57_500, type: "credit" }, "57.5k"],
+    [{ total: 1500, type: "usage", used: 211.3214152413 }, "211.3/1.5k"],
+    [{ total: 1500, type: "usage", used: 211.39 }, "211.4/1.5k"],
+    [{ total: 1500, type: "usage", used: 211 }, "211/1.5k"]
+  ]) {
+    const original = structuredClone(metric);
+    assert.equal(
+      plainText(
+        renderSnapshot(
+          { name: "Test" },
+          { groups: [{ metrics: [{ label: "value", ...metric }] }] }
+        )
+      ),
+      `Test  value ${expected}`
+    );
+    assert.deepEqual(metric, original);
+  }
   const line = renderSnapshot(
-    { name: "Claude", showAbove: 5 },
+    { name: "Test", showAbove: 5 },
     {
       groups: [
         {
-          label: "Claude",
           metrics: [
-            { label: "5h", percentage: 2, type: "percentage" },
+            percentage("5h", 2),
             { currency: "USD", label: "credit", remaining: 3, type: "credit" }
           ]
         }
       ]
     }
   );
-  const plainLine = plainText(line);
-  assert.doesNotMatch(plainLine, /5h:/u);
-  assert.match(plainLine, /credit: \$3\.00/u);
+  assert.equal(plainText(line), "Test  credit $3.00");
 });
 
-test("제공자·그룹 제목은 굵게 표시하고 숨긴 제목에는 굵기를 넣지 않는다", async () => {
-  const { renderSnapshot } = await import("./statusline.mjs");
-  const labeled = renderSnapshot(
-    { name: "Fallback" },
-    {
-      groups: [{ label: "ZAI", metrics: [{ label: "5h", percentage: 10 }] }]
-    }
+test("provider names use muted blue and hidden names leave no empty title", () => {
+  const groups = [{ metrics: [percentage("5h", 10)] }];
+  assert.ok(
+    renderSnapshot({ name: "Fallback" }, { groups }).startsWith(
+      `${PROVIDER_COLOR}Fallback${RESET_CODE}  `
+    )
   );
-  assert.ok(labeled.startsWith(`${BOLD}ZAI${RESET_CODE} | `));
-  const fallback = renderSnapshot(
-    { name: "Fallback" },
-    {
-      groups: [{ metrics: [{ label: "5h", percentage: 10 }] }]
-    }
+  assert.equal(
+    plainText(renderSnapshot({ hideName: true, name: "Fallback" }, { groups })),
+    "5h 90% left"
   );
-  assert.ok(fallback.startsWith(`${BOLD}Fallback${RESET_CODE} | `));
-  const hidden = renderSnapshot(
-    { hideName: true, name: "Fallback" },
-    {
-      groups: [{ metrics: [{ label: "5h", percentage: 10 }] }]
-    }
-  );
-  assert.ok(!hidden.includes(BOLD));
-  assert.match(plainText(hidden), /5h: 10%/u);
 });
 
-test("hideLabels filters metric rows", async () => {
-  const { renderSnapshot } = await import("./statusline.mjs");
+test("hideLabels filters metric rows", () => {
   const line = renderSnapshot(addon, snapshot);
-  assert.match(line, /Chat: /u);
-  assert.match(line, /Completions: /u);
+  assert.match(line, /Chat /u);
+  assert.match(line, /Completions /u);
   assert.doesNotMatch(line, /Premium/u);
 });
 
-test("all metrics hidden yields no bare group", async () => {
-  const { renderSnapshot } = await import("./statusline.mjs");
+test("all metrics hidden yields no bare group", () => {
   const line = renderSnapshot(
     { hideLabels: ["Chat", "Completions", "Premium"] },
     snapshot
@@ -636,14 +468,12 @@ test("all metrics hidden yields no bare group", async () => {
   assert.equal(line, "");
 });
 
-test("no hideLabels keeps all metrics visible", async () => {
-  const { renderSnapshot } = await import("./statusline.mjs");
+test("no hideLabels keeps all metrics visible", () => {
   const line = renderSnapshot({}, snapshot);
-  assert.match(line, /Premium: /u);
+  assert.match(line, /Premium /u);
 });
 
-test("raw labels remain available for hideLabels and showAbove", async () => {
-  const { renderSnapshot } = await import("./statusline.mjs");
+test("raw labels remain available for hideLabels and showAbove", () => {
   const groupLabel = "Group\nRAW\u001B[31m";
   const metricLabel = "Metric\nRAW\u001B[31m";
   const rawSnapshot = {
@@ -668,7 +498,6 @@ test("raw labels remain available for hideLabels and showAbove", async () => {
 });
 
 test("external addon names and metric values stay on one plain-text row", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
   const rows = await renderStatusline(
     {},
     {
@@ -694,18 +523,17 @@ test("external addon names and metric values stay on one plain-text row", async 
     }
   );
   const output = rows.join("\n");
-  assert.equal(output.split("\n").length, 3);
+  assert.equal(output.split("\n").length, 2);
   assert.ok(
     plainText(output).includes(
-      "Credit FAKE GROUP | Remaining: 10 FAKE ROW PARAGRAPH END C1"
+      "Credit FAKE GROUP  Remaining 10 FAKE ROW PARAGRAPH END C1"
     )
   );
   assert.equal(output.includes(RED_TEXT), false);
-  assert.ok(output.includes(`${BOLD}Credit FAKE GROUP${RESET_CODE}`));
+  assert.ok(output.includes(`${PROVIDER_COLOR}Credit FAKE GROUP${RESET_CODE}`));
 });
 
 test("external header strings stay on one plain-text row", async () => {
-  const { renderStatusline } = await import("./statusline.mjs");
   const rows = await renderStatusline(
     {
       effort: { level: "High\r\nFAKE ROW\u001B[31m" },
@@ -718,15 +546,15 @@ test("external header strings stay on one plain-text row", async () => {
     { branch: "branch\nFAKE ROW\u001B[31m" }
   );
   const output = rows.join("\n");
-  assert.equal(output.split("\n").length, 2);
+  assert.equal(output.split("\n").length, 1);
   assert.ok(
     plainText(rows[0]).includes(
-      "[Model FAKE ROW (High FAKE ROW)] project(current FAKE ROW) | branch FAKE ROW"
+      "Model FAKE ROW High FAKE ROW · project/current FAKE ROW · branch FAKE ROW"
     )
   );
   assert.equal(output.includes(RED_TEXT), false);
-  assert.ok(output.includes("\u001B[36m"));
-  assert.ok(output.includes("\u001B[35m"));
+  assert.ok(output.includes("\u001B[38;2;246;226;183m"));
+  assert.ok(output.includes("\u001B[38;2;143;179;239m"));
 });
 
 test("resolves large credential reference lists without stack overflow", async () => {
@@ -850,7 +678,7 @@ test("public CLI resolves addon settings from the configured directory", async (
         CLAUDE_CONFIG_DIR: configDir,
         HOME: homeDir
       });
-      assert.match(output, /CustomFixture \| Probe: 10%/u);
+      assert.match(output, /CustomFixture {2}Probe 90% left/u);
       assert.doesNotMatch(output, /HomeFixture/u);
     }
   );
@@ -859,12 +687,12 @@ test("public CLI resolves addon settings from the configured directory", async (
       CLAUDE_CONFIG_DIR: "",
       HOME: homeDir
     });
-    assert.match(output, /HomeFixture \| Probe: 10%/u);
+    assert.match(output, /HomeFixture {2}Probe 90% left/u);
     assert.doesNotMatch(output, /CustomFixture/u);
   });
   await t.test("unset CLAUDE_CONFIG_DIR falls back to HOME", () => {
     const output = runPlainText(fallbackProjectDir, { HOME: homeDir });
-    assert.match(output, /HomeFixture \| Probe: 10%/u);
+    assert.match(output, /HomeFixture {2}Probe 90% left/u);
     assert.doesNotMatch(output, /CustomFixture/u);
   });
   await t.test(
@@ -874,7 +702,7 @@ test("public CLI resolves addon settings from the configured directory", async (
         CLAUDE_CONFIG_DIR: configDir,
         HOME: homeDir
       });
-      assert.match(output, /ProjectFixture \| Probe: 10%/u);
+      assert.match(output, /ProjectFixture {2}Probe 90% left/u);
       assert.doesNotMatch(output, /HomeFixture|CustomFixture/u);
     }
   );
@@ -887,7 +715,7 @@ test("public CLI resolves addon settings from the configured directory", async (
   });
   await t.test("project addon settings work when HOME is unset", () => {
     const output = runPlainText(projectDir, { CLAUDE_CONFIG_DIR: configDir });
-    assert.match(output, /ProjectFixture \| Probe: 10%/u);
+    assert.match(output, /ProjectFixture {2}Probe 90% left/u);
   });
   await t.test(
     "script symlink invocation renders configured provider output",
@@ -897,19 +725,19 @@ test("public CLI resolves addon settings from the configured directory", async (
         { HOME: homeDir },
         scriptSymlinkPath
       );
-      assert.equal(output.trimEnd().split("\n").length, 3);
-      assert.ok(plainText(output).includes("HomeFixture | Probe: 10%"));
+      assert.equal(output.trimEnd().split("\n").length, 2);
+      assert.ok(plainText(output).includes("HomeFixture  Probe 90% left"));
     }
   );
   await t.test(
-    "directory symlink invocation renders two rows through the configured command",
+    "directory symlink invocation renders one row through the configured command",
     () => {
       const output = run(
         fallbackProjectDir,
         { CLAUDE_CONFIG_DIR: symlinkedConfigDir, HOME: homeDir },
         path.join(symlinkedConfigDir, "statusline.mjs")
       );
-      assert.equal(output.trimEnd().split("\n").length, 2);
+      assert.equal(output.trimEnd().split("\n").length, 1);
     }
   );
   await t.test(
@@ -924,16 +752,16 @@ test("public CLI resolves addon settings from the configured directory", async (
         },
         path.join(symlinkedConfigDir, "statusline.mjs")
       );
-      assert.equal(output.trimEnd().split("\n").length, 2);
+      assert.equal(output.trimEnd().split("\n").length, 1);
     }
   );
   await t.test("supplied labels stay in one plain-text display row", () => {
     const output = run(displayProjectDir, { HOME: homeDir });
     const rows = output.trimEnd().split("\n");
-    assert.equal(rows.length, 3);
-    assert.match(plainText(output), /EVIL FAKE ROW \| 5h SPOOF: 10%/u);
-    assert.ok(output.includes(`${BOLD}EVIL FAKE ROW${RESET_CODE}`));
-    assert.ok(output.includes("\u001B[32m"));
+    assert.equal(rows.length, 2);
+    assert.match(plainText(output), /EVIL FAKE ROW {2}5h SPOOF 90% left/u);
+    assert.ok(output.includes(`${PROVIDER_COLOR}EVIL FAKE ROW${RESET_CODE}`));
+    assert.ok(output.includes("\u001B[38;2;171;223;167m"));
     assert.equal(output.includes(RED_TEXT), false);
   });
   await t.test("newline workspace basename stays within its header row", () => {
@@ -943,7 +771,7 @@ test("public CLI resolves addon settings from the configured directory", async (
       CLAUDE_CONFIG_DIR: path.join(fixtureDir, "empty-config"),
       HOME: homeDir
     });
-    assert.equal(output.trimEnd().split("\n").length, 2);
+    assert.equal(output.trimEnd().split("\n").length, 1);
     assert.match(plainText(output), /project name/u);
   });
   await t.test("malformed input through a symlink remains silent", () => {
@@ -1121,7 +949,6 @@ test("Codex additional-limit labels stay inside the display row", async (t) => {
     JSON.stringify({ tokens: { access_token: "fixture-token" } })
   );
   const { fetchUsage } = await import("./statusline/codex-usage.mjs");
-  const { renderStatusline } = await import("./statusline.mjs");
   const codexSnapshot = await fetchUsage({
     cache: false,
     fetch: () => ({
@@ -1155,7 +982,7 @@ test("Codex additional-limit labels stay inside the display row", async (t) => {
     }
   );
   const output = rows.join("\n");
-  assert.equal(output.trimEnd().split("\n").length, 3);
-  assert.match(plainText(output), /Additional FAKE ROW \| 5h: 10%/u);
+  assert.equal(output.trimEnd().split("\n").length, 2);
+  assert.match(plainText(output), /Additional FAKE ROW {2}5h 90% left/u);
   assert.equal(output.includes(RED_TEXT), false);
 });

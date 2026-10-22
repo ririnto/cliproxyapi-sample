@@ -47,12 +47,15 @@ hide_full_access_warning = true
 hide_rate_limit_model_nudge = true
 
 [tui]
+status_line_use_colors = true
 status_line = [
   "model-with-reasoning",
-  "current-dir",
+  "project-name",
   "git-branch",
-  "permissions",
-  "context-remaining"
+  "context-used",
+  "five-hour-limit",
+  "weekly-limit",
+  "used-tokens"
 ]
 
 [marketplaces.i-have-adhd]
