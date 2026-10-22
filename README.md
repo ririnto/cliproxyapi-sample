@@ -202,7 +202,7 @@ Run `pnpm install --frozen-lockfile` from the repository root.
 Installation activates Husky's Git hooks.
 The hooks run `pnpm run pre-commit` and `pnpm run pre-push` respectively.
 Both scripts run Markdownlint, Ultracite and the offline regression tests.
-The pnpm overrides select patched TOML and math parser dependencies.
+The pnpm override selects a patched math parser dependency.
 Run `pnpm run fix` to apply Markdownlint and Ultracite fixes.
 Run `pnpm run pre-push` to repeat the complete local gate.
 The Checks workflow uses the same gate on Node.js 24.
