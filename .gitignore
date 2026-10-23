@@ -3,3 +3,6 @@ logs/
 plugins/
 node_modules/
 /config.yaml
+
+.claude/worktrees/
+.worktrees/
