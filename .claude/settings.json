@@ -26,7 +26,7 @@
     "kotlin-lsp@claude-plugins-official": true,
     "playwright@claude-plugins-official": false,
     "plugin-dev@claude-plugins-official": true,
-    "superpowers@claude-plugins-official": true,
+    "superpowers@superpowers-marketplace": true,
     "swift-lsp@claude-plugins-official": false,
     "typescript-lsp@claude-plugins-official": true,
     "workgraph@sinon": true
@@ -105,6 +105,12 @@
       "source": {
         "repo": "ririnto/sinon",
         "source": "github"
+      }
+    },
+    "superpowers-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "obra/superpowers-marketplace"
       }
     }
   },

@@ -65,3 +65,10 @@ ref = "main"
 
 [plugins."i-have-adhd@i-have-adhd"]
 enabled = true
+
+[marketplaces.superpowers-marketplace]
+source_type = "git"
+source = "https://github.com/obra/superpowers-marketplace.git"
+
+[plugins."superpowers@superpowers-marketplace"]
+enabled = true
