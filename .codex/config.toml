@@ -72,3 +72,20 @@ source = "https://github.com/obra/superpowers-marketplace.git"
 
 [plugins."superpowers@superpowers-marketplace"]
 enabled = true
+
+[marketplaces.cursor-plugins]
+ref = "main"
+source = "https://github.com/cursor/plugins.git"
+source_type = "git"
+
+[plugins."workgraph@sinon"]
+enabled = true
+
+[plugins."codegraph@sinon"]
+enabled = true
+
+[plugins."ddgs@sinon"]
+enabled = true
+
+[plugins."pstack@cursor-plugins"]
+enabled = true
