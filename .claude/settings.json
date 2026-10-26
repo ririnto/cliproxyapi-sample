@@ -63,7 +63,7 @@
     "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
     "CLAUDE_CODE_GATEWAY_HINT_HEADERS": "true",
     "CLAUDE_CODE_GOAL_CHECKIN_MINUTES": "4",
-    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "400000",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "305000",
     "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "270000",
     "CLAUDE_CODE_REMOTE_SEND_KEEPALIVES": "1",
     "CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS": "4",
@@ -173,7 +173,7 @@
       "maxEffortLevel": "xhigh"
     },
     "claude-haiku-5-5": {
-      "autoCompactWindow": 100000,
+      "autoCompactWindow": 128000,
       "effortLevel": "medium",
       "maxEffortLevel": "high"
     },
@@ -225,7 +225,12 @@
   },
   "permissions": {
     "defaultMode": "bypassPermissions",
-    "deny": ["Agent(claude)", "AskUserQuestion", "EnterPlanMode"]
+    "deny": [
+      "Agent(claude)",
+      "AskUserQuestion",
+      "EnterPlanMode",
+      "Bash(sleep*)"
+    ]
   },
   "promptSuggestionEnabled": false,
   "respondToBashCommands": false,
