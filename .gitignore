@@ -3,6 +3,7 @@ logs/
 plugins/
 node_modules/
 /config.yaml
+.codex/models_cache.json
 
 .claude/worktrees/
 .worktrees/
