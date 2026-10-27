@@ -43,9 +43,9 @@ brew services restart cliproxyapi
 | 선택자 | 대상 |
 | --- | --- |
 | `ANTHROPIC_DEFAULT_FABLE_MODEL` | `gpt-6-astra` |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `glm-5.3-flash` |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `gpt-6-luna` |
 | `ANTHROPIC_DEFAULT_OPUS_MODEL` | `gpt-6.1-sol` |
-| `ANTHROPIC_DEFAULT_SONNET_MODEL` | `gpt-6-luna` |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | `gpt-6.1-terra` |
 
 `ANTHROPIC_CUSTOM_MODEL_OPTION`은 `glm-5.3`을 모델 선택기에 추가한다.
 모델별 `modelSettings.autoCompactWindow` 설정에는 Claude Code v2.1.288 이상이 필요하다.
