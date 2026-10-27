@@ -1,6 +1,7 @@
 approval_policy = "never"
-model = "gpt-6.1-sol"
+model = "gpt-6.1-terra"
 model_catalog_json = "model_catalog.json"
+model_reasoning_effort = "high"
 model_verbosity = "low"
 openai_base_url = "http://localhost:8317/v1"
 personality = "none"
@@ -17,13 +18,13 @@ memories = true
 prevent_idle_sleep = true
 
 [features.code_mode]
-default_exec_yield_time_ms = 240000
+default_exec_yield_time_ms = 270000
 
 [features.context_management]
 experimental_mode = true
 
 [features.multi_agent_v2]
-default_wait_timeout_ms = 240000
+default_wait_timeout_ms = 270000
 enabled = true
 hide_spawn_agent_metadata = false
 min_wait_timeout_ms = 120000
