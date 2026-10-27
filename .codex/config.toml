@@ -1,6 +1,6 @@
 approval_policy = "never"
 model = "gpt-6.1-sol"
-model_catalog_json = "models.json"
+model_catalog_json = "model_catalog.json"
 model_verbosity = "low"
 openai_base_url = "http://localhost:8317/v1"
 personality = "none"
