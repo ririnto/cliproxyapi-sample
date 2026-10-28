@@ -5,7 +5,7 @@
 Homebrew로 설치한 CLIProxyAPI는 `$(brew --prefix)/etc/cliproxyapi.conf`에서 설정을 읽는다.
 Apple Silicon의 기본 경로는 `/opt/homebrew/etc/cliproxyapi.conf`이고 Intel Mac의 기본 경로는 `/usr/local/etc/cliproxyapi.conf`다.
 
-`config.example.yaml`은 공식 CLIProxyAPI v8 예시의 주석을 유지한 설정이다.
+`config.example.yaml`은 CLIProxyAPI v8 설정 예시다.
 CLIProxyAPI v8 이상을 설치한다.
 `__ZAI_API_KEY__`를 Z.ai API 키로 바꾼다.
 `access.api-keys`는 주석 처리되어 로컬 client 인증을 사용하지 않는다.
@@ -53,7 +53,6 @@ brew services restart cliproxyapi
 ### Model pricing
 
 `.claude/settings.json`의 `modelPricing.overrides`는 모델별 백만 토큰당 USD 가격을 담는다.
-가격 데이터는 기존 `.claude/managed-settings.json` 템플릿에서 일반 프로젝트 설정으로 통합되었고 템플릿 파일은 삭제되었다.
 Claude Code 2.1.302는 사용자, 프로젝트, 로컬 설정과 `--settings`에서 `modelPricing`을 무시한다.
 따라서 이 값은 이 범위에서 효과가 없는 요청된 구성 데이터다.
 가격을 적용하려면 지원되는 관리형 설정 범위에 배포해야 한다.
