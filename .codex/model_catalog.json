@@ -716,7 +716,7 @@
         }
       ],
       "shell_type": "unified_exec",
-      "visibility": "list",
+      "visibility": "hide",
       "supported_in_api": true,
       "priority": 4,
       "additional_speed_tiers": ["fast"],
@@ -925,7 +925,7 @@
         }
       ],
       "shell_type": "unified_exec",
-      "visibility": "list",
+      "visibility": "hide",
       "supported_in_api": true,
       "priority": 6,
       "additional_speed_tiers": ["fast"],
@@ -1018,7 +1018,7 @@
         }
       ],
       "shell_type": "unified_exec",
-      "visibility": "list",
+      "visibility": "hide",
       "supported_in_api": true,
       "priority": 8,
       "additional_speed_tiers": ["fast"],
@@ -1107,7 +1107,7 @@
         }
       ],
       "shell_type": "unified_exec",
-      "visibility": "list",
+      "visibility": "hide",
       "supported_in_api": true,
       "priority": 9,
       "additional_speed_tiers": ["fast"],
