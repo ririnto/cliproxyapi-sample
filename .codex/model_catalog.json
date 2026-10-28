@@ -528,7 +528,7 @@
         "limit": 10000
       },
       "supports_image_detail_original": false,
-      "context_window": 272000,
+      "context_window": 872000,
       "max_context_window": 872000,
       "comp_hash": null,
       "effective_context_window_percent": 95,
@@ -586,7 +586,7 @@
         "limit": 10000
       },
       "supports_image_detail_original": false,
-      "context_window": 272000,
+      "context_window": 872000,
       "max_context_window": 872000,
       "comp_hash": null,
       "effective_context_window_percent": 95,
