@@ -222,9 +222,3 @@ Run the complete local gate before review and publication.
 Review the full proposed diff and record actual checks and untested behavior.
 Confirm the merged change on `main` and clean up owned temporary resources.
 Keep live CLIProxyAPI services, settings and authentication assets untouched.
-
-These practices follow [pstack's lifecycle guide][pstack-lifecycle].
-The check scripts align with [Sinon's harness tooling][sinon-tooling].
-
-[pstack-lifecycle]: https://github.com/cursor/plugins/blob/main/pstack/docs/guide/06-verify-and-ship.md
-[sinon-tooling]: https://github.com/ririnto/sinon/tree/main/plugins/harness/tooling/pnpm
