@@ -42,6 +42,10 @@ url = "https://mcp.context7.com/mcp"
 [mcp_servers.grep_app]
 url = "https://mcp.grep.app"
 
+[memories]
+extract_model = "gpt-6-luna"
+consolidation_model = "gpt-6.1-terra"
+
 [notice]
 fast_default_opt_out = true
 hide_full_access_warning = true
