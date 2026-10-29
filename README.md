@@ -90,8 +90,9 @@ Claude Code 2.1.302는 인식되지 않는 커스텀 모델 ID의 용량을 순�
 
 ### Agent guidance ownership
 
-[Shared engineering guidance](.agents/engineering.md) owns common rules.
-Codex and Claude guidance provide host-scoped instructions.
+[Shared engineering guidance](.agents/engineering.md) contains common rules.
+The `.codex/AGENTS.md` and `.claude/AGENTS.md` templates do not import that guidance.
+Check each host's instruction discovery rules before relying on automatic loading.
 Place user-level instruction files under one parent:
 
 - `.agents/engineering.md`
