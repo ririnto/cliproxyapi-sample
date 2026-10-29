@@ -194,7 +194,7 @@ statusline 명령은 비어 있지 않은 `CLAUDE_CONFIG_DIR`를 사용한다.
 
 ## Development checks
 
-Use Node.js 24 LTS and the pnpm version declared in `.tool-versions`.
+Use Node.js 26 LTS and the pnpm version declared in `.tool-versions`.
 Run `pnpm install --frozen-lockfile` from the repository root.
 Installation activates Husky's Git hooks.
 The hooks run `pnpm run pre-commit` and `pnpm run pre-push` respectively.
@@ -202,7 +202,7 @@ Both scripts run Markdownlint, Ultracite and the offline regression tests.
 The pnpm override selects a patched math parser dependency.
 Run `pnpm run fix` to apply Markdownlint and Ultracite fixes.
 Run `pnpm run pre-push` to repeat the complete local gate.
-The Checks workflow uses the same gate on Node.js 24.
+The Checks workflow uses the same gate on Node.js 26.
 It also validates Docker Compose without starting services.
 Tests use isolated temporary directories and local fixtures.
 They do not require provider credentials or service requests.

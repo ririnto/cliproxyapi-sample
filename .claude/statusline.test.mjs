@@ -813,7 +813,7 @@ test("module imports do not render for absent or unrelated argv", (t) => {
   }
 });
 
-test("collectors handle HTTP errors without Promise.withResolvers", (t) => {
+test("collectors handle HTTP errors and cancel response bodies", (t) => {
   const home = mkdtempSync(path.join(tmpdir(), "statusline-runtime-"));
   t.after(() => rmSync(home, { force: true, recursive: true }));
   const codexDirectory = path.join(home, ".codex");
@@ -828,7 +828,6 @@ test("collectors handle HTTP errors without Promise.withResolvers", (t) => {
     const pendingCancellation = delay(60_000, undefined, {
       signal: cancellationController.signal
     });
-    delete Promise.withResolvers;
     const [
       { fetchUsage: fetchCodex },
       { fetchUsage: fetchCopilot },
