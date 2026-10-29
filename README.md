@@ -92,11 +92,10 @@ Claude Code 2.1.302는 인식되지 않는 커스텀 모델 ID의 용량을 순�
 
 [Shared engineering guidance](.agents/engineering.md) owns common rules.
 Repository rules live in `AGENTS.md`.
-The Claude and Codex instruction files link to the shared guidance.
+Repository and Codex guidance link to the shared guidance.
 Place user-level instruction files under one parent:
 
 - `.agents/engineering.md`
-- `.claude/CLAUDE.md`
 - `.codex/AGENTS.md`
 
 Instruction reads do not import config or activate plugins.

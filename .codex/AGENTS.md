@@ -1,8 +1,8 @@
-# Codex Engineering Guidance
+# Codex engineering guidance
 
 Read [shared engineering guidance](../.agents/engineering.md).
 
-## Chat Titles
+## Set chat titles
 
 Apply these title rules in main when the title tool is available.
 
