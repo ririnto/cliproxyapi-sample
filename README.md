@@ -91,8 +91,7 @@ Claude Code 2.1.302는 인식되지 않는 커스텀 모델 ID의 용량을 순�
 ### Agent guidance ownership
 
 [Shared engineering guidance](.agents/engineering.md) owns common rules.
-Repository rules live in `AGENTS.md`.
-Repository and Codex guidance link to the shared guidance.
+Codex guidance links to the shared guidance.
 Place user-level instruction files under one parent:
 
 - `.agents/engineering.md`
