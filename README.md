@@ -194,7 +194,7 @@ statusline 명령은 비어 있지 않은 `CLAUDE_CONFIG_DIR`를 사용한다.
 
 ## Development checks
 
-Use Node.js 24 LTS and the pnpm version declared in `package.json`.
+Use Node.js 24 LTS and the pnpm version declared in `.tool-versions`.
 Run `pnpm install --frozen-lockfile` from the repository root.
 Installation activates Husky's Git hooks.
 The hooks run `pnpm run pre-commit` and `pnpm run pre-push` respectively.

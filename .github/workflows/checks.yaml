@@ -19,6 +19,7 @@ jobs:
           node-version: "24"
       - uses: pnpm/action-setup@v6
         with:
+          version: 12.15.0
           cache: true
       - run: pnpm install --frozen-lockfile
       - run: pnpm run pre-push
