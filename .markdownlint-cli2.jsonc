@@ -5,9 +5,6 @@
     },
     "docs/no-box-drawing": true,
     "no-emphasis-as-heading": true,
-    "single-title": {
-      "front_matter_title": ""
-    },
     "table-column-style": {
       "style": "compact"
     }
