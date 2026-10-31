@@ -1,0 +1,37 @@
+---
+description: Pstack model configuration for Claude Code with Codex aliases
+alwaysApply: true
+---
+# Pstack model configuration
+
+## budget: small (medium)
+
+| Pstack role | Task difficulty | Claude Code model and effort |
+| --- | --- | --- |
+| feature, refactoring | Routine | Sonnet(medium) |
+| bug-fix | Routine | Sonnet(medium) |
+| perf-issue | High | Sonnet(high) |
+| hillclimb | High | Sonnet(high) |
+| judgment and prose | Routine | Sonnet(medium) |
+| hardest tasks | High | Opus(high) |
+| how explorer | Low | Haiku(low) |
+| how explainer | Routine | Sonnet(medium) |
+| why investigators | High | Sonnet(high) |
+| why synthesizer | High | Sonnet(high) |
+| reflect tooling | Low | Haiku(low) |
+| reflect judgment, divergent, synthesizer | High | Sonnet(high) |
+| arena runners | Low or high | Haiku(low), Sonnet(high) |
+| arena cross-judge pool | Low or high | Haiku(low), Sonnet(high) |
+| swarm workers | Low | Haiku(low) |
+| architect runners | Low or high | Haiku(low), Sonnet(high) |
+| interrogate reviewers | Low or high | Haiku(low), Sonnet(high) |
+
+## Codex aliases
+
+| Claude Code model | Codex alias |
+| --- | --- |
+| Haiku | luna |
+| Sonnet | terra |
+| Opus | sol |
+
+For native Codex tasks, resolve the alias to the currently available model ID and pass the model ID to the task tool.
