@@ -1,5 +1,7 @@
 # Engineering Defaults
 
+> When a repository's documentation and its existing code disagree, follow the conventions used in the existing code, and in your final reply point out each inconsistency you found between the documentation and the code.
+
 - Stop discovery when the implementation decision has sufficient evidence.
 - Prefer existing code, platform capabilities, and installed dependencies before adding custom code or packages.
 - Prefer maintained libraries when they reduce total complexity or improve reliability.
