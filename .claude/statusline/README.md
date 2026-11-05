@@ -60,3 +60,24 @@ Trailing `Pro` and `Individual` plan suffixes are omitted from provider names.
 These display changes do not change collector data or credentials.
 Cache behavior is unchanged.
 Use the repository's installation procedure to copy the updated `statusline.mjs`.
+
+## Subagent rows
+
+The project's `subagentStatusLine` setting renders each subagent row in the
+subagent panel through `subagent-statusline.mjs`.
+Claude Code sends the visible rows as JSON on stdin and the script answers
+with one JSON object per row.
+Each row shows the agent name, status, progress summary, and running token
+count.
+The name falls back to the agent type, and the summary falls back from the
+label to the description.
+Rows are clipped to the width reported by Claude Code, counting wide
+characters such as Hangul and emoji as two cells.
+The agent name outranks the status, token count, and summary when the row runs
+out of space.
+The token count is never truncated mid-value; it drops off whole when the row
+runs out of space.
+Running rows use green, failed and killed rows use the warning color, and all
+other statuses stay dim.
+Rows without a task id keep Claude Code's default rendering.
+Malformed input produces no rows, which also keeps the default rendering.
