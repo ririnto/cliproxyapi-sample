@@ -41,39 +41,108 @@ const statusColor = (status) => {
   return status === "failed" || status === "killed" ? ALERT_COLOR : DIM;
 };
 
-const clippedText = (value, width) => {
-  const characters = [...value];
-  return characters.length <= width
-    ? value
-    : `${characters.slice(0, Math.max(0, width - 1)).join("")}…`;
+const WIDE_RANGES = [
+  ["\u{1100}", "\u{115F}"],
+  ["\u{2E80}", "\u{303E}"],
+  ["\u{3041}", "\u{33FF}"],
+  ["\u{3400}", "\u{4DBF}"],
+  ["\u{4E00}", "\u{9FFF}"],
+  ["\u{A000}", "\u{A4CF}"],
+  ["\u{AC00}", "\u{D7A3}"],
+  ["\u{F900}", "\u{FAFF}"],
+  ["\u{FE30}", "\u{FE4F}"],
+  ["\u{FF00}", "\u{FF60}"],
+  ["\u{FFE0}", "\u{FFE6}"],
+  ["\u{20000}", "\u{2FFFD}"],
+  ["\u{30000}", "\u{3FFFD}"]
+];
+
+const characterWidth = (character) => {
+  const codePoint = character.codePointAt(0);
+  return WIDE_RANGES.some(
+    ([from, to]) =>
+      codePoint >= from.codePointAt(0) && codePoint <= to.codePointAt(0)
+  )
+    ? 2
+    : 1;
 };
 
-export const renderTaskContent = (task, columns) => {
-  const name = displayText(task.name || task.agentType || task.type || "agent");
-  const status = displayText(task.status || "running");
-  const tokens =
-    Number(task.tokenCount) > 0 ? `${numberText(task.tokenCount)} tok` : "";
-  const head = `${NAME_COLOR}${name}${RESET}${SEPARATOR}${statusColor(task.status || "running")}${status}${RESET}`;
-  const summary = displayText(task.label ?? task.description ?? "").trim();
-  const tail = tokens ? `${DIM}${tokens}${RESET}` : "";
-  if (!summary && !tail) {
-    return head;
+const displayWidth = (value) =>
+  [...value].reduce((width, character) => width + characterWidth(character), 0);
+
+const clipToWidth = (value, width) => {
+  const characters = [];
+  let used = 0;
+  for (const character of value) {
+    const next = characterWidth(character);
+    if (used + next > width) {
+      break;
+    }
+    characters.push(character);
+    used += next;
   }
-  const summaryWidth =
+  return characters.join("");
+};
+
+const fitSegment = (text, budget) => {
+  const width = displayWidth(text);
+  if (width <= budget) {
+    return text;
+  }
+  return `${clipToWidth(text, Math.max(0, budget - 1))}…`;
+};
+
+const totalWidth = (segments) =>
+  segments.reduce((width, segment) => width + segment.width, 0) +
+  SEPARATOR_WIDTH * Math.max(0, segments.length - 1);
+
+export const renderTaskContent = (task, columns) => {
+  const limit =
     Number.isFinite(columns) && columns > 0
-      ? columns -
-        name.length -
-        status.length -
-        2 * SEPARATOR_WIDTH -
-        (tail ? SEPARATOR_WIDTH + tokens.length : 0)
+      ? columns
       : Number.POSITIVE_INFINITY;
-  const clippedSummary =
-    summaryWidth >= 1 ? clippedText(summary, summaryWidth) : "";
-  return [
-    head,
-    ...(clippedSummary ? [`${DIM}${clippedSummary}${RESET}`] : []),
-    ...(tail ? [tail] : [])
-  ].join(SEPARATOR);
+  const segments = [
+    {
+      color: NAME_COLOR,
+      priority: 0,
+      text: displayText(task.name || task.agentType || task.type || "agent")
+    },
+    {
+      color: statusColor(task.status || "running"),
+      priority: 1,
+      text: displayText(task.status || "running")
+    },
+    {
+      color: DIM,
+      priority: 3,
+      text: displayText(task.label ?? task.description ?? "").trim()
+    },
+    {
+      color: DIM,
+      priority: 2,
+      text:
+        Number(task.tokenCount) > 0 ? `${numberText(task.tokenCount)} tok` : ""
+    }
+  ]
+    .filter((segment) => segment.text)
+    .map((segment) => ({ ...segment, width: displayWidth(segment.text) }));
+  for (const segment of segments.toSorted((a, b) => b.priority - a.priority)) {
+    if (totalWidth(segments) <= limit) {
+      break;
+    }
+    const others = segments.filter((entry) => entry !== segment);
+    const budget =
+      limit - totalWidth(others) - (others.length ? SEPARATOR_WIDTH : 0);
+    if (budget < 1) {
+      segments.splice(segments.indexOf(segment), 1);
+    } else {
+      segment.text = fitSegment(segment.text, budget);
+      segment.width = displayWidth(segment.text);
+    }
+  }
+  return segments
+    .map((segment) => `${segment.color}${segment.text}${RESET}`)
+    .join(SEPARATOR);
 };
 
 export const renderRows = (input) => {

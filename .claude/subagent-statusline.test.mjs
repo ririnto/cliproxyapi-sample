@@ -58,7 +58,7 @@ test("absent tasks or rows without an id keep the default rendering", () => {
   );
 });
 
-test("summaries are clipped to the reported row width", () => {
+test("rows are clipped to the reported row width", () => {
   const rows = renderRows({
     columns: 40,
     tasks: [
@@ -71,10 +71,42 @@ test("summaries are clipped to the reported row width", () => {
       }
     ]
   });
-  const content = plainText(rows[0].content);
-  assert.ok(content.length <= 40, content);
-  assert.ok(content.endsWith("aaaaaaa… · 12.3k tok"), content);
-  assert.ok(content.startsWith("Explore · running · "), content);
+  assert.equal(
+    plainText(rows[0].content),
+    "Explore · running · aaaaaaa… · 12.3k tok"
+  );
+});
+
+test("wide characters count as two cells when clipping", () => {
+  const rows = renderRows({
+    columns: 40,
+    tasks: [
+      {
+        agentType: "Explore",
+        description: "한".repeat(20),
+        id: "task-1",
+        status: "running"
+      }
+    ]
+  });
+  assert.equal(
+    plainText(rows[0].content),
+    `Explore · running · ${"한".repeat(9)}…`
+  );
+});
+
+test("long names clip after lower-priority segments are dropped", () => {
+  const rows = renderRows({
+    columns: 40,
+    tasks: [
+      {
+        id: "task-1",
+        name: "N".repeat(50),
+        status: "running"
+      }
+    ]
+  });
+  assert.equal(plainText(rows[0].content), `${"N".repeat(39)}…`);
 });
 
 test("task strings stay inside their row without escape leakage", () => {
