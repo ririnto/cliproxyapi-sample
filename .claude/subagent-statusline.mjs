@@ -53,44 +53,20 @@ const WIDE_RANGES = [
   ["\u{FE30}", "\u{FE4F}"],
   ["\u{FF00}", "\u{FF60}"],
   ["\u{FFE0}", "\u{FFE6}"],
+  ["\u{1F300}", "\u{1FAFF}"],
   ["\u{20000}", "\u{2FFFD}"],
   ["\u{30000}", "\u{3FFFD}"]
-];
+].map(([from, to]) => [from.codePointAt(0), to.codePointAt(0)]);
 
 const characterWidth = (character) => {
   const codePoint = character.codePointAt(0);
-  return WIDE_RANGES.some(
-    ([from, to]) =>
-      codePoint >= from.codePointAt(0) && codePoint <= to.codePointAt(0)
-  )
+  return WIDE_RANGES.some(([from, to]) => codePoint >= from && codePoint <= to)
     ? 2
     : 1;
 };
 
 const displayWidth = (value) =>
   [...value].reduce((width, character) => width + characterWidth(character), 0);
-
-const clipToWidth = (value, width) => {
-  const characters = [];
-  let used = 0;
-  for (const character of value) {
-    const next = characterWidth(character);
-    if (used + next > width) {
-      break;
-    }
-    characters.push(character);
-    used += next;
-  }
-  return characters.join("");
-};
-
-const fitSegment = (text, budget) => {
-  const width = displayWidth(text);
-  if (width <= budget) {
-    return text;
-  }
-  return `${clipToWidth(text, Math.max(0, budget - 1))}…`;
-};
 
 const totalWidth = (segments) =>
   segments.reduce((width, segment) => width + segment.width, 0) +
@@ -119,6 +95,7 @@ export const renderTaskContent = (task, columns) => {
     },
     {
       color: DIM,
+      fixed: true,
       priority: 2,
       text:
         Number(task.tokenCount) > 0 ? `${numberText(task.tokenCount)} tok` : ""
@@ -133,11 +110,23 @@ export const renderTaskContent = (task, columns) => {
     const others = segments.filter((entry) => entry !== segment);
     const budget =
       limit - totalWidth(others) - (others.length ? SEPARATOR_WIDTH : 0);
-    if (budget < 1) {
+    if (budget < 1 || (segment.fixed && segment.width > budget)) {
       segments.splice(segments.indexOf(segment), 1);
-    } else {
-      segment.text = fitSegment(segment.text, budget);
-      segment.width = displayWidth(segment.text);
+      continue;
+    }
+    if (segment.width > budget) {
+      const characters = [];
+      let used = 0;
+      for (const character of segment.text) {
+        const next = characterWidth(character);
+        if (used + next > budget - 1) {
+          break;
+        }
+        characters.push(character);
+        used += next;
+      }
+      segment.text = `${characters.join("")}…`;
+      segment.width = used + 1;
     }
   }
   return segments

@@ -72,9 +72,11 @@ count.
 The name falls back to the agent type, and the summary falls back from the
 label to the description.
 Rows are clipped to the width reported by Claude Code, counting wide
-characters such as Hangul as two cells.
+characters such as Hangul and emoji as two cells.
 The agent name outranks the status, token count, and summary when the row runs
 out of space.
+The token count is never truncated mid-value; it drops off whole when the row
+runs out of space.
 Running rows use green, failed and killed rows use the warning color, and all
 other statuses stay dim.
 Rows without a task id keep Claude Code's default rendering.

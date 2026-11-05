@@ -93,6 +93,36 @@ test("wide characters count as two cells when clipping", () => {
     plainText(rows[0].content),
     `Explore · running · ${"한".repeat(9)}…`
   );
+  const emojiRows = renderRows({
+    columns: 30,
+    tasks: [
+      {
+        agentType: "Explore",
+        description: "🚀".repeat(20),
+        id: "task-1",
+        status: "running"
+      }
+    ]
+  });
+  assert.equal(
+    plainText(emojiRows[0].content),
+    `Explore · running · ${"🚀".repeat(4)}…`
+  );
+});
+
+test("token counts drop whole instead of truncating mid-value", () => {
+  const rows = renderRows({
+    columns: 22,
+    tasks: [
+      {
+        agentType: "Explore",
+        id: "task-1",
+        status: "running",
+        tokenCount: 12_345
+      }
+    ]
+  });
+  assert.equal(plainText(rows[0].content), "Explore · running");
 });
 
 test("long names clip after lower-priority segments are dropped", () => {
