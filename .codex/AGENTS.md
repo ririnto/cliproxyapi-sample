@@ -37,3 +37,7 @@
   - Do not apply this rule to forked repositories.
   - Verify and ensure no personal or sensitive information is included prior to publishing.
   - Strictly prohibit direct pushes to protected branches.
+
+## Pstack Models
+
+- @~/.cursor/rules/pstack-models.mdc
