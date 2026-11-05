@@ -79,6 +79,22 @@ test("rows are clipped to the reported row width", () => {
   );
 });
 
+test("model outranks effort when the row runs out of space", () => {
+  const rows = renderRows({
+    columns: 28,
+    tasks: [
+      {
+        agentType: "Explore",
+        effort: "high",
+        id: "task-1",
+        model: "claude-opus-5-5",
+        status: "running"
+      }
+    ]
+  });
+  assert.equal(plainText(rows[0].content), "Explore · claude-opus-5-5");
+});
+
 test("wide characters count as two cells when clipping", () => {
   const rows = renderRows({
     columns: 40,
