@@ -281,6 +281,10 @@
       "script": "statusline/copilot-usage.mjs"
     }
   ],
+  "subagentStatusLine": {
+    "command": "node \"$CLAUDE_PROJECT_DIR/.claude/subagent-statusline.mjs\"",
+    "type": "command"
+  },
   "teammateMode": "auto",
   "theme": "auto",
   "totalTokensReminder": "countdown",
