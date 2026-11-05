@@ -11,15 +11,17 @@ const scriptPath = fileURLToPath(
   new URL("subagent-statusline.mjs", import.meta.url)
 );
 
-test("rows show name, status, summary, and compact token count", () => {
+test("rows show name, model, effort, status, tokens, and summary in order", () => {
   const rows = renderRows({
     columns: 120,
     tasks: [
       {
         agentType: "Explore",
         description: "map the auth flow",
+        effort: "high",
         id: "task-1",
         label: "reviewing auth flow",
+        model: "claude-opus-5-5",
         status: "running",
         tokenCount: 12_345,
         type: "local_agent"
@@ -37,7 +39,7 @@ test("rows show name, status, summary, and compact token count", () => {
   assert.equal(rows[0].id, "task-1");
   assert.equal(
     plainText(rows[0].content),
-    "Explore · running · reviewing auth flow · 12.3k tok"
+    "Explore · claude-opus-5-5 · high · running · 12.3k tok · reviewing auth flow"
   );
   assert.equal(rows[1].id, "task-2");
   assert.equal(
@@ -73,7 +75,7 @@ test("rows are clipped to the reported row width", () => {
   });
   assert.equal(
     plainText(rows[0].content),
-    "Explore · running · aaaaaaa… · 12.3k tok"
+    "Explore · running · 12.3k tok · aaaaaaa…"
   );
 });
 
@@ -156,7 +158,7 @@ test("task strings stay inside their row without escape leakage", () => {
   assert.equal(rows[0].content.includes("\u001B[31m"), false);
   assert.equal(
     plainText(rows[0].content),
-    "Explore FAKE ROW · running ROW2 · scan files · 5 tok"
+    "Explore FAKE ROW · running ROW2 · 5 tok · scan files"
   );
 });
 
@@ -169,7 +171,9 @@ test("the command reads tasks from stdin and writes one JSON row per task", () =
         {
           agentType: "Explore",
           description: "map the auth flow",
+          effort: "high",
           id: "task-1",
+          model: "claude-opus-5-5",
           status: "running",
           tokenCount: 12_345
         }
@@ -186,7 +190,7 @@ test("the command reads tasks from stdin and writes one JSON row per task", () =
   assert.deepEqual(Object.keys(row), ["content", "id"]);
   assert.equal(
     plainText(row.content),
-    "Explore · running · map the auth flow · 12.3k tok"
+    "Explore · claude-opus-5-5 · high · running · 12.3k tok · map the auth flow"
   );
 });
 

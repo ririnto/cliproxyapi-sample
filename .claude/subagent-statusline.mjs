@@ -72,37 +72,45 @@ const totalWidth = (segments) =>
   segments.reduce((width, segment) => width + segment.width, 0) +
   SEPARATOR_WIDTH * Math.max(0, segments.length - 1);
 
-export const renderTaskContent = (task, columns) => {
-  const limit =
-    Number.isFinite(columns) && columns > 0
-      ? columns
-      : Number.POSITIVE_INFINITY;
-  const segments = [
+const buildSegments = (task) =>
+  [
     {
       color: NAME_COLOR,
       priority: 0,
       text: displayText(task.name || task.agentType || task.type || "agent")
     },
     {
-      color: statusColor(task.status || "running"),
+      color: DIM,
       priority: 1,
+      text: displayText(task.model ?? "").trim()
+    },
+    {
+      color: DIM,
+      priority: 2,
+      text: displayText(task.effort ?? "").trim()
+    },
+    {
+      color: statusColor(task.status || "running"),
+      priority: 3,
       text: displayText(task.status || "running")
     },
     {
       color: DIM,
-      priority: 3,
-      text: displayText(task.label ?? task.description ?? "").trim()
+      fixed: true,
+      priority: 4,
+      text:
+        Number(task.tokenCount) > 0 ? `${numberText(task.tokenCount)} tok` : ""
     },
     {
       color: DIM,
-      fixed: true,
-      priority: 2,
-      text:
-        Number(task.tokenCount) > 0 ? `${numberText(task.tokenCount)} tok` : ""
+      priority: 5,
+      text: displayText(task.label ?? task.description ?? "").trim()
     }
   ]
     .filter((segment) => segment.text)
     .map((segment) => ({ ...segment, width: displayWidth(segment.text) }));
+
+const fitSegments = (segments, limit) => {
   for (const segment of segments.toSorted((a, b) => b.priority - a.priority)) {
     if (totalWidth(segments) <= limit) {
       break;
@@ -129,6 +137,15 @@ export const renderTaskContent = (task, columns) => {
       segment.width = used + 1;
     }
   }
+  return segments;
+};
+
+export const renderTaskContent = (task, columns) => {
+  const limit =
+    Number.isFinite(columns) && columns > 0
+      ? columns
+      : Number.POSITIVE_INFINITY;
+  const segments = fitSegments(buildSegments(task), limit);
   return segments
     .map((segment) => `${segment.color}${segment.text}${RESET}`)
     .join(SEPARATOR);
