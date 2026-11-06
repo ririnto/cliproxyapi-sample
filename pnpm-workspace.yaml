@@ -4,10 +4,10 @@ catalog:
   markdownlint: ^0.42.0
   markdownlint-cli2: ^0.24.0
   npm-run-all2: ^9.0.4
-  oxfmt: ^0.75.0
-  oxlint: ^1.90.0
+  oxfmt: ^0.76.0
+  oxlint: ^1.91.0
   typescript: ^7.0.2
-  ultracite: ^8.1.0
+  ultracite: ^8.1.1
 
 minimumReleaseAge: 480
 
