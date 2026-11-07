@@ -60,16 +60,20 @@ const keychainOauth = (options, configDir, home, now) => {
     (home === homedir() || options.execFile)
   ) {
     try {
-      const text = (options.execFile ?? execFileSync)(
-        "security",
-        ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
-        {
-          encoding: "utf-8",
-          stdio: ["ignore", "pipe", "ignore"],
-          timeout: 3000
-        }
+      return validOauth(
+        parseRecord(
+          (options.execFile ?? execFileSync)(
+            "security",
+            ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+            {
+              encoding: "utf-8",
+              stdio: ["ignore", "pipe", "ignore"],
+              timeout: 3000
+            }
+          )
+        ),
+        now
       );
-      return validOauth(parseRecord(text), now);
     } catch {
       debug("Keychain 인증을 읽을 수 없습니다.");
     }
@@ -78,8 +82,7 @@ const keychainOauth = (options, configDir, home, now) => {
 
 const nativeOauth = async (options, now) => {
   const home = options.home ?? homedir();
-  const environment = options.environment ?? process.env;
-  const configured = environment.CLAUDE_CONFIG_DIR;
+  const configured = (options.environment ?? process.env).CLAUDE_CONFIG_DIR;
   const configDir = configured
     ? path.resolve(
         configured.startsWith("~/")
@@ -174,12 +177,10 @@ const budgetMetric = (budget) => {
   if (isRecord(budget) && budget.is_enabled === true) {
     const total = budget.monthly_limit ?? budget.monthly_credit_limit;
     const used = budget.used_credits;
-    const currency =
-      typeof budget.currency === "string"
-        ? budget.currency.toUpperCase()
-        : (budget.currency ?? "USD");
     if (
-      currency === "USD" &&
+      (typeof budget.currency === "string"
+        ? budget.currency.toUpperCase()
+        : (budget.currency ?? "USD")) === "USD" &&
       Number.isFinite(total) &&
       total > 0 &&
       Number.isFinite(used) &&

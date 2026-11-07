@@ -165,7 +165,7 @@ for module in ".claude/statusline/"*.mjs; do
 done
 ```
 
-런타임은 진입점과 `.claude/statusline/`의 여섯 실행 모듈이다.
+런타임은 진입점과 `.claude/statusline/`의 일곱 실행 모듈이다.
 테스트 파일과 `README.md`는 설치 대상이 아니다.
 사용량 캐시와 수집기 동작은 [statusline README](.claude/statusline/README.md)를 참고한다.
 

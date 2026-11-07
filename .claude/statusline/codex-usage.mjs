@@ -57,8 +57,6 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   }
 };
 
-const fetchFunction = (options) => options.fetch ?? globalThis.fetch;
-
 const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
@@ -187,8 +185,10 @@ const chatgptCredit = (credits) => {
 };
 
 const chatgptPlanLabel = (planType) => {
-  const known = ["free", "plus", "pro", "team", "enterprise", "edu"];
-  if (typeof planType !== "string" || !known.includes(planType)) {
+  if (
+    typeof planType !== "string" ||
+    !["free", "plus", "pro", "team", "enterprise", "edu"].includes(planType)
+  ) {
     return "";
   }
   return planType.charAt(0).toUpperCase() + planType.slice(1);
@@ -205,7 +205,7 @@ const usageSnapshot = async (selected, options) => {
         ? { "ChatGPT-Account-ID": selected.accountId }
         : {})
     },
-    fetchFunction(options),
+    options.fetch ?? globalThis.fetch,
     options.onUsageError
   );
   const plan = chatgptPlanLabel(payload?.plan_type);

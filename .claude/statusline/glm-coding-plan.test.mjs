@@ -91,11 +91,11 @@ assert.deepEqual(
 const pro = await run([limit({ number: 5, percentage: 10, unit: 3 })], "pro");
 assert.equal(pro.groups[0].label, "Z.AI (Pro)");
 
-const unknownLevel = await run(
+const ultra = await run(
   [limit({ number: 5, percentage: 10, unit: 3 })],
   "enterprise-ultra"
 );
-assert.equal(unknownLevel.groups[0].label, undefined);
+assert.equal(ultra.groups[0].label, undefined);
 
 assert.equal(
   await run([limit({ type: "TIME_LIMIT" }), limit({ number: 1 })]),
@@ -143,15 +143,17 @@ try {
     now: NOW + 120_000
   });
   assert.equal(malformedBody.groups[0].metrics[0].percentage, 25);
-  const empty = await fetchUsage({
-    ...options,
-    fetch: () => {
-      calls += 1;
-      return response([]);
-    },
-    now: NOW + 180_000
-  });
-  assert.equal(empty, undefined);
+  assert.equal(
+    await fetchUsage({
+      ...options,
+      fetch: () => {
+        calls += 1;
+        return response([]);
+      },
+      now: NOW + 180_000
+    }),
+    undefined
+  );
   assert.equal(calls, 4);
 } finally {
   await rm(cacheDir, { force: true, recursive: true });

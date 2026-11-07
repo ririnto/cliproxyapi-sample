@@ -144,11 +144,10 @@ test("omits absent, unusable, or unowned ChatGPT credits", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
-    const balances = [undefined, 0, -1, "Infinity", "12credits"];
     const snapshots = await Promise.all(
       [
         { balance: 5, has_credits: false, unlimited: false },
-        ...balances.map((balance) => ({
+        ...[undefined, 0, -1, "Infinity", "12credits"].map((balance) => ({
           balance,
           has_credits: true,
           unlimited: false
@@ -187,8 +186,7 @@ test("caches normalized ChatGPT snapshots in an isolated directory", async () =>
       now: 1000
     };
     const first = await fetchUsage(options);
-    const second = await fetchUsage(options);
-    assert.deepEqual(second, first);
+    assert.deepEqual(await fetchUsage(options), first);
     assert.equal(calls, 1);
   } finally {
     await rm(home, { force: true, recursive: true });
@@ -223,8 +221,7 @@ test("retains the last snapshot after a malformed cached response", async () => 
     };
     const first = await fetchUsage(options);
     now += 1;
-    const second = await fetchUsage({ ...options, now });
-    assert.deepEqual(second, first);
+    assert.deepEqual(await fetchUsage({ ...options, now }), first);
     assert.equal(calls, 2);
   } finally {
     await rm(home, { force: true, recursive: true });
@@ -262,26 +259,28 @@ test("signals malformed or explicit provider-error payloads to the cache hook", 
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
-    const failures = await Promise.all(
-      [
-        () => {
-          throw new Error("invalid body");
-        },
-        () => null,
-        () => ({ error: "provider error" }),
-        () => ({ success: false })
-      ].map(async (json) => {
-        let failureCount = 0;
-        await fetchUsage({
-          cache: false,
-          fetch: () => ({ json, status: 200 }),
-          home,
-          onUsageError: () => (failureCount += 1)
-        });
-        return failureCount;
-      })
+    assert.deepEqual(
+      await Promise.all(
+        [
+          () => {
+            throw new Error("invalid body");
+          },
+          () => null,
+          () => ({ error: "provider error" }),
+          () => ({ success: false })
+        ].map(async (json) => {
+          let failureCount = 0;
+          await fetchUsage({
+            cache: false,
+            fetch: () => ({ json, status: 200 }),
+            home,
+            onUsageError: () => (failureCount += 1)
+          });
+          return failureCount;
+        })
+      ),
+      [1, 1, 1, 1]
     );
-    assert.deepEqual(failures, [1, 1, 1, 1]);
   } finally {
     await rm(home, { force: true, recursive: true });
   }
@@ -291,22 +290,24 @@ test("does not signal valid empty or zero-credit payloads to the cache hook", as
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
-    const failures = await Promise.all(
-      [
-        {},
-        { credits: { balance: 0, has_credits: true, unlimited: false } }
-      ].map(async (payload) => {
-        let failureCount = 0;
-        await fetchUsage({
-          cache: false,
-          fetch: () => ({ json: () => payload, status: 200 }),
-          home,
-          onUsageError: () => (failureCount += 1)
-        });
-        return failureCount;
-      })
+    assert.deepEqual(
+      await Promise.all(
+        [
+          {},
+          { credits: { balance: 0, has_credits: true, unlimited: false } }
+        ].map(async (payload) => {
+          let failureCount = 0;
+          await fetchUsage({
+            cache: false,
+            fetch: () => ({ json: () => payload, status: 200 }),
+            home,
+            onUsageError: () => (failureCount += 1)
+          });
+          return failureCount;
+        })
+      ),
+      [0, 0]
     );
-    assert.deepEqual(failures, [0, 0]);
   } finally {
     await rm(home, { force: true, recursive: true });
   }
@@ -316,12 +317,14 @@ test("returns undefined instead of throwing when the response fails", async () =
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
-    const snapshots = await Promise.all(
-      [{ status: 401 }, { status: undefined }].map((response) =>
-        fetchUsage({ cache: false, fetch: () => response, home })
-      )
+    assert.deepEqual(
+      await Promise.all(
+        [{ status: 401 }, { status: undefined }].map((response) =>
+          fetchUsage({ cache: false, fetch: () => response, home })
+        )
+      ),
+      [undefined, undefined]
     );
-    assert.deepEqual(snapshots, [undefined, undefined]);
   } finally {
     await rm(home, { force: true, recursive: true });
   }
@@ -406,7 +409,6 @@ test("keeps optional diagnostics content-free while using OpenCode credentials",
       path.join(home, ".local", "share", "opencode", "auth.json"),
       JSON.stringify({ openai: { access: fallbackToken } })
     );
-    const fallbackAuthorization = `Bearer ${fallbackToken}`;
     const script = `
       import { fetchUsage } from ${JSON.stringify(new URL("codex-usage.mjs", import.meta.url).href)};
       let requests = 0;
@@ -415,7 +417,7 @@ test("keeps optional diagnostics content-free while using OpenCode credentials",
         cache: false,
         fetch: (_url, options) => {
           requests += 1;
-          fallbackUsed = options.headers.Authorization === ${JSON.stringify(fallbackAuthorization)};
+          fallbackUsed = options.headers.Authorization === ${JSON.stringify(`Bearer ${fallbackToken}`)};
           return new Response(JSON.stringify({ credits: { balance: 5, has_credits: true } }), { status: 200 });
         },
         home: process.env.HOME

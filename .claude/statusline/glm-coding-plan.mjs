@@ -54,8 +54,6 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   }
 };
 
-const fetchFunction = (options) => options.fetch ?? globalThis.fetch;
-
 const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
@@ -83,10 +81,13 @@ const percentageMetric = (label, percentage, resetsInMs) =>
 
 const snapshot = (metrics, label) => {
   const validMetrics = metrics.filter(Boolean);
-  const group = label
-    ? { label, metrics: validMetrics }
-    : { metrics: validMetrics };
-  return validMetrics.length ? { groups: [group] } : undefined;
+  return validMetrics.length
+    ? {
+        groups: [
+          label ? { label, metrics: validMetrics } : { metrics: validMetrics }
+        ]
+      }
+    : undefined;
 };
 
 const TIER_LABELS = {
@@ -102,7 +103,7 @@ const fetchUsageData = async (credential, options) => {
       Authorization: `Bearer ${credential}`,
       "Content-Type": "application/json"
     },
-    fetchFunction(options),
+    options.fetch ?? globalThis.fetch,
     options.onUsageError
   );
   if (

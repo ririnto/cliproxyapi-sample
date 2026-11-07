@@ -59,8 +59,6 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   }
 };
 
-const fetchFunction = (options) => options.fetch ?? globalThis.fetch;
-
 const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
@@ -126,10 +124,13 @@ const resetAfter = (timestamp, now) =>
 
 const snapshot = (metrics, label) => {
   const validMetrics = metrics.filter(Boolean);
-  const group = label
-    ? { label, metrics: validMetrics }
-    : { metrics: validMetrics };
-  return validMetrics.length ? { groups: [group] } : undefined;
+  return validMetrics.length
+    ? {
+        groups: [
+          label ? { label, metrics: validMetrics } : { metrics: validMetrics }
+        ]
+      }
+    : undefined;
 };
 
 const usageMetric = (label, used, total, resetsInMs) =>
@@ -201,10 +202,10 @@ const intellijCandidates = async (home) => {
 };
 
 const openCodeCopilotCandidates = async (home) => {
-  const openCode = await readJson(
+  const auth = await readJson(
     path.join(home, ".local", "share", "opencode", "auth.json")
   );
-  const oauth = openCode?.["github-copilot"];
+  const oauth = auth?.["github-copilot"];
   if (oauth?.type !== "oauth") {
     return [];
   }
@@ -227,12 +228,14 @@ const ghCliCandidates = async (home) => {
     .filter(([, entry]) => isRecord(entry))
     .flatMap(([authority, entry]) => {
       const host = copilotApiHost(authority);
-      const userTokens = isRecord(entry.users)
-        ? Object.values(entry.users)
-            .filter(isRecord)
-            .map((user) => user.oauth_token)
-        : [];
-      return [...userTokens, entry.oauth_token]
+      return [
+        ...(isRecord(entry.users)
+          ? Object.values(entry.users)
+              .filter(isRecord)
+              .map((user) => user.oauth_token)
+          : []),
+        entry.oauth_token
+      ]
         .filter((token) => typeof token === "string" && token)
         .map((token) => ({ host, scheme: "token", token }));
     });
@@ -384,7 +387,7 @@ const fetchCandidate = async (candidates, options, index = 0) => {
     const { status, payload } = await requestJson(
       `${copilotApiHost(candidate.host)}/copilot_internal/user`,
       copilotHeaders(candidate),
-      fetchFunction(options),
+      options.fetch ?? globalThis.fetch,
       options.onUsageError
     );
     if (status === 401 || status === 403) {

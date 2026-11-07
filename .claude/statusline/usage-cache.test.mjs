@@ -65,8 +65,8 @@ test("reuses a successful snapshot and counts down resetsInMs", async () => {
   assert.deepEqual(first, snapshot);
   assert.equal(cached.groups[0].metrics[0].resetsInMs, 8000);
   assert.equal(calls, 1);
-  const record = await readFile(path.join(cacheDir, "zai.json"), "utf-8");
-  assert.equal(record.includes("account-a"), false);
+  const cacheText = await readFile(path.join(cacheDir, "zai.json"), "utf-8");
+  assert.equal(cacheText.includes("account-a"), false);
 });
 
 test("refreshes at five seconds and leaves fresh cache bytes unchanged", async () => {
@@ -254,6 +254,46 @@ test("all five collectors use the home cache and refresh at five seconds", async
   );
 });
 
+test("mistral collector uses the home cache and refreshes at five seconds", async () => {
+  const home = path.join(cacheDir, "mistral");
+  const { fetchUsage } = await import("./mistral-usage.mjs");
+  let calls = 0;
+  const options = {
+    credential: "synthetic-token",
+    environment: {},
+    fetch: () => {
+      calls += 1;
+      return {
+        json: () => ({
+          api_budget: { reset_at: null, usage_percentage: calls * 10 }
+        }),
+        status: 200
+      };
+    },
+    home,
+    now: 1000,
+    platform: "linux"
+  };
+  const first = await fetchUsage(options);
+  const directory = path.join(home, ".claude", "cache", "usage");
+  const filePath = path.join(directory, "mistral.json");
+  const bytes = await readFile(filePath);
+  assert.equal(first.groups[0].label, "Mistral");
+  assert.equal(first.groups[0].metrics[0].percentage, 10);
+  assert.equal(JSON.parse(bytes).nextAttemptAt, 6000);
+  assert.deepEqual(await readdir(directory), ["mistral.json"]);
+  const cached = await fetchUsage({ ...options, now: 5999 });
+  assert.equal(cached.groups[0].metrics[0].percentage, 10);
+  assert.equal(calls, 1);
+  assert.deepEqual(await readFile(filePath), bytes);
+  const refreshed = await fetchUsage({ ...options, now: 6000 });
+  assert.equal(refreshed.groups[0].metrics[0].percentage, 20);
+  assert.equal(calls, 2);
+  const record = JSON.parse(await readFile(filePath, "utf-8"));
+  assert.equal(record.fetchedAt, 6000);
+  assert.equal(record.nextAttemptAt, 11_000);
+});
+
 test("invalidates data when credential identity changes", async () => {
   await withUsageCache(
     "zai",
@@ -262,15 +302,12 @@ test("invalidates data when credential identity changes", async () => {
     () => snapshot
   );
   let calls = 0;
-  const result = await withUsageCache(
-    "zai",
-    "account-b",
-    { cacheDir, now: 2000 },
-    () => {
+  assert.equal(
+    await withUsageCache("zai", "account-b", { cacheDir, now: 2000 }, () => {
       calls += 1;
-    }
+    }),
+    undefined
   );
-  assert.equal(result, undefined);
   assert.equal(calls, 1);
 });
 
@@ -284,10 +321,11 @@ test("honors Retry-After during initial rate limiting", async () => {
     () => assert.fail()
   );
   assert.equal(cached, undefined);
-  const file = JSON.parse(
-    await readFile(path.join(cacheDir, "zai.json"), "utf-8")
+  assert.equal(
+    JSON.parse(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
+      .nextAttemptAt,
+    601_000
   );
-  assert.equal(file.nextAttemptAt, 601_000);
 });
 
 test("omits expired stale data while preserving an active cooldown", async () => {
@@ -309,16 +347,18 @@ test("omits expired stale data while preserving an active cooldown", async () =>
     }
   );
   let calls = 0;
-  const result = await withUsageCache(
-    "zai",
-    "account",
-    optionsFor(cacheDir, 302_000, undefined, 429),
-    () => {
-      calls += 1;
-      return snapshot;
-    }
+  assert.equal(
+    await withUsageCache(
+      "zai",
+      "account",
+      optionsFor(cacheDir, 302_000, undefined, 429),
+      () => {
+        calls += 1;
+        return snapshot;
+      }
+    ),
+    undefined
   );
-  assert.equal(result, undefined);
   assert.equal(calls, 0);
   const file = JSON.parse(
     await readFile(path.join(cacheDir, "zai.json"), "utf-8")
@@ -400,29 +440,32 @@ test("preserves prior data when a successful HTTP body is malformed", async () =
   );
   assert.equal(typeof onUsageError, "function");
   assert.equal(result.groups[0].metrics[0].label, "5h");
-  const file = JSON.parse(
-    await readFile(path.join(cacheDir, "zai.json"), "utf-8")
+  assert.deepEqual(
+    JSON.parse(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
+      .snapshot,
+    snapshot
   );
-  assert.deepEqual(file.snapshot, snapshot);
 });
 
 test("resets normalization failure for a later successful HTTP attempt", async () => {
   let calls = 0;
   let hookAvailable = false;
-  const result = await withUsageCache(
-    "zai",
-    "account",
-    optionsFor(cacheDir, 1000),
-    async (wrapped) => {
-      await wrapped.fetch("https://example.test");
-      hookAvailable = typeof wrapped.onUsageError === "function";
-      wrapped.onUsageError?.();
-      await wrapped.fetch("https://example.test");
-      calls += 1;
-      return snapshot;
-    }
+  assert.deepEqual(
+    await withUsageCache(
+      "zai",
+      "account",
+      optionsFor(cacheDir, 1000),
+      async (wrapped) => {
+        await wrapped.fetch("https://example.test");
+        hookAvailable = typeof wrapped.onUsageError === "function";
+        wrapped.onUsageError?.();
+        await wrapped.fetch("https://example.test");
+        calls += 1;
+        return snapshot;
+      }
+    ),
+    snapshot
   );
-  assert.deepEqual(result, snapshot);
   assert.equal(calls, 1);
   assert.equal(hookAvailable, true);
 });
@@ -437,10 +480,11 @@ test("honors HTTP-date Retry-After cooldowns", async () => {
     429
   );
   await withUsageCache("zai", "account", options, fetchSnapshot);
-  const file = JSON.parse(
-    await readFile(path.join(cacheDir, "zai.json"), "utf-8")
+  assert.equal(
+    JSON.parse(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
+      .nextAttemptAt,
+    retryAt
   );
-  assert.equal(file.nextAttemptAt, retryAt);
 });
 
 test("serves prior snapshot during a rate limit", async () => {
@@ -474,34 +518,39 @@ test("clears cached credits on successful authoritative empty response", async (
       return snapshot;
     }
   );
-  const result = await withUsageCache(
-    "zai",
-    "account",
-    optionsFor(cacheDir, 62_000),
-    async (wrapped) => {
-      await wrapped.fetch("https://example.test");
-    }
+  assert.equal(
+    await withUsageCache(
+      "zai",
+      "account",
+      optionsFor(cacheDir, 62_000),
+      async (wrapped) => {
+        await wrapped.fetch("https://example.test");
+      }
+    ),
+    undefined
   );
-  assert.equal(result, undefined);
-  const file = JSON.parse(
-    await readFile(path.join(cacheDir, "zai.json"), "utf-8")
+  assert.equal(
+    JSON.parse(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
+      .snapshot,
+    undefined
   );
-  assert.equal(file.snapshot, undefined);
 });
 
 test("ignores corrupt cache files and persists fresh results", async () => {
   const filePath = path.join(cacheDir, "zai.json");
   await writeFile(filePath, "{");
-  const result = await withUsageCache(
-    "zai",
-    "account",
-    optionsFor(cacheDir, 1000),
-    async (wrapped) => {
-      await wrapped.fetch("https://example.test");
-      return snapshot;
-    }
+  assert.deepEqual(
+    await withUsageCache(
+      "zai",
+      "account",
+      optionsFor(cacheDir, 1000),
+      async (wrapped) => {
+        await wrapped.fetch("https://example.test");
+        return snapshot;
+      }
+    ),
+    snapshot
   );
-  assert.deepEqual(result, snapshot);
   assert.deepEqual(
     JSON.parse(await readFile(filePath, "utf-8")).snapshot,
     snapshot

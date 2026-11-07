@@ -9,7 +9,14 @@ const MAX_STALE_MS = 5 * 60_000;
  */
 export const DEFAULT_USAGE_CACHE_TTL_MS = 5000;
 
-const PROVIDERS = new Set(["claude", "chatgpt", "zai", "minimax", "copilot"]);
+const PROVIDERS = new Set([
+  "claude",
+  "chatgpt",
+  "copilot",
+  "minimax",
+  "mistral",
+  "zai"
+]);
 
 const nowValue = (value) => {
   if (value instanceof Date) {
@@ -174,18 +181,21 @@ export const withUsageCache = async (
   }
   const successful = isSuccessfulResponse(status, usageError);
   const nextAttemptAt = now + Math.max(ttl, delay);
-  const record = successful
-    ? { credentialHash, fetchedAt: now, nextAttemptAt, snapshot }
-    : {
-        credentialHash,
-        fetchedAt: cached?.fetchedAt ?? now,
-        nextAttemptAt,
-        snapshot:
-          cached && now - cached.fetchedAt <= MAX_STALE_MS
-            ? cached.snapshot
-            : undefined
-      };
-  await writeCache(directory, filePath, record);
+  await writeCache(
+    directory,
+    filePath,
+    successful
+      ? { credentialHash, fetchedAt: now, nextAttemptAt, snapshot }
+      : {
+          credentialHash,
+          fetchedAt: cached?.fetchedAt ?? now,
+          nextAttemptAt,
+          snapshot:
+            cached && now - cached.fetchedAt <= MAX_STALE_MS
+              ? cached.snapshot
+              : undefined
+        }
+  );
   if (successful) {
     return snapshot;
   }

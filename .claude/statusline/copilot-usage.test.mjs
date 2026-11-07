@@ -79,54 +79,58 @@ test("does not query Keychain on non-macOS platforms", async () => {
 });
 
 test("0 엔타이틀먼트는 한도가 아니어서 지표를 만들지 않는다", async () => {
-  const snapshot = await fetchUsage({
-    cache: false,
-    credential: "tok",
-    environment: {},
-    execFile: () => {
-      throw new Error("no keychain");
-    },
-    fetch: () => ({
-      json: () => ({
-        quota_snapshots: {
-          premium_interactions: {
-            credits_used: 0,
-            entitlement: 0,
-            quota_remaining: 0,
-            remaining: 0
-          }
-        },
-        token_based_billing: true
+  assert.equal(
+    await fetchUsage({
+      cache: false,
+      credential: "tok",
+      environment: {},
+      execFile: () => {
+        throw new Error("no keychain");
+      },
+      fetch: () => ({
+        json: () => ({
+          quota_snapshots: {
+            premium_interactions: {
+              credits_used: 0,
+              entitlement: 0,
+              quota_remaining: 0,
+              remaining: 0
+            }
+          },
+          token_based_billing: true
+        }),
+        status: 200
       }),
-      status: 200
+      home: "/nonexistent"
     }),
-    home: "/nonexistent"
-  });
-  assert.equal(snapshot, undefined);
+    undefined
+  );
 });
 
 test("음수 엔타이틀먼트도 지표를 만들지 않는다", async () => {
-  const snapshot = await fetchUsage({
-    cache: false,
-    credential: "tok",
-    environment: {},
-    execFile: () => {
-      throw new Error("no keychain");
-    },
-    fetch: () => ({
-      json: () => ({
-        quota_snapshots: {
-          premium_interactions: {
-            entitlement: -1,
-            quota_remaining: -1
+  assert.equal(
+    await fetchUsage({
+      cache: false,
+      credential: "tok",
+      environment: {},
+      execFile: () => {
+        throw new Error("no keychain");
+      },
+      fetch: () => ({
+        json: () => ({
+          quota_snapshots: {
+            premium_interactions: {
+              entitlement: -1,
+              quota_remaining: -1
+            }
           }
-        }
+        }),
+        status: 200
       }),
-      status: 200
+      home: "/nonexistent"
     }),
-    home: "/nonexistent"
-  });
-  assert.equal(snapshot, undefined);
+    undefined
+  );
 });
 
 test("잘못된 엔타이틀먼트는 해당 지표만 생략한다", async () => {
@@ -148,36 +152,37 @@ test("잘못된 엔타이틀먼트는 해당 지표만 생략한다", async () =
     }),
     home: "/nonexistent"
   });
-  const metrics = snapshot?.groups[0].metrics ?? [];
   assert.deepEqual(
-    metrics.map((metric) => metric.label),
+    (snapshot?.groups[0].metrics ?? []).map((metric) => metric.label),
     ["Premium"]
   );
 });
 
 test("모든 지표가 사라지면 스냅샷을 생략한다", async () => {
-  const snapshot = await fetchUsage({
-    cache: false,
-    credential: "tok",
-    environment: {},
-    execFile: () => {
-      throw new Error("no keychain");
-    },
-    fetch: () => ({
-      json: () => ({
-        copilot_plan: "individual",
-        quota_snapshots: {
-          chat: { entitlement: 0, quota_remaining: 0 },
-          completions: { entitlement: 0, quota_remaining: 0 },
-          premium_interactions: { entitlement: 0, quota_remaining: 0 }
-        },
-        token_based_billing: true
+  assert.equal(
+    await fetchUsage({
+      cache: false,
+      credential: "tok",
+      environment: {},
+      execFile: () => {
+        throw new Error("no keychain");
+      },
+      fetch: () => ({
+        json: () => ({
+          copilot_plan: "individual",
+          quota_snapshots: {
+            chat: { entitlement: 0, quota_remaining: 0 },
+            completions: { entitlement: 0, quota_remaining: 0 },
+            premium_interactions: { entitlement: 0, quota_remaining: 0 }
+          },
+          token_based_billing: true
+        }),
+        status: 200
       }),
-      status: 200
+      home: "/nonexistent"
     }),
-    home: "/nonexistent"
-  });
-  assert.equal(snapshot, undefined);
+    undefined
+  );
 });
 
 test("양수 엔타이틀먼트 Chat을 남기고 0 엔타이틀먼트 Premium은 생략한다", async () => {
@@ -381,15 +386,17 @@ test("preserves prior usage for malformed and provider-error responses", async (
       now: 1_700_000_000_000
     };
     const initial = await fetchUsage(options);
-    const providerError = await fetchUsage({
-      ...options,
-      fetch: () => ({
-        json: () => ({ message: "temporary error" }),
-        status: 200
+    assert.deepEqual(
+      await fetchUsage({
+        ...options,
+        fetch: () => ({
+          json: () => ({ message: "temporary error" }),
+          status: 200
+        }),
+        now: options.now + 60_000
       }),
-      now: options.now + 60_000
-    });
-    assert.deepEqual(providerError, initial);
+      initial
+    );
     const malformed = await fetchUsage({
       ...options,
       fetch: () => ({
@@ -401,12 +408,14 @@ test("preserves prior usage for malformed and provider-error responses", async (
       now: options.now + 120_000
     });
     assert.equal(malformed.groups[0].metrics[0].used, 20);
-    const empty = await fetchUsage({
-      ...options,
-      fetch: () => ({ json: () => ({ quota_snapshots: {} }), status: 200 }),
-      now: options.now + 180_000
-    });
-    assert.equal(empty, undefined);
+    assert.equal(
+      await fetchUsage({
+        ...options,
+        fetch: () => ({ json: () => ({ quota_snapshots: {} }), status: 200 }),
+        now: options.now + 180_000
+      }),
+      undefined
+    );
   } finally {
     await rm(home, { force: true, recursive: true });
     await rm(cacheDir, { force: true, recursive: true });
@@ -520,22 +529,24 @@ test("disposes HTTP error response bodies before returning", async () => {
         await writeFile(filePath, "{}");
       })
     );
-    const result = await fetchUsage({
-      cache: false,
-      credential: "synthetic-copilot-token",
-      environment: {
-        COPILOT_GITHUB_TOKEN: "",
-        GH_TOKEN: "",
-        GITHUB_TOKEN: ""
-      },
-      fetch: (_url, options) => {
-        requestSignal = options.signal;
-        return errorResponse;
-      },
-      home,
-      platform: "linux"
-    });
-    assert.equal(result, undefined);
+    assert.equal(
+      await fetchUsage({
+        cache: false,
+        credential: "synthetic-copilot-token",
+        environment: {
+          COPILOT_GITHUB_TOKEN: "",
+          GH_TOKEN: "",
+          GITHUB_TOKEN: ""
+        },
+        fetch: (_url, options) => {
+          requestSignal = options.signal;
+          return errorResponse;
+        },
+        home,
+        platform: "linux"
+      }),
+      undefined
+    );
     assert.equal(cancellations, 1);
     assert.equal(requestSignal.aborted, true);
     assert.equal(errorResponse.bodyUsed, true);

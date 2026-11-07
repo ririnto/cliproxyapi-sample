@@ -15,15 +15,17 @@ test("disposes HTTP error response bodies before returning", async () => {
     }),
     { status: 503 }
   );
-  const result = await fetchUsage({
-    cache: false,
-    credential: "synthetic-minimax-token",
-    fetch: (_url, options) => {
-      requestSignal = options.signal;
-      return errorResponse;
-    }
-  });
-  assert.equal(result, undefined);
+  assert.equal(
+    await fetchUsage({
+      cache: false,
+      credential: "synthetic-minimax-token",
+      fetch: (_url, options) => {
+        requestSignal = options.signal;
+        return errorResponse;
+      }
+    }),
+    undefined
+  );
   assert.equal(cancellations, 1);
   assert.equal(requestSignal.aborted, true);
   assert.equal(errorResponse.bodyUsed, true);

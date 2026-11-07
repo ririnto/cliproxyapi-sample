@@ -26,50 +26,52 @@ const response = (payload = usage, status = 200) => ({
 });
 
 test("API key가 있어도 native Keychain의 OAuth 인증으로 구독 사용량을 조회한다", async () => {
-  const snapshot = await fetchUsage({
-    cache: false,
-    environment: { ANTHROPIC_API_KEY: "proxy-api-key" },
-    execFile: (file, args) => {
-      assert.equal(file, "security");
-      assert.deepEqual(args, [
-        "find-generic-password",
-        "-s",
-        "Claude Code-credentials",
-        "-w"
-      ]);
-      return JSON.stringify(credentials("native-token"));
-    },
-    fetch: (url, options) => {
-      assert.equal(url, "https://api.anthropic.com/api/oauth/usage");
-      assert.equal(options.method, "GET");
-      assert.equal(options.headers.Authorization, "Bearer native-token");
-      assert.equal(options.headers["anthropic-beta"], "oauth-2025-04-20");
-      return response();
-    },
-    home: "/nonexistent",
-    now: NOW
-  });
-  assert.deepEqual(snapshot, {
-    groups: [
-      {
-        label: "Claude (Max)",
-        metrics: [
-          {
-            label: "5h",
-            percentage: 37,
-            resetsInMs: 2_760_000,
-            type: "percentage"
-          },
-          {
-            label: "7d",
-            percentage: 6,
-            resetsInMs: 219_600_000,
-            type: "percentage"
-          }
-        ]
-      }
-    ]
-  });
+  assert.deepEqual(
+    await fetchUsage({
+      cache: false,
+      environment: { ANTHROPIC_API_KEY: "proxy-api-key" },
+      execFile: (file, args) => {
+        assert.equal(file, "security");
+        assert.deepEqual(args, [
+          "find-generic-password",
+          "-s",
+          "Claude Code-credentials",
+          "-w"
+        ]);
+        return JSON.stringify(credentials("native-token"));
+      },
+      fetch: (url, options) => {
+        assert.equal(url, "https://api.anthropic.com/api/oauth/usage");
+        assert.equal(options.method, "GET");
+        assert.equal(options.headers.Authorization, "Bearer native-token");
+        assert.equal(options.headers["anthropic-beta"], "oauth-2025-04-20");
+        return response();
+      },
+      home: "/nonexistent",
+      now: NOW
+    }),
+    {
+      groups: [
+        {
+          label: "Claude (Max)",
+          metrics: [
+            {
+              label: "5h",
+              percentage: 37,
+              resetsInMs: 2_760_000,
+              type: "percentage"
+            },
+            {
+              label: "7d",
+              percentage: 6,
+              resetsInMs: 219_600_000,
+              type: "percentage"
+            }
+          ]
+        }
+      ]
+    }
+  );
 });
 
 test("Keychain 조회가 실패하면 native credentials 파일을 사용한다", async () => {
@@ -157,20 +159,22 @@ test("만료된 Keychain 인증 대신 유효한 파일 인증을 사용한다",
 
 test("native OAuth 인증이 없으면 API key를 대신 사용하지 않는다", async () => {
   let requests = 0;
-  const snapshot = await fetchUsage({
-    cache: false,
-    environment: { ANTHROPIC_API_KEY: "proxy-api-key" },
-    execFile: () => {
-      throw new Error("no keychain");
-    },
-    fetch: () => {
-      requests += 1;
-      return response();
-    },
-    home: "/nonexistent",
-    now: NOW
-  });
-  assert.equal(snapshot, undefined);
+  assert.equal(
+    await fetchUsage({
+      cache: false,
+      environment: { ANTHROPIC_API_KEY: "proxy-api-key" },
+      execFile: () => {
+        throw new Error("no keychain");
+      },
+      fetch: () => {
+        requests += 1;
+        return response();
+      },
+      home: "/nonexistent",
+      now: NOW
+    }),
+    undefined
+  );
   assert.equal(requests, 0);
 });
 
@@ -182,18 +186,20 @@ test("만료되거나 잘못된 native 인증으로는 요청하지 않는다", 
       { apiKey: "not-oauth" }
     ].map(async (oauth) => {
       let requests = 0;
-      const snapshot = await fetchUsage({
-        cache: false,
-        environment: {},
-        execFile: () => JSON.stringify({ claudeAiOauth: oauth }),
-        fetch: () => {
-          requests += 1;
-          return response();
-        },
-        home: "/nonexistent",
-        now: NOW
-      });
-      assert.equal(snapshot, undefined);
+      assert.equal(
+        await fetchUsage({
+          cache: false,
+          environment: {},
+          execFile: () => JSON.stringify({ claudeAiOauth: oauth }),
+          fetch: () => {
+            requests += 1;
+            return response();
+          },
+          home: "/nonexistent",
+          now: NOW
+        }),
+        undefined
+      );
       assert.equal(requests, 0);
     })
   );
@@ -220,40 +226,44 @@ test("조회 실패와 잘못된 응답은 사용량으로 표시하지 않는�
           five_hour: { resets_at: usage.five_hour.resets_at, utilization: "37" }
         })
     ].map(async (fetch) => {
-      const snapshot = await fetchUsage({
-        cache: false,
-        environment: {},
-        execFile: () => JSON.stringify(credentials("native-token")),
-        fetch,
-        home: "/nonexistent",
-        now: NOW
-      });
-      assert.equal(snapshot, undefined);
+      assert.equal(
+        await fetchUsage({
+          cache: false,
+          environment: {},
+          execFile: () => JSON.stringify(credentials("native-token")),
+          fetch,
+          home: "/nonexistent",
+          now: NOW
+        }),
+        undefined
+      );
     })
   );
 });
 
 test("잘못된 window는 생략하고 유효한 0% 사용량은 유지한다", async () => {
-  const snapshot = await fetchUsage({
-    cache: false,
-    environment: {},
-    execFile: () => JSON.stringify(credentials("native-token", "unknown")),
-    fetch: () =>
-      response({
-        five_hour: { resets_at: usage.five_hour.resets_at, utilization: -1 },
-        seven_day: { resets_at: null, utilization: 0 }
-      }),
-    home: "/nonexistent",
-    now: NOW
-  });
-  assert.deepEqual(snapshot, {
-    groups: [
-      {
-        label: "Claude",
-        metrics: [{ label: "7d", percentage: 0, type: "percentage" }]
-      }
-    ]
-  });
+  assert.deepEqual(
+    await fetchUsage({
+      cache: false,
+      environment: {},
+      execFile: () => JSON.stringify(credentials("native-token", "unknown")),
+      fetch: () =>
+        response({
+          five_hour: { resets_at: usage.five_hour.resets_at, utilization: -1 },
+          seven_day: { resets_at: null, utilization: 0 }
+        }),
+      home: "/nonexistent",
+      now: NOW
+    }),
+    {
+      groups: [
+        {
+          label: "Claude",
+          metrics: [{ label: "7d", percentage: 0, type: "percentage" }]
+        }
+      ]
+    }
+  );
 });
 
 const snapshotFor = (payload) =>
@@ -425,12 +435,14 @@ test("본문 조회 실패는 최근 잔액을 유지하고 정상 빈 응답은
       now: NOW + 183_000
     });
     assert.equal(invalidBody?.groups[0].metrics[0].remaining, 75);
-    const empty = await fetchUsage({
-      ...options,
-      fetch: () => response({}),
-      now: NOW + 244_000
-    });
-    assert.equal(empty, undefined);
+    assert.equal(
+      await fetchUsage({
+        ...options,
+        fetch: () => response({}),
+        now: NOW + 244_000
+      }),
+      undefined
+    );
   } finally {
     await rm(cacheDir, { force: true, recursive: true });
   }

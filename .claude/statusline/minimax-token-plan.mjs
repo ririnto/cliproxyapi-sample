@@ -55,8 +55,6 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   }
 };
 
-const fetchFunction = (options) => options.fetch ?? globalThis.fetch;
-
 const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
@@ -70,10 +68,13 @@ const compactMetrics = (metrics, index = 0) => {
 
 const snapshot = (metrics, label) => {
   const validMetrics = compactMetrics(metrics);
-  const group = label
-    ? { label, metrics: validMetrics }
-    : { metrics: validMetrics };
-  return validMetrics.length ? { groups: [group] } : undefined;
+  return validMetrics.length
+    ? {
+        groups: [
+          label ? { label, metrics: validMetrics } : { metrics: validMetrics }
+        ]
+      }
+    : undefined;
 };
 
 const usageMetric = (label, used, total, resetsInMs) =>
@@ -139,7 +140,7 @@ const fetchUsageUncached = async (options = {}) => {
           Authorization: `Bearer ${credential}`,
           "Content-Type": "application/json"
         },
-        fetchFunction(options),
+        options.fetch ?? globalThis.fetch,
         options.onUsageError
       )
     : {};

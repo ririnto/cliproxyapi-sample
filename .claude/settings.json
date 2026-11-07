@@ -262,30 +262,37 @@
       "name": "Claude",
       "primary": true,
       "provider": "claude",
-      "script": "statusline/claude-usage.mjs"
+      "script": "statusline/claude-usage.mjs",
+      "showAbove": 0.001
     },
     {
       "credential": "{env:ZHIPU_API_KEY}",
       "hideName": true,
       "name": "GLM Coding Plan",
-      "script": "statusline/glm-coding-plan.mjs"
+      "script": "statusline/glm-coding-plan.mjs",
+      "showAbove": 0.001
+    },
+    {
+      "name": "Chatgpt",
+      "script": "statusline/codex-usage.mjs",
+      "showAbove": 0.001
+    },
+    {
+      "credential": "{env:MISTRAL_API_KEY}",
+      "name": "Mistral",
+      "script": "statusline/mistral-usage.mjs",
+      "showAbove": 0.001
+    },
+    {
+      "name": "Copilot",
+      "script": "statusline/copilot-usage.mjs",
+      "showAbove": 0.001
     },
     {
       "credential": "{env:MINIMAX_API_KEY}",
       "name": "MiniMax Token Plan",
       "script": "statusline/minimax-token-plan.mjs",
-      "showAbove": {
-        "5h": 5,
-        "7d": 5
-      }
-    },
-    {
-      "name": "Chatgpt",
-      "script": "statusline/codex-usage.mjs"
-    },
-    {
-      "name": "Copilot",
-      "script": "statusline/copilot-usage.mjs"
+      "showAbove": 0.001
     }
   ],
   "subagentStatusLine": {
