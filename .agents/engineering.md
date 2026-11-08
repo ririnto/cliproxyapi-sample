@@ -30,6 +30,10 @@ Prefer existing code, platform features, and installed dependencies.
 Add custom code or packages only when existing options are insufficient.
 Prefer maintained libraries when they reduce complexity or improve reliability.
 Add abstractions only for a stated requirement or a second real caller.
+Use named regex capture groups and name-based access instead of ordinal
+capture extraction, including full-match extraction.
+Subject to configured lint, inline single-use variables and keep
+single-use logic inline.
 Replace obsolete interfaces with their consumers, and remove superseded paths.
 
 ## Preserve checks
