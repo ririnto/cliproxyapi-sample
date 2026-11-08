@@ -88,10 +88,10 @@ source_type = "git"
 [plugins."workgraph@sinon"]
 enabled = true
 
-[plugins."codegraph@sinon"]
+[plugins."codegraph-plugin@sinon"]
 enabled = true
 
-[plugins."ddgs@sinon"]
+[plugins."ddgs-plugin@sinon"]
 enabled = true
 
 [plugins."pstack@cursor-plugins"]

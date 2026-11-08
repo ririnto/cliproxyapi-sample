@@ -12,10 +12,10 @@
   "enableWorkflows": true,
   "enabledPlugins": {
     "code-simplifier@claude-plugins-official": true,
-    "codegraph@sinon": true,
+    "codegraph-plugin@sinon": true,
     "codex-app-server@sinon": false,
     "context7@claude-plugins-official": true,
-    "ddgs@sinon": true,
+    "ddgs-plugin@sinon": true,
     "discernment-nudge@anthropic-agent-skills": true,
     "feature-dev@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true,
