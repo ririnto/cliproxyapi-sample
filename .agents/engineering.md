@@ -42,6 +42,7 @@ Do not disable lint rules, add suppressions, or weaken checks to pass a change.
 
 ## Measure and report performance
 
+Write the intended claim before measuring.
 Lead with the verdict: faster, slower, no measurable difference, or inconclusive.
 Report the number with its unit, run count, range, and the limiter that explains
 it.

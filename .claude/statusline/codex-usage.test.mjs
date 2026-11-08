@@ -254,58 +254,85 @@ test("shows owned credits regardless of the unlimited flag", async () => {
   }
 });
 
-test("signals malformed or explicit provider-error payloads to the cache hook", async () => {
+test("preserves cached usage for malformed and provider-error payloads", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
-    assert.deepEqual(
-      await Promise.all(
-        [
-          () => {
-            throw new Error("invalid body");
-          },
-          () => null,
-          () => ({ error: "provider error" }),
-          () => ({ success: false })
-        ].map(async (json) => {
-          let failureCount = 0;
+    await Promise.all(
+      [
+        () => {
+          throw new Error("invalid body");
+        },
+        () => null,
+        () => ({ error: "provider error" }),
+        () => ({ success: false })
+      ].map(async (json, index) => {
+        const options = {
+          cacheDir: path.join(home, `cache-${index}`),
+          cacheTtlMs: 0,
+          fetch: () => ({
+            json: () => ({ credits: { balance: 5, has_credits: true } }),
+            status: 200
+          }),
+          home,
+          now: 1000
+        };
+        const previous = await fetchUsage(options);
+        assert.ok(previous);
+        assert.deepEqual(
           await fetchUsage({
-            cache: false,
+            ...options,
             fetch: () => ({ json, status: 200 }),
-            home,
-            onUsageError: () => (failureCount += 1)
-          });
-          return failureCount;
-        })
-      ),
-      [1, 1, 1, 1]
+            now: 1001
+          }),
+          previous
+        );
+      })
     );
   } finally {
     await rm(home, { force: true, recursive: true });
   }
 });
 
-test("does not signal valid empty or zero-credit payloads to the cache hook", async () => {
+test("clears cached usage for valid empty and zero-credit payloads", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
-    assert.deepEqual(
-      await Promise.all(
-        [
-          {},
-          { credits: { balance: 0, has_credits: true, unlimited: false } }
-        ].map(async (payload) => {
-          let failureCount = 0;
+    await Promise.all(
+      [
+        {},
+        { credits: { balance: 0, has_credits: true, unlimited: false } }
+      ].map(async (payload, index) => {
+        const options = {
+          cacheDir: path.join(home, `cache-${index}`),
+          cacheTtlMs: 0,
+          fetch: () => ({
+            json: () => ({ credits: { balance: 5, has_credits: true } }),
+            status: 200
+          }),
+          home,
+          now: 1000
+        };
+        assert.ok(await fetchUsage(options));
+        assert.equal(
           await fetchUsage({
-            cache: false,
+            ...options,
             fetch: () => ({ json: () => payload, status: 200 }),
-            home,
-            onUsageError: () => (failureCount += 1)
-          });
-          return failureCount;
-        })
-      ),
-      [0, 0]
+            now: 1001
+          }),
+          undefined
+        );
+        assert.equal(
+          await fetchUsage({
+            ...options,
+            fetch: () => {
+              throw new Error("offline");
+            },
+            now: 1002
+          }),
+          undefined
+        );
+      })
     );
   } finally {
     await rm(home, { force: true, recursive: true });
