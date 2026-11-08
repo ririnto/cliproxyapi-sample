@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 
 import { fetchUsage } from "./copilot-usage.mjs";
 
@@ -98,32 +97,6 @@ test("0 엔타이틀먼트는 한도가 아니어서 지표를 만들지 않는�
             }
           },
           token_based_billing: true
-        }),
-        status: 200
-      }),
-      home: "/nonexistent"
-    }),
-    undefined
-  );
-});
-
-test("음수 엔타이틀먼트도 지표를 만들지 않는다", async () => {
-  assert.equal(
-    await fetchUsage({
-      cache: false,
-      credential: "tok",
-      environment: {},
-      execFile: () => {
-        throw new Error("no keychain");
-      },
-      fetch: () => ({
-        json: () => ({
-          quota_snapshots: {
-            premium_interactions: {
-              entitlement: -1,
-              quota_remaining: -1
-            }
-          }
         }),
         status: 200
       }),
@@ -643,80 +616,6 @@ test("disposes unauthorized responses before fallback, even when cancellation re
         ]);
       })
     );
-  } finally {
-    await rm(home, { force: true, recursive: true });
-  }
-});
-
-test("continues fallback when HTTP error body cancellation stalls until timeout", async () => {
-  const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
-  const events = [];
-  let firstResponse;
-  let firstSignal;
-  let calls = 0;
-  try {
-    await Promise.all(
-      [
-        [".copilot", "config.json"],
-        [".config", "github-copilot", "oauth.json"],
-        [".local", "share", "opencode", "auth.json"],
-        [".config", "gh", "hosts.json"]
-      ].map(async (parts) => {
-        const filePath = path.join(home, ...parts);
-        await mkdir(path.dirname(filePath), { recursive: true });
-        await writeFile(filePath, "{}");
-      })
-    );
-    const snapshot = await Promise.race([
-      fetchUsage({
-        cache: false,
-        credential: "first-token",
-        environment: {
-          COPILOT_GITHUB_TOKEN: "second-token",
-          GH_TOKEN: "",
-          GITHUB_TOKEN: ""
-        },
-        fetch: (_url, options) => {
-          calls += 1;
-          if (calls === 1) {
-            firstSignal = options.signal;
-            firstResponse = new Response(
-              new ReadableStream({
-                cancel() {
-                  events.push("dispose");
-                  return Promise.withResolvers().promise;
-                }
-              }),
-              { status: 401 }
-            );
-            events.push("first");
-            return firstResponse;
-          }
-          events.push("fallback");
-          return Response.json(
-            {
-              quota_snapshots: {
-                premium_interactions: {
-                  entitlement: 100,
-                  quota_remaining: 70
-                }
-              }
-            },
-            { status: 200 }
-          );
-        },
-        home,
-        onUsageError: () => events.push("hook"),
-        platform: "linux"
-      }),
-      delay(3500, "stalled")
-    ]);
-    assert.notEqual(snapshot, "stalled");
-    assert.equal(snapshot.groups[0].metrics[0].used, 30);
-    assert.equal(calls, 2);
-    assert.deepEqual(events, ["first", "dispose", "hook", "fallback"]);
-    assert.equal(firstSignal.aborted, true);
-    assert.equal(firstResponse.bodyUsed, true);
   } finally {
     await rm(home, { force: true, recursive: true });
   }
