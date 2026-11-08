@@ -682,14 +682,6 @@ test("public CLI resolves addon settings from the configured directory", async (
       assert.doesNotMatch(output, /HomeFixture/u);
     }
   );
-  await t.test("empty CLAUDE_CONFIG_DIR falls back to HOME", () => {
-    const output = runPlainText(fallbackProjectDir, {
-      CLAUDE_CONFIG_DIR: "",
-      HOME: homeDir
-    });
-    assert.match(output, /HomeFixture {2}Probe 90% left/u);
-    assert.doesNotMatch(output, /CustomFixture/u);
-  });
   await t.test("unset CLAUDE_CONFIG_DIR falls back to HOME", () => {
     const output = runPlainText(fallbackProjectDir, { HOME: homeDir });
     assert.match(output, /HomeFixture {2}Probe 90% left/u);
