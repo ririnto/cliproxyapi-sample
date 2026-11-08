@@ -45,14 +45,14 @@ const homePath = (value, home) =>
   value.startsWith("~/") ? path.join(home, value.slice(2)) : value;
 
 const replaceEnvironmentReferences = (value, environment) =>
-  value.replaceAll(/\{env:(?<name>[^{}]+)\}/gu, (placeholder) =>
-    String(environmentValue(placeholder.slice(5, -1), environment))
+  value.replaceAll(/\{env:(?<name>[^{}]+)\}/gu, (placeholder, envName) =>
+    String(environmentValue(envName, environment))
   );
 
 const referenceText = async (reference, home, baseDir) => {
-  const [, referencePath] = reference;
+  const referencePath = reference.groups.fileReferencePath;
   if (!referencePath) {
-    return reference[0];
+    return `{file:${referencePath}}`;
   }
   const pathValue = homePath(referencePath, home);
   const filePath = path.isAbsolute(pathValue)
@@ -62,25 +62,8 @@ const referenceText = async (reference, home, baseDir) => {
     const contents = await readFile(filePath, "utf-8");
     return contents.trim();
   } catch {
-    return reference[0];
+    return `{file:${referencePath}}`;
   }
-};
-
-const spliceReferences = (value, references, texts) => {
-  const last = references.at(-1);
-  return (
-    references
-      .map(
-        (reference, index) =>
-          value.slice(
-            index
-              ? references[index - 1].index + references[index - 1][0].length
-              : 0,
-            reference.index
-          ) + texts[index]
-      )
-      .join("") + value.slice(last.index + last[0].length)
-  );
 };
 
 const replaceFileReferences = async (value, options) => {
@@ -95,7 +78,12 @@ const replaceFileReferences = async (value, options) => {
   const texts = await Promise.all(
     references.map((reference) => referenceText(reference, home, baseDir))
   );
-  return spliceReferences(value, references, texts);
+  const segments = value.split(/\{file:[^{}]*\}/gu);
+  return segments
+    .map((segment, index) =>
+      index < texts.length ? `${segment}${texts[index]}` : segment
+    )
+    .join("");
 };
 
 const resolveCredentialReference = (value, options = {}) =>
