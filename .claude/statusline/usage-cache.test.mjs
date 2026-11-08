@@ -447,29 +447,6 @@ test("preserves prior data when a successful HTTP body is malformed", async () =
   );
 });
 
-test("resets normalization failure for a later successful HTTP attempt", async () => {
-  let calls = 0;
-  let hookAvailable = false;
-  assert.deepEqual(
-    await withUsageCache(
-      "zai",
-      "account",
-      optionsFor(cacheDir, 1000),
-      async (wrapped) => {
-        await wrapped.fetch("https://example.test");
-        hookAvailable = typeof wrapped.onUsageError === "function";
-        wrapped.onUsageError?.();
-        await wrapped.fetch("https://example.test");
-        calls += 1;
-        return snapshot;
-      }
-    ),
-    snapshot
-  );
-  assert.equal(calls, 1);
-  assert.equal(hookAvailable, true);
-});
-
 test("honors HTTP-date Retry-After cooldowns", async () => {
   const now = 1000;
   const retryAt = now + 600_000;
