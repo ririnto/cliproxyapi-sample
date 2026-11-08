@@ -36,6 +36,27 @@ brew services stop cliproxyapi
 brew services restart cliproxyapi
 ```
 
+### OpenCode와 Codex 권한
+
+이 저장소의 `opencode.json`은 OpenCode V2 프로젝트 설정으로 모든 작업과 리소스에 `allow` 규칙을 적용한다.
+OpenCode를 프로젝트에서 실행하면 확인 요청 없이 작업을 허용한다.
+상위 우선순위 설정이나 관리 정책은 이 동작을 제한할 수 있다.
+V1은 설정 형식이 다르므로 이 파일을 그대로 사용할 수 없다.
+자세한 내용은 [OpenCode 권한 문서](https://opencode.ai/docs/permissions/)를 참조한다.
+
+`.codex/config.toml`은 Codex 클라이언트 설정이다.
+`approval_policy = "never"`는 승인 요청을 표시하지 않는다.
+`sandbox_mode = "danger-full-access"`는 Codex의 샌드박스를 비활성화한다.
+`approvals_reviewer = "auto_review"`는 승인 요청이 허용되는 정책에서 적격 요청을 검토한다.
+이 설정은 `never`에서 모든 작업을 승인하거나 샌드박스를 제공하지 않는다.
+프로젝트 설정은 신뢰된 프로젝트에 적용되며 관리 정책이나 실행 시 설정이 유효한 동작을 제한하거나 변경할 수 있다.
+자세한 내용은 [Codex 설정 참조](https://developers.openai.com/codex/config-reference/)를 확인한다.
+
+**주의:** 이 설정은 에이전트가 사용자 권한으로 파일을 읽거나 수정하고, 명령을 실행하고, 네트워크에 접근할 수 있게 한다.
+악의적인 프롬프트나 저장소 내용으로 비밀 정보 유출, 데이터 손실, 외부 서비스 변경이 발생할 수 있으며 실행 전 사람의 확인이 없다.
+신뢰할 수 있는 환경에서만 사용하고 필요한 경우 각 클라이언트의 권한과 샌드박스 설정을 강화한다.
+이 파일들은 클라이언트 권한 설정이며 `config.example.yaml`의 프록시 인증, 네트워크 또는 공급자 설정을 변경하지 않는다.
+
 ### Claude Code
 
 `.claude/settings.json`은 `model` 키를 지정하지 않는다.
