@@ -40,6 +40,25 @@ Replace obsolete interfaces with their consumers, and remove superseded paths.
 
 Do not disable lint rules, add suppressions, or weaken checks to pass a change.
 
+## Measure and report performance
+
+Lead with the verdict: faster, slower, no measurable difference, or inconclusive.
+Report the number with its unit, run count, range, and the limiter that explains
+it.
+Use production-representative settings and data, and check results against
+physical limits.
+Count failures and verify that outputs are correct.
+Confirm that the work ran inside the timed region.
+For comparisons, alternate at least five runs per side and report the median and
+range.
+Treat a difference smaller than run-to-run variation as no measurable difference.
+Measure the end-to-end path a user waits on with realistic data and concurrency.
+Report each micro result as a share of that path.
+Call a comparison inconclusive if a side is untuned or correctness, timed work,
+or the limiter cannot be established.
+For a requested one-run ballpark, check failures, correctness, and timed work,
+and say it is one run.
+
 ## Extend tests for behavior
 
 Extend existing tests for requirements and concrete regression risks.
