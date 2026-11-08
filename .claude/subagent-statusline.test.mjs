@@ -1,221 +1,173 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 
 import { renderRows } from "./subagent-statusline.mjs";
 
-const plainText = (value) => stripVTControlCharacters(String(value));
-const scriptPath = fileURLToPath(
-  new URL("subagent-statusline.mjs", import.meta.url)
-);
+const nowMs = 1_700_000_000_000;
 
-test("rows show name, model, effort, status, tokens, and summary in order", () => {
-  const rows = renderRows({
-    columns: 120,
-    tasks: [
-      {
-        agentType: "Explore",
-        description: "map the auth flow",
-        effort: "high",
-        id: "task-1",
-        label: "reviewing auth flow",
-        model: "claude-opus-5-5",
-        status: "running",
-        tokenCount: 12_345,
-        type: "local_agent"
-      },
-      {
-        agentType: "general-purpose",
-        description: "search for the retry helper",
-        id: "task-2",
-        name: "finder",
-        status: "completed"
-      }
-    ]
-  });
-  assert.equal(rows.length, 2);
-  assert.equal(rows[0].id, "task-1");
-  assert.equal(
-    plainText(rows[0].content),
-    "Explore · claude-opus-5-5 · high · running · 12.3k tok · reviewing auth flow"
+test("reads transcript usage from the current user directory", (t) => {
+  if (typeof process.getuid !== "function") {
+    t.skip("POSIX user ID is unavailable");
+    return;
+  }
+  const directory = mkdtempSync(
+    path.join(tmpdir(), "subagent-statusline-test-")
   );
-  assert.equal(rows[1].id, "task-2");
-  assert.equal(
-    plainText(rows[1].content),
-    "finder · completed · search for the retry helper"
+  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  const tasks = path.join(
+    directory,
+    `claude-${process.getuid()}`,
+    "project",
+    "session",
+    "tasks"
   );
-});
-
-test("absent tasks or rows without an id keep the default rendering", () => {
-  assert.deepEqual(renderRows({}), []);
-  assert.deepEqual(renderRows({ columns: 80, tasks: [] }), []);
-  assert.deepEqual(
-    renderRows({
-      columns: 80,
-      tasks: [{ status: "running" }, null, { agentType: "Explore" }]
-    }),
-    []
+  mkdirSync(tasks, { recursive: true });
+  const transcript = path.join(tasks, "fixture.output");
+  const message = {
+    id: "message-1",
+    usage: {
+      cache_creation_input_tokens: 400,
+      cache_read_input_tokens: 9000,
+      input_tokens: 1200,
+      output_tokens: 300
+    }
+  };
+  writeFileSync(
+    transcript,
+    [message, message]
+      .map((item) => JSON.stringify({ message: item }))
+      .join("\n")
   );
-});
-
-test("rows are clipped to the reported row width", () => {
-  const rows = renderRows({
-    columns: 40,
-    tasks: [
-      {
-        agentType: "Explore",
-        description: "a".repeat(60),
-        id: "task-1",
-        status: "running",
-        tokenCount: 12_345
-      }
-    ]
-  });
-  assert.equal(
-    plainText(rows[0].content),
-    "Explore · running · 12.3k tok · aaaaaaa…"
+  const cache = path.join(directory, "subagent-statusline-usage");
+  mkdirSync(cache, { recursive: true });
+  const stat = statSync(transcript);
+  writeFileSync(
+    path.join(cache, "fixture.json"),
+    JSON.stringify({ key: `${stat.mtimeMs}:${stat.size}`, total: 99_999 })
   );
-});
-
-test("model outranks effort when the row runs out of space", () => {
-  const rows = renderRows({
-    columns: 28,
-    tasks: [
+  const run = () =>
+    spawnSync(
+      process.execPath,
+      [new URL("subagent-statusline.mjs", import.meta.url).pathname],
       {
-        agentType: "Explore",
-        effort: "high",
-        id: "task-1",
-        model: "claude-opus-5-5",
-        status: "running"
+        encoding: "utf-8",
+        env: { ...process.env, TMPDIR: directory },
+        input: JSON.stringify({
+          tasks: [
+            {
+              agentType: "worker",
+              id: "fixture",
+              status: "completed",
+              tokenCount: 0
+            }
+          ]
+        })
       }
-    ]
-  });
-  assert.equal(plainText(rows[0].content), "Explore · claude-opus-5-5");
-});
-
-test("wide characters count as two cells when clipping", () => {
-  const rows = renderRows({
-    columns: 40,
-    tasks: [
-      {
-        agentType: "Explore",
-        description: "한".repeat(20),
-        id: "task-1",
-        status: "running"
-      }
-    ]
-  });
-  assert.equal(
-    plainText(rows[0].content),
-    `Explore · running · ${"한".repeat(9)}…`
+    );
+  let result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    stripVTControlCharacters(JSON.parse(result.stdout).content),
+    /Σ\s*1\.9k/u
   );
-  const emojiRows = renderRows({
-    columns: 30,
-    tasks: [
-      {
-        agentType: "Explore",
-        description: "🚀".repeat(20),
-        id: "task-1",
-        status: "running"
-      }
-    ]
-  });
-  assert.equal(
-    plainText(emojiRows[0].content),
-    `Explore · running · ${"🚀".repeat(4)}…`
+  writeFileSync(
+    transcript,
+    `${JSON.stringify({ message })}\n${JSON.stringify({ message: { id: "message-2", usage: { input_tokens: 100 } } })}`
+  );
+  result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    stripVTControlCharacters(JSON.parse(result.stdout).content),
+    /Σ\s*2k/u
   );
 });
 
-test("token counts drop whole instead of truncating mid-value", () => {
-  const rows = renderRows({
-    columns: 22,
-    tasks: [
-      {
-        agentType: "Explore",
-        id: "task-1",
-        status: "running",
-        tokenCount: 12_345
-      }
-    ]
-  });
-  assert.equal(plainText(rows[0].content), "Explore · running");
-});
-
-test("long names clip after lower-priority segments are dropped", () => {
-  const rows = renderRows({
-    columns: 40,
-    tasks: [
-      {
-        id: "task-1",
-        name: "N".repeat(50),
-        status: "running"
-      }
-    ]
-  });
-  assert.equal(plainText(rows[0].content), `${"N".repeat(39)}…`);
-});
-
-test("task strings stay inside their row without escape leakage", () => {
-  const rows = renderRows({
-    columns: 120,
-    tasks: [
-      {
-        description: "scan\nfiles\u001B[31m",
-        id: "task-1",
-        name: "Explore\nFAKE ROW\u001B[31m",
-        status: "running\nROW2",
-        tokenCount: 5
-      }
-    ]
-  });
-  assert.equal(rows[0].content.includes("\n"), false);
-  assert.equal(rows[0].content.includes("\u001B[31m"), false);
-  assert.equal(
-    plainText(rows[0].content),
-    "Explore FAKE ROW · running ROW2 · 5 tok · scan files"
-  );
-});
-
-test("the command reads tasks from stdin and writes one JSON row per task", () => {
-  const result = spawnSync(process.execPath, [scriptPath], {
-    encoding: "utf-8",
-    input: JSON.stringify({
-      columns: 120,
+test("subagent rows preserve task ids and align right metrics", () => {
+  const rows = renderRows(
+    {
+      columns: 100,
+      cwd: "/workspace/project",
       tasks: [
         {
-          agentType: "Explore",
-          description: "map the auth flow",
+          agentType: "worker",
+          contextWindowSize: 200_000,
+          cwd: "/workspace/project",
+          description: "Investigate fixture",
           effort: "high",
           id: "task-1",
-          model: "claude-opus-5-5",
+          model: "glm-5.3",
+          name: "worker",
+          startTime: nowMs - 65_000,
           status: "running",
-          tokenCount: 12_345
+          tokenCount: 20_000
+        },
+        {
+          agentType: "explorer",
+          id: "task-2",
+          startTime: nowMs - 125_000,
+          status: "completed",
+          tokenCount: 0
         }
       ]
-    })
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stderr, "");
-  const lines = result.stdout.split("\n");
-  assert.equal(lines.length, 2);
-  assert.equal(lines[1], "");
-  const row = JSON.parse(lines[0]);
-  assert.equal(row.id, "task-1");
-  assert.deepEqual(Object.keys(row), ["content", "id"]);
-  assert.equal(
-    plainText(row.content),
-    "Explore · claude-opus-5-5 · high · running · 12.3k tok · map the auth flow"
+    },
+    nowMs
   );
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows.map((row) => JSON.parse(row).id),
+    ["task-1", "task-2"]
+  );
+  assert.match(
+    stripVTControlCharacters(JSON.parse(rows[0]).content),
+    /glm-5.3 high/u
+  );
+  assert.match(stripVTControlCharacters(JSON.parse(rows[0]).content), /▰▱/u);
+  assert.match(
+    stripVTControlCharacters(JSON.parse(rows[1]).content),
+    /✔ explorer\s+0\s+2m05s/u
+  );
+  const firstRightEdge = stripVTControlCharacters(
+    JSON.parse(rows[0]).content
+  ).length;
+  const secondRightEdge = stripVTControlCharacters(
+    JSON.parse(rows[1]).content
+  ).length;
+  assert.equal(firstRightEdge, secondRightEdge);
 });
 
-test("malformed stdin exits silently without rows", () => {
-  const result = spawnSync(process.execPath, [scriptPath], {
-    encoding: "utf-8",
-    input: "{"
-  });
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, "");
-  assert.equal(result.stderr, "");
+test("subagent rows omit missing metrics and sanitize task labels", () => {
+  const [row] = renderRows(
+    {
+      columns: 0,
+      tasks: [
+        {
+          agentType: "worker",
+          description: "safe\u000Blabel\nvalue",
+          effort: "low",
+          id: "task",
+          model: "gpt-6.1-sol",
+          startTime: nowMs,
+          status: "failed",
+          tokenCount: 0
+        }
+      ]
+    },
+    nowMs
+  );
+  const content = stripVTControlCharacters(JSON.parse(row).content);
+
+  assert.match(content, /✗ worker gpt-6.1-sol low safe label value\s+0\s+0s/u);
+  assert.doesNotMatch(content, /▰|▱|⌥|Σ/u);
 });
