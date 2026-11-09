@@ -61,7 +61,9 @@ stateDiagram-v2
     Recent --> Request: Retry time reached
     Expired --> Request: Retry time reached
     Request --> Recent: Successful response with usage
+    Request --> Recent: Failed response and age at most five minutes
     Request --> Expired: Failed response and age exceeds five minutes
+    Request --> Empty: Successful response without usage
 ```
 
 A custom lifetime can keep a successful snapshot for over five minutes.
