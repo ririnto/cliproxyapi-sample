@@ -534,6 +534,79 @@ test("ignores corrupt cache files and persists fresh results", async () => {
   );
 });
 
+test("generated request sequences never return another account's snapshot", async () => {
+  const actions = ["a", "b"].flatMap((identity) =>
+    [200, 429].flatMap((status) =>
+      [1000, 6000].map((elapsed) => ({ elapsed, identity, status }))
+    )
+  );
+  let sequences = [[]];
+  for (let depth = 0; depth < 3; depth += 1) {
+    sequences = sequences.flatMap((sequence) =>
+      actions.map((action) => [...sequence, action])
+    );
+  }
+  await Promise.all(
+    sequences.map(async (sequence, index) => {
+      const directory = path.join(cacheDir, String(index));
+      const run = async (step, previousNow) => {
+        const action = sequence[step];
+        if (!action) {
+          return;
+        }
+        const now = previousNow + action.elapsed;
+        const result = await withUsageCache(
+          "zai",
+          action.identity,
+          optionsFor(directory, now, undefined, action.status),
+          async (options) => {
+            await options.fetch("https://example.test");
+            return { owner: action.identity };
+          }
+        );
+        assert.ok(
+          result === undefined || result.owner === action.identity,
+          JSON.stringify(sequence)
+        );
+        await run(step + 1, now);
+      };
+      await run(0, 0);
+    })
+  );
+});
+
+test("generated cooldowns never serve a snapshot beyond the stale limit", async () => {
+  await Promise.all(
+    [299_999, 300_000, 300_001, 600_000].flatMap((age) =>
+      [601, 1200].map(async (retrySeconds) => {
+        const directory = path.join(cacheDir, `${age}-${retrySeconds}`);
+        await withUsageCache(
+          "zai",
+          "account",
+          optionsFor(directory, 1000),
+          async (options) => {
+            await options.fetch("https://example.test");
+            return snapshot;
+          }
+        );
+        await withUsageCache(
+          "zai",
+          "account",
+          optionsFor(directory, 6000, String(retrySeconds), 429),
+          fetchSnapshot
+        );
+        const result = await withUsageCache(
+          "zai",
+          "account",
+          optionsFor(directory, 1000 + age),
+          () => assert.fail("cooldown must prevent a request")
+        );
+        assert.equal(result === undefined, age > 300_000);
+      })
+    )
+  );
+});
+
 test("bypasses cache when disabled", async () => {
   let calls = 0;
   const run = () =>

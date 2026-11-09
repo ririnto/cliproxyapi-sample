@@ -28,6 +28,50 @@ Existing records retain their saved retry times until the next request.
 Installed copies need a separately owned source update and reload to activate
 these defaults.
 
+## Usage cache states
+
+The cache associates each provider snapshot with a credential identity.
+A changed identity ignores the previous record and starts a new request.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Request: No matching record
+    Request --> Available: Successful response with usage
+    Request --> Empty: Successful response without usage
+    Request --> Waiting: Failed response
+    Available --> Available: Request before refresh time
+    Available --> Request: Refresh time reached or identity changed
+    Empty --> Empty: Request before refresh time
+    Empty --> Request: Refresh time reached or identity changed
+    Waiting --> Waiting: Request before retry time
+    Waiting --> Request: Retry time reached or identity changed
+```
+
+A failed request can retain a prior snapshot for the same identity.
+The next diagram tracks a snapshot during a failed refresh.
+The cooldown exceeds the cache lifetime.
+Age is measured from the last successful response, not the latest failure.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Recent: Successful response with usage
+    Recent --> Recent: Failed refresh and age at most five minutes
+    Recent --> Expired: Cooldown continues and age exceeds five minutes
+    Expired --> Expired: Request before retry time
+    Recent --> Request: Retry time reached
+    Expired --> Request: Retry time reached
+    Request --> Recent: Successful response with usage
+    Request --> Expired: Failed response and age exceeds five minutes
+```
+
+A custom lifetime can keep a successful snapshot for over five minutes.
+A successful empty response removes the previous snapshot.
+The generated tests in `usage-cache.test.mjs` exercise sequential requests for
+two identities and stale data during rate-limit cooldowns.
+The tests use bounded inputs and do not prove behavior for concurrent requests
+or provider-specific credential selection.
+Run them with `pnpm test`.
+
 ## Claude display
 
 The first row starts with the model, effort, project, and Git branch.
