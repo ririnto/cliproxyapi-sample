@@ -72,7 +72,7 @@ The generated tests in `usage-cache.test.mjs` exercise sequential requests for
 two identities and stale data during rate-limit cooldowns.
 The tests use bounded inputs and do not prove behavior for concurrent requests
 or provider-specific credential selection.
-Run them with `pnpm test`.
+Run them with `pnpm run check:test`.
 
 ## Claude display
 
