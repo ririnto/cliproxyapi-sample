@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "agent-browser": {
+      "type": "stdio",
+      "command": "bunx",
+      "args": ["agent-browser", "mcp"],
+      "env": {}
+    }
+  }
+}

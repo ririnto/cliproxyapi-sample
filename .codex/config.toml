@@ -33,10 +33,6 @@ local_thread_store_compression = true
 memories = true
 prevent_idle_sleep = true
 
-[marketplaces.agent-browser]
-source = "https://github.com/vercel-labs/agent-browser.git"
-source_type = "git"
-
 [marketplaces.cursor-plugins]
 source = "https://github.com/cursor/plugins.git"
 source_type = "git"
@@ -61,6 +57,10 @@ source_type = "git"
 source = "https://github.com/obra/superpowers-marketplace.git"
 source_type = "git"
 
+[mcp_servers.agent-browser]
+args = ["agent-browser", "mcp"]
+command = "bunx"
+
 [mcp_servers.context7]
 bearer_token_env_var = "CONTEXT7_API_KEY"
 url = "https://mcp.context7.com/mcp"
@@ -76,9 +76,6 @@ extract_model = "gpt-6-luna"
 fast_default_opt_out = true
 hide_full_access_warning = true
 hide_rate_limit_model_nudge = true
-
-[plugins."agent-browser@agent-browser"]
-enabled = true
 
 [plugins."agent-desktop-plugin@sinon"]
 enabled = true
