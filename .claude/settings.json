@@ -11,6 +11,7 @@
   "effortLevel": "high",
   "enableWorkflows": true,
   "enabledPlugins": {
+    "agent-browser-plugin@sinon": true,
     "agent-desktop-plugin@sinon": true,
     "claude-security@claude-plugins-official": true,
     "clear-writing@sinon": true,
