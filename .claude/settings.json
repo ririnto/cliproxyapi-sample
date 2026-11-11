@@ -11,6 +11,10 @@
   "effortLevel": "high",
   "enableWorkflows": true,
   "enabledPlugins": {
+    "agent-browser@agent-browser": true,
+    "agent-desktop-plugin@sinon": true,
+    "claude-security@claude-plugins-official": true,
+    "clear-writing@sinon": true,
     "code-simplifier@claude-plugins-official": true,
     "codegraph-plugin@sinon": true,
     "codex-app-server@sinon": false,
@@ -23,9 +27,12 @@
     "gopls-lsp@claude-plugins-official": true,
     "i-have-adhd@i-have-adhd": true,
     "kotlin-lsp@claude-plugins-official": true,
+    "modern-web-guidance@googlechrome": true,
     "playwright@claude-plugins-official": false,
     "plugin-dev@claude-plugins-official": true,
     "pstack@cursor-plugins": true,
+    "rea@rea": true,
+    "stop-slop@sinon": true,
     "superpowers@superpowers-marketplace": true,
     "swift-lsp@claude-plugins-official": false,
     "typescript-lsp@claude-plugins-official": true,
@@ -72,6 +79,12 @@
     "ENABLE_TOOL_SEARCH": "true"
   },
   "extraKnownMarketplaces": {
+    "agent-browser": {
+      "source": {
+        "repo": "vercel-labs/agent-browser",
+        "source": "github"
+      }
+    },
     "anthropic-agent-skills": {
       "autoUpdate": true,
       "source": {
@@ -93,10 +106,22 @@
         "source": "github"
       }
     },
+    "googlechrome": {
+      "source": {
+        "repo": "GoogleChrome/modern-web-guidance",
+        "source": "github"
+      }
+    },
     "i-have-adhd": {
       "autoUpdate": true,
       "source": {
         "repo": "ayghri/i-have-adhd",
+        "source": "github"
+      }
+    },
+    "rea": {
+      "source": {
+        "repo": "morluto/rea",
         "source": "github"
       }
     },
