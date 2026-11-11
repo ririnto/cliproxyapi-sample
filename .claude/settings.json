@@ -140,7 +140,7 @@
       }
     }
   },
-  "fallbackModel": ["glm-5.3", "claude-sonnet-5-5", "gpt-6.1-sol"],
+  "fallbackModel": ["glm-5.3-flash", "claude-sonnet-5-5", "gpt-6.1-terra"],
   "feedbackSurveyRate": 0,
   "includeGitInstructions": false,
   "language": "Korean",
