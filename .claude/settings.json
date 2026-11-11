@@ -11,7 +11,7 @@
   "effortLevel": "high",
   "enableWorkflows": true,
   "enabledPlugins": {
-    "agent-browser@agent-browser": true,
+    "agent-browser-plugin@sinon": true,
     "agent-desktop-plugin@sinon": true,
     "claude-security@claude-plugins-official": true,
     "clear-writing@sinon": true,
@@ -79,12 +79,6 @@
     "ENABLE_TOOL_SEARCH": "true"
   },
   "extraKnownMarketplaces": {
-    "agent-browser": {
-      "source": {
-        "repo": "vercel-labs/agent-browser",
-        "source": "github"
-      }
-    },
     "anthropic-agent-skills": {
       "autoUpdate": true,
       "source": {
