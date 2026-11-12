@@ -9,6 +9,11 @@
 # The compatibility notes at the end show old spellings for existing deployments.
 config-version: 8
 
+models:
+  catalog: ""
+  codex-catalog: "https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/codex_client_models.json"
+  devin-catalog: ""
+
 # Listener, TLS, network discovery, and server operation.
 server:
   # Server host/interface to bind to. Default is empty ("") to bind all interfaces (IPv4 + IPv6).
@@ -768,7 +773,7 @@ api-keys:
         - name: glm-5.3
           alias: glm-5.3
           display-name: GLM 5.3
-          max-context-length: 872000
+          max-context-length: 272000
           is-compat: true
           thinking:
             levels:
@@ -781,7 +786,7 @@ api-keys:
         - name: glm-5.3-flash
           alias: glm-5.3-flash
           display-name: GLM 5.3 Flash
-          max-context-length: 872000
+          max-context-length: 272000
           is-compat: true
           thinking:
             levels:
@@ -860,6 +865,16 @@ oauth:
   #   sample-provider:                  # plugin provider keys are supported for OAuth plugins
   #     - name: "sample-model-latest"
   #       alias: "sample-latest"
+  model-alias:
+    codex:
+      - name: "gpt-6.1-sol"
+        alias: "gpt-6-sol"
+      - name: "gpt-6.1-sol"
+        alias: "gpt-5.6-sol"
+      - name: "gpt-6.1-terra"
+        alias: "gpt-5.6-terra"
+      - name: "gpt-6-luna"
+        alias: "gpt-5.6-luna"
 
   # OAuth provider model settings (per channel)
   # Allows overriding model-level capabilities (such as context window) for OAuth credentials.
@@ -870,6 +885,32 @@ oauth:
   #       max-context-length: 524288 # overrides context window advertised to Codex clients
   #     - name: "gpt-6-astra"
   #       max-context-length: 1048576
+  settings:
+    codex:
+      - name: "gpt-6.1-sol"
+        max-context-length: 272000
+      - name: "gpt-6-astra"
+        max-context-length: 272000
+      - name: "gpt-6-chat-thinking"
+        max-context-length: 272000
+      - name: "gpt-6.1-terra"
+        max-context-length: 272000
+      - name: "gpt-6-sol"
+        max-context-length: 272000
+      - name: "gpt-reserve"
+        max-context-length: 272000
+      - name: "gpt-6-luna"
+        max-context-length: 272000
+      - name: "gpt-5.6-sol"
+        max-context-length: 272000
+      - name: "gpt-5.6-terra"
+        max-context-length: 272000
+      - name: "gpt-5.6-luna"
+        max-context-length: 272000
+      - name: "codex-auto-review"
+        max-context-length: 272000
+      - name: "gpt-5.5"
+        max-context-length: 272000
 
   # OAuth provider excluded models
   # excluded-models:
