@@ -48,6 +48,10 @@ source_type = "git"
 source = "https://github.com/ayghri/i-have-adhd.git"
 source_type = "git"
 
+[marketplaces.kotest]
+source = "https://github.com/kotest/kotest.git"
+source_type = "git"
+
 [marketplaces.rea]
 source = "https://github.com/morluto/rea.git"
 source_type = "git"
@@ -92,6 +96,9 @@ enabled = true
 enabled = true
 
 [plugins."i-have-adhd@i-have-adhd"]
+enabled = true
+
+[plugins."kotest-skills@kotest"]
 enabled = true
 
 [plugins."modern-web-guidance@googlechrome"]
