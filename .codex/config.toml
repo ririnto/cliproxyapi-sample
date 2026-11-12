@@ -36,6 +36,10 @@ local_thread_store_compression = true
 memories = true
 prevent_idle_sleep = true
 
+[marketplaces.astryx]
+source = "https://github.com/meta/astryx.git"
+source_type = "git"
+
 [marketplaces.cursor-plugins]
 source = "https://github.com/cursor/plugins.git"
 source_type = "git"
@@ -84,6 +88,9 @@ hide_rate_limit_model_nudge = true
 enabled = true
 
 [plugins."agent-desktop-plugin@sinon"]
+enabled = true
+
+[plugins."astryx@astryx"]
 enabled = true
 
 [plugins."clear-writing@sinon"]
