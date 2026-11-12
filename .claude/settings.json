@@ -13,6 +13,7 @@
   "enabledPlugins": {
     "agent-browser-plugin@sinon": true,
     "agent-desktop-plugin@sinon": true,
+    "astryx@astryx": true,
     "claude-security@claude-plugins-official": true,
     "clear-writing@sinon": true,
     "code-simplifier@claude-plugins-official": true,
@@ -84,6 +85,12 @@
       "autoUpdate": true,
       "source": {
         "repo": "anthropics/skills",
+        "source": "github"
+      }
+    },
+    "astryx": {
+      "source": {
+        "repo": "meta/astryx",
         "source": "github"
       }
     },
