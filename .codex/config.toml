@@ -126,6 +126,9 @@ enabled = true
 [plugins."workgraph@sinon"]
 enabled = true
 
+[tools.update_plan]
+enabled = true
+
 [tui]
 status_line = [
   "model-with-reasoning",
