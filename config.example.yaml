@@ -911,6 +911,15 @@ oauth:
         max-context-length: 272000
       - name: "gpt-5.5"
         max-context-length: 272000
+    claude:
+      - name: "claude-fable-5-2"
+        max-context-length: 272000
+      - name: "claude-opus-5-5"
+        max-context-length: 272000
+      - name: "claude-sonnet-5-5"
+        max-context-length: 272000
+      - name: "claude-haiku-5-5"
+        max-context-length: 128000
 
   # OAuth provider excluded models
   # excluded-models:

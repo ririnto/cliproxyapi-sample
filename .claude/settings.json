@@ -199,8 +199,8 @@
     }
   },
   "modelSettings": {
-    "claude-fable-5-1": {
-      "autoCompactWindow": 305000,
+    "claude-fable-5-2": {
+      "autoCompactWindow": 272000,
       "effortLevel": "high",
       "maxEffortLevel": "xhigh"
     },
@@ -210,12 +210,12 @@
       "maxEffortLevel": "high"
     },
     "claude-opus-5-5": {
-      "autoCompactWindow": 305000,
+      "autoCompactWindow": 272000,
       "effortLevel": "medium",
       "maxEffortLevel": "high"
     },
     "claude-sonnet-5-5": {
-      "autoCompactWindow": 305000,
+      "autoCompactWindow": 272000,
       "effortLevel": "medium",
       "maxEffortLevel": "high"
     },
