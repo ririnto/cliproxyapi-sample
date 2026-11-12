@@ -26,6 +26,7 @@
     "github@claude-plugins-official": true,
     "gopls-lsp@claude-plugins-official": true,
     "i-have-adhd@i-have-adhd": true,
+    "kotest-skills@kotest": true,
     "kotlin-lsp@claude-plugins-official": true,
     "modern-web-guidance@googlechrome": true,
     "playwright@claude-plugins-official": false,
@@ -110,6 +111,12 @@
       "autoUpdate": true,
       "source": {
         "repo": "ayghri/i-have-adhd",
+        "source": "github"
+      }
+    },
+    "kotest": {
+      "source": {
+        "repo": "kotest/kotest",
         "source": "github"
       }
     },
