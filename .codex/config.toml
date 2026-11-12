@@ -126,6 +126,9 @@ enabled = true
 [plugins."workgraph@sinon"]
 enabled = true
 
+[tools.experimental_request_user_input]
+enabled = true
+
 [tools.update_plan]
 enabled = true
 
