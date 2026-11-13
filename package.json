@@ -3,7 +3,8 @@
   "type": "module",
   "scripts": {
     "check": "run-p check:*",
-    "check:test": "node --test \"**/*.test.mjs\" \".claude/**/*.test.mjs\"",
+    "check:test": "run-p check:test:*",
+    "check:test:tooling": "node --test \"**/*.test.mjs\" \".claude/**/*.test.mjs\"",
     "check:markdownlint-cli2": "markdownlint-cli2",
     "check:ultracite": "ultracite check",
     "fix": "run-p fix:*",
