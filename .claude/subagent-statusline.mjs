@@ -1,13 +1,6 @@
 #!/usr/bin/env node
 
-import {
-  readFileSync,
-  readdirSync,
-  statSync,
-  mkdirSync,
-  writeFileSync,
-  existsSync
-} from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
@@ -19,12 +12,9 @@ const SAND = "\u001B[38;2;246;226;183m";
 const GREEN = "\u001B[38;2;171;223;167m";
 const BLUE = "\u001B[38;2;143;179;239m";
 const STEEL = "\u001B[38;2;166;190;211m";
-const YELLOW = "\u001B[38;2;242;181;144m";
 const PINK = "\u001B[38;2;233;144;169m";
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-const settingsDir =
-  process.env.CLAUDE_CONFIG_DIR || `${process.env.HOME || ""}/.claude`;
 const optional = (operation) => {
   try {
     return operation() ?? null;
@@ -37,14 +27,13 @@ const optional = (operation) => {
 };
 const settings =
   optional(() =>
-    JSON.parse(readFileSync(`${settingsDir}/settings.json`, "utf-8"))
+    JSON.parse(
+      readFileSync(
+        `${process.env.CLAUDE_CONFIG_DIR || `${process.env.HOME || ""}/.claude`}/settings.json`,
+        "utf-8"
+      )
+    )
   ) ?? {};
-const effortFor = (model) =>
-  settings.modelSettings?.[model]?.effortLevel || settings.effortLevel || "";
-
-const USAGE_CACHE = path.join(tmpdir(), "subagent-statusline-usage");
-optional(() => mkdirSync(USAGE_CACHE, { recursive: true }));
-
 const directoriesIn = (directory) => {
   try {
     return readdirSync(directory, { withFileTypes: true }).filter((entry) =>
@@ -53,80 +42,6 @@ const directoriesIn = (directory) => {
   } catch {
     return [];
   }
-};
-
-const findTranscript = (taskId) => {
-  const transcriptDirectory = `claude-${process.getuid?.() ?? 501}`;
-  for (const root of new Set([
-    path.join("/private/tmp", transcriptDirectory),
-    path.join("/tmp", transcriptDirectory),
-    path.join(tmpdir(), transcriptDirectory)
-  ])) {
-    for (const project of directoriesIn(root)) {
-      for (const session of directoriesIn(path.join(root, project.name))) {
-        const candidate = path.join(
-          root,
-          project.name,
-          session.name,
-          "tasks",
-          `${taskId}.output`
-        );
-        if (existsSync(candidate)) {
-          return candidate;
-        }
-      }
-    }
-  }
-  return null;
-};
-
-const totalUsage = (taskId) => {
-  const transcript = findTranscript(taskId);
-  if (!transcript) {
-    return null;
-  }
-  let stat;
-  try {
-    stat = statSync(transcript);
-  } catch {
-    return null;
-  }
-  const cacheFile = path.join(USAGE_CACHE, `${taskId}.json`);
-  const cacheKey = `2:${stat.mtimeMs}:${stat.size}`;
-  const cached = optional(() => JSON.parse(readFileSync(cacheFile, "utf-8")));
-  if (cached?.key === cacheKey) {
-    return cached.total;
-  }
-  let total = 0;
-  const seen = new Set();
-  try {
-    for (const line of readFileSync(transcript, "utf-8").split("\n")) {
-      if (!line.includes('"usage"')) {
-        continue;
-      }
-      let message;
-      try {
-        message = JSON.parse(line)?.message;
-      } catch {
-        continue;
-      }
-      if (!message?.id || !message.usage || seen.has(message.id)) {
-        continue;
-      }
-      seen.add(message.id);
-      const { usage } = message;
-      total +=
-        Number(usage.input_tokens || 0) +
-        Number(usage.output_tokens || 0) +
-        Number(usage.cache_creation_input_tokens || 0);
-    }
-  } catch {
-    return null;
-  }
-  optional(() =>
-    writeFileSync(cacheFile, JSON.stringify({ key: cacheKey, total }))
-  );
-  return total;
 };
 
 const displayText = (value) =>
@@ -163,131 +78,192 @@ const elapsedText = (milliseconds) => {
     : `${seconds}s`;
 };
 
-const statusMark = (status, elapsedMs) => {
-  if (status === "completed") {
-    return { color: GREEN, glyph: "✔" };
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const cellWidth = (text) => {
+  if (/^[\p{Mark}\p{Cf}]*$/u.test(text)) {
+    return 0;
   }
-  if (status === "failed") {
-    return { color: PINK, glyph: "✗" };
-  }
-  if (status === "killed") {
-    return { color: DIM, glyph: "⊘" };
-  }
-  return {
-    color: BLUE,
-    glyph: SPINNER[Math.floor(elapsedMs / 1000) % SPINNER.length]
-  };
+  return /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꥠ-꥿가-힣豈-﫿︐-︙︰-﹯＀-｠￠-￦\u{20000}-\u{3FFFD}]/u.test(
+    text
+  ) || /\p{Emoji_Presentation}|\uFE0F/u.test(text)
+    ? 2
+    : 1;
 };
-
-const barColor = (percentage) => {
-  if (percentage <= 70) {
-    return GREEN;
-  }
-  return percentage <= 90 ? YELLOW : PINK;
-};
-
-const usageBar = (percentage) => {
-  const steps = Math.max(
-    percentage > 0 ? 1 : 0,
-    Math.min(8, Math.round((percentage / 100) * 8))
+const visibleWidth = (text) =>
+  [...graphemes.segment(stripVTControlCharacters(text))].reduce(
+    (width, { segment }) => width + cellWidth(segment),
+    0
   );
-  return "▰".repeat(steps) + DIM + "▱".repeat(8 - steps);
-};
 
-const WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꥠ-꥿가-힣豈-﫿︐-︙︰-﹯＀-｠￠-￦]/gu;
-
-const visibleWidth = (text) => {
-  const plain = stripVTControlCharacters(text);
-  return plain.length + (plain.match(WIDE)?.length || 0);
-};
-
-const contextPercentageFor = (task) => {
-  const contextWindowSize = Number(task.contextWindowSize);
-  if (!Number.isFinite(contextWindowSize) || contextWindowSize <= 0) {
-    return null;
-  }
-  return Math.min(100, (Number(task.tokenCount) / contextWindowSize) * 100);
-};
-
-const taskTitle = (task) => {
-  if (task.name && task.agentType && task.name !== task.agentType) {
-    return `${displayText(task.name)} ${DIM}(${displayText(task.agentType)})${RESET}`;
-  }
-  return displayText(task.name || task.agentType || task.type);
-};
-
-const alternateDirectory = (task, input) => {
-  if (!task.cwd || !input.cwd || task.cwd === input.cwd) {
+const clip = (text, columns) => {
+  if (columns <= 0) {
     return "";
   }
-  return `${BLUE}⌥ ${displayText(path.basename(task.cwd) || task.cwd)}${RESET}`;
-};
-
-const tokenMetric = (task, contextPercentage) => {
-  if (contextPercentage === null) {
-    return `${DIM}${numberText(task.tokenCount).padStart(5, " ")}${RESET}`;
+  if (visibleWidth(text) <= columns) {
+    return text;
   }
-  return `${barColor(contextPercentage)}${numberText(task.tokenCount).padStart(5, " ")}${RESET} ${barColor(contextPercentage)}${usageBar(contextPercentage)}${RESET} ${DIM}${String(Math.round(contextPercentage)).padStart(3, " ")}%${RESET}`;
-};
-
-const usageMetric = (usageTotal) => {
-  if (usageTotal === null || usageTotal <= 0) {
-    return "";
+  let result = "";
+  let width = 0;
+  for (const { segment } of graphemes.segment(stripVTControlCharacters(text))) {
+    const cells = cellWidth(segment);
+    if (width + cells > columns - 1) {
+      return `${DIM}${result}…${RESET}`;
+    }
+    result += segment;
+    width += cells;
   }
-  return `${YELLOW}Σ${RESET}${DIM}${numberText(usageTotal).padStart(6, " ")}${RESET}`;
+  return result;
 };
 
-const renderRow = (task, input, nowMs) => {
-  const elapsedMs = Math.max(0, nowMs - Number(task.startTime || nowMs));
-  const mark = statusMark(task.status, elapsedMs);
+const taskLabel = (task, mark) => {
   const effortText =
     task.effort === undefined
-      ? effortFor(displayText(task.model))
+      ? settings.modelSettings?.[displayText(task.model)]?.effortLevel ||
+        settings.effortLevel ||
+        ""
       : displayText(task.effort);
   const label = displayText(task.label || task.description || "");
-  return {
-    left: [
-      `${mark.color}${mark.glyph}${RESET} ${SAND}${BOLD}${taskTitle(task)}${RESET}`,
-      task.model
-        ? `${STEEL}${displayText(task.model)}${RESET}${effortText ? ` ${DIM}${effortText}${RESET}` : ""}`
-        : "",
-      label ? `${DIM}${label}${RESET}` : ""
-    ],
-    right: [
-      alternateDirectory(task, input),
-      tokenMetric(task, contextPercentageFor(task)),
-      usageMetric(totalUsage(task.id)),
-      `${DIM}${elapsedText(elapsedMs).padStart(5, " ")}${RESET}`
-    ]
-  };
+  return [
+    `${mark.color}${mark.glyph}${RESET} ${SAND}${BOLD}${
+      task.name && task.agentType && task.name !== task.agentType
+        ? `${displayText(task.name)} ${DIM}(${displayText(task.agentType)})${RESET}`
+        : displayText(task.name || task.agentType || task.type)
+    }${RESET}`,
+    task.model
+      ? `${STEEL}${displayText(task.model)}${RESET}${effortText ? ` ${DIM}${effortText}${RESET}` : ""}`
+      : "",
+    label ? `${DIM}${label}${RESET}` : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
 };
 
 export const renderRows = (input, nowMs) => {
-  const rows = (Array.isArray(input.tasks) ? input.tasks : [])
+  const available = Number(input.columns || input.width);
+  const columns =
+    Number.isFinite(available) && available > 0 ? Math.floor(available) : 0;
+  return (Array.isArray(input.tasks) ? input.tasks : [])
     .filter((task) => task && typeof task.id === "string")
     .map((task) => {
-      const cells = renderRow(task, input, nowMs);
-      return {
-        id: task.id,
-        left: cells.left.filter((cell) => cell.length > 0).join(" "),
-        right: cells.right.filter((cell) => cell.length > 0).join(" ")
-      };
+      const elapsedMs = Math.max(0, nowMs - Number(task.startTime || nowMs));
+      const inputTokens = optional(() => {
+        if (path.basename(task.id) !== task.id) {
+          return null;
+        }
+        const transcriptDirectory = `claude-${process.getuid?.() ?? 501}`;
+        for (const root of new Set([
+          path.join("/private/tmp", transcriptDirectory),
+          path.join("/tmp", transcriptDirectory),
+          path.join(tmpdir(), transcriptDirectory)
+        ])) {
+          for (const project of directoriesIn(root)) {
+            for (const session of directoriesIn(
+              path.join(root, project.name)
+            )) {
+              const candidate = path.join(
+                root,
+                project.name,
+                session.name,
+                "tasks",
+                `${task.id}.output`
+              );
+              if (!existsSync(candidate)) {
+                continue;
+              }
+              const lines = readFileSync(candidate, "utf-8").trim().split("\n");
+              for (let index = lines.length - 1; index >= 0; index -= 1) {
+                const entry = JSON.parse(lines[index]);
+                if (
+                  entry.type !== "assistant" &&
+                  entry.message?.role !== "assistant"
+                ) {
+                  continue;
+                }
+                const usage = entry.message?.usage;
+                if (!usage || typeof usage.input_tokens !== "number") {
+                  return null;
+                }
+                const values = [
+                  usage.input_tokens,
+                  usage.cache_creation_input_tokens ?? 0,
+                  usage.cache_read_input_tokens ?? 0
+                ];
+                return values.every(
+                  (value) =>
+                    typeof value === "number" &&
+                    Number.isFinite(value) &&
+                    value >= 0
+                )
+                  ? values.reduce((sum, value) => sum + value, 0)
+                  : null;
+              }
+              return null;
+            }
+          }
+        }
+        return null;
+      });
+      const directory =
+        !task.cwd || !input.cwd || task.cwd === input.cwd
+          ? ""
+          : `${BLUE}⌥ ${displayText(path.basename(task.cwd) || task.cwd)}${RESET}`;
+      const tokens =
+        typeof task.tokenCount !== "number" ||
+        !Number.isFinite(task.tokenCount) ||
+        task.tokenCount < 0
+          ? ""
+          : `${DIM}${numberText(task.tokenCount)} tok${RESET}`;
+      const elapsed = elapsedText(elapsedMs);
+      const left = taskLabel(
+        task,
+        new Map([
+          ["completed", { color: GREEN, glyph: "✔" }],
+          ["failed", { color: PINK, glyph: "✗" }],
+          ["killed", { color: DIM, glyph: "⊘" }]
+        ]).get(task.status) || {
+          color: BLUE,
+          glyph: SPINNER[Math.floor(elapsedMs / 1000) % SPINNER.length]
+        }
+      );
+      let right = [
+        directory,
+        tokens,
+        inputTokens === null
+          ? ""
+          : `${DIM}in ${numberText(inputTokens)}${RESET}`,
+        `${DIM}${elapsed.padStart(5, " ")}${RESET}`
+      ]
+        .filter(Boolean)
+        .join(" ");
+      if (!columns) {
+        return JSON.stringify({ content: `${left} ${right}`, id: task.id });
+      }
+      if (visibleWidth(right) > columns) {
+        const compactElapsed = `${DIM}${elapsed}${RESET}`;
+        const metrics = [tokens, compactElapsed].filter(Boolean).join(" ");
+        const directoryBudget = columns - visibleWidth(metrics) - 1;
+        right =
+          directory && directoryBudget > 0
+            ? `${clip(directory, directoryBudget)} ${metrics}`
+            : metrics;
+        if (visibleWidth(right) > columns) {
+          right =
+            visibleWidth(compactElapsed) <= columns
+              ? compactElapsed
+              : clip(compactElapsed, columns);
+        }
+      }
+      const clippedLeft = clip(left, columns - visibleWidth(right) - 1);
+      return JSON.stringify({
+        content:
+          clippedLeft +
+          " ".repeat(
+            columns - visibleWidth(right) - visibleWidth(clippedLeft)
+          ) +
+          right,
+        id: task.id
+      });
     });
-  const columns = Number(input.columns || input.width) || 0;
-  const rightWidth = Math.max(0, ...rows.map((row) => visibleWidth(row.right)));
-  return rows.map((row) => {
-    const gap = columns - rightWidth - visibleWidth(row.left);
-    return JSON.stringify({
-      content:
-        columns > 0 && gap >= 1 && row.right
-          ? row.left +
-            " ".repeat(gap) +
-            " ".repeat(rightWidth - visibleWidth(row.right)) +
-            row.right
-          : [row.left, row.right].filter((part) => part.length > 0).join(" "),
-      id: row.id
-    });
-  });
 };
 
 export const main = () => {
