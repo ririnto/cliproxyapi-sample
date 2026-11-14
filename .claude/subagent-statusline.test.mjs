@@ -133,13 +133,12 @@ test("long descriptions give way to right-aligned worktree and metrics", () => {
 });
 
 test("wide and combined descriptions clip on grapheme boundaries", () => {
-  const description = "한𠀀👩‍💻e\u0301".repeat(30);
   const [row] = renderRows(
     {
       columns: 40,
       tasks: [
         {
-          description,
+          description: "한𠀀👩‍💻e\u0301".repeat(30),
           id: "unicode-layout-fixture",
           name: "worker",
           startTime: nowMs - 65_000,
@@ -151,13 +150,14 @@ test("wide and combined descriptions clip on grapheme boundaries", () => {
     nowMs
   );
   const plain = stripVTControlCharacters(JSON.parse(row).content);
-  // Each fixture cluster occupies 2, 2, 2 and 1 terminal cells respectively.
-  const cells = plain
-    .replaceAll("한", "HH")
-    .replaceAll("𠀀", "CC")
-    .replaceAll("👩‍💻", "EE")
-    .replaceAll("e\u0301", "e");
-  assert.equal(cells.length, 40);
+  assert.equal(
+    plain
+      .replaceAll("한", "HH")
+      .replaceAll("𠀀", "CC")
+      .replaceAll("👩‍💻", "EE")
+      .replaceAll("e\u0301", "e").length,
+    40
+  );
   assert.match(plain, /…\s+12\.3k tok\s+1m05s$/u);
   assert.doesNotMatch(plain.replaceAll("👩‍💻", ""), /👩|💻|\u200D/u);
 });
