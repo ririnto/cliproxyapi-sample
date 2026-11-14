@@ -15,8 +15,6 @@ const STEEL = "\u001B[38;2;166;190;211m";
 const PINK = "\u001B[38;2;233;144;169m";
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-const settingsDir =
-  process.env.CLAUDE_CONFIG_DIR || `${process.env.HOME || ""}/.claude`;
 const optional = (operation) => {
   try {
     return operation() ?? null;
@@ -29,11 +27,13 @@ const optional = (operation) => {
 };
 const settings =
   optional(() =>
-    JSON.parse(readFileSync(`${settingsDir}/settings.json`, "utf-8"))
+    JSON.parse(
+      readFileSync(
+        `${process.env.CLAUDE_CONFIG_DIR || `${process.env.HOME || ""}/.claude`}/settings.json`,
+        "utf-8"
+      )
+    )
   ) ?? {};
-const effortFor = (model) =>
-  settings.modelSettings?.[model]?.effortLevel || settings.effortLevel || "";
-
 const directoriesIn = (directory) => {
   try {
     return readdirSync(directory, { withFileTypes: true }).filter((entry) =>
@@ -42,66 +42,6 @@ const directoriesIn = (directory) => {
   } catch {
     return [];
   }
-};
-
-const findTranscript = (taskId) => {
-  if (path.basename(taskId) !== taskId) {
-    return null;
-  }
-  const transcriptDirectory = `claude-${process.getuid?.() ?? 501}`;
-  for (const root of new Set([
-    path.join("/private/tmp", transcriptDirectory),
-    path.join("/tmp", transcriptDirectory),
-    path.join(tmpdir(), transcriptDirectory)
-  ])) {
-    for (const project of directoriesIn(root)) {
-      for (const session of directoriesIn(path.join(root, project.name))) {
-        const candidate = path.join(
-          root,
-          project.name,
-          session.name,
-          "tasks",
-          `${taskId}.output`
-        );
-        if (existsSync(candidate)) {
-          return candidate;
-        }
-      }
-    }
-  }
-  return null;
-};
-
-const latestInputTokens = (taskId) => {
-  const transcript = findTranscript(taskId);
-  if (!transcript) {
-    return null;
-  }
-  return optional(() => {
-    const lines = readFileSync(transcript, "utf-8").trim().split("\n");
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      const entry = JSON.parse(lines[index]);
-      if (entry.type !== "assistant" && entry.message?.role !== "assistant") {
-        continue;
-      }
-      const usage = entry.message?.usage;
-      if (!usage || typeof usage.input_tokens !== "number") {
-        return null;
-      }
-      const values = [
-        usage.input_tokens,
-        usage.cache_creation_input_tokens ?? 0,
-        usage.cache_read_input_tokens ?? 0
-      ];
-      return values.every(
-        (value) =>
-          typeof value === "number" && Number.isFinite(value) && value >= 0
-      )
-        ? values.reduce((sum, value) => sum + value, 0)
-        : null;
-    }
-    return null;
-  });
 };
 
 const displayText = (value) =>
@@ -138,30 +78,16 @@ const elapsedText = (milliseconds) => {
     : `${seconds}s`;
 };
 
-const statusMark = (status, elapsedMs) => {
-  if (status === "completed") {
-    return { color: GREEN, glyph: "✔" };
-  }
-  if (status === "failed") {
-    return { color: PINK, glyph: "✗" };
-  }
-  if (status === "killed") {
-    return { color: DIM, glyph: "⊘" };
-  }
-  return {
-    color: BLUE,
-    glyph: SPINNER[Math.floor(elapsedMs / 1000) % SPINNER.length]
-  };
-};
-
-const WIDE =
-  /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꥠ-꥿가-힣豈-﫿︐-︙︰-﹯＀-｠￠-￦\u{20000}-\u{3FFFD}]/u;
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const cellWidth = (text) => {
   if (/^[\p{Mark}\p{Cf}]*$/u.test(text)) {
     return 0;
   }
-  return WIDE.test(text) || /\p{Emoji_Presentation}|\uFE0F/u.test(text) ? 2 : 1;
+  return /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꥠ-꥿가-힣豈-﫿︐-︙︰-﹯＀-｠￠-￦\u{20000}-\u{3FFFD}]/u.test(
+    text
+  ) || /\p{Emoji_Presentation}|\uFE0F/u.test(text)
+    ? 2
+    : 1;
 };
 const visibleWidth = (text) =>
   [...graphemes.segment(stripVTControlCharacters(text))].reduce(
@@ -189,56 +115,27 @@ const clip = (text, columns) => {
   return result;
 };
 
-const taskTitle = (task) => {
-  if (task.name && task.agentType && task.name !== task.agentType) {
-    return `${displayText(task.name)} ${DIM}(${displayText(task.agentType)})${RESET}`;
-  }
-  return displayText(task.name || task.agentType || task.type);
-};
-
-const alternateDirectory = (task, input) => {
-  if (!task.cwd || !input.cwd || task.cwd === input.cwd) {
-    return "";
-  }
-  return `${BLUE}⌥ ${displayText(path.basename(task.cwd) || task.cwd)}${RESET}`;
-};
-
-const tokenMetric = (task) => {
-  const tokens = task.tokenCount;
-  return typeof tokens !== "number" || !Number.isFinite(tokens) || tokens < 0
-    ? ""
-    : `${DIM}${numberText(tokens)} tok${RESET}`;
-};
-
-const renderRow = (task, input, nowMs) => {
-  const elapsedMs = Math.max(0, nowMs - Number(task.startTime || nowMs));
-  const mark = statusMark(task.status, elapsedMs);
+const taskLabel = (task, mark) => {
   const effortText =
     task.effort === undefined
-      ? effortFor(displayText(task.model))
+      ? settings.modelSettings?.[displayText(task.model)]?.effortLevel ||
+        settings.effortLevel ||
+        ""
       : displayText(task.effort);
   const label = displayText(task.label || task.description || "");
-  const inputTokens = latestInputTokens(task.id);
-  return {
-    compact: [
-      alternateDirectory(task, input),
-      tokenMetric(task),
-      `${DIM}${elapsedText(elapsedMs)}${RESET}`
-    ],
-    left: [
-      `${mark.color}${mark.glyph}${RESET} ${SAND}${BOLD}${taskTitle(task)}${RESET}`,
-      task.model
-        ? `${STEEL}${displayText(task.model)}${RESET}${effortText ? ` ${DIM}${effortText}${RESET}` : ""}`
-        : "",
-      label ? `${DIM}${label}${RESET}` : ""
-    ],
-    right: [
-      alternateDirectory(task, input),
-      tokenMetric(task),
-      inputTokens === null ? "" : `${DIM}in ${numberText(inputTokens)}${RESET}`,
-      `${DIM}${elapsedText(elapsedMs).padStart(5, " ")}${RESET}`
-    ]
-  };
+  return [
+    `${mark.color}${mark.glyph}${RESET} ${SAND}${BOLD}${
+      task.name && task.agentType && task.name !== task.agentType
+        ? `${displayText(task.name)} ${DIM}(${displayText(task.agentType)})${RESET}`
+        : displayText(task.name || task.agentType || task.type)
+    }${RESET}`,
+    task.model
+      ? `${STEEL}${displayText(task.model)}${RESET}${effortText ? ` ${DIM}${effortText}${RESET}` : ""}`
+      : "",
+    label ? `${DIM}${label}${RESET}` : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
 };
 
 export const renderRows = (input, nowMs) => {
@@ -248,15 +145,102 @@ export const renderRows = (input, nowMs) => {
   return (Array.isArray(input.tasks) ? input.tasks : [])
     .filter((task) => task && typeof task.id === "string")
     .map((task) => {
-      const cells = renderRow(task, input, nowMs);
-      const left = cells.left.filter(Boolean).join(" ");
-      let right = cells.right.filter(Boolean).join(" ");
+      const elapsedMs = Math.max(0, nowMs - Number(task.startTime || nowMs));
+      const inputTokens = optional(() => {
+        if (path.basename(task.id) !== task.id) {
+          return null;
+        }
+        const transcriptDirectory = `claude-${process.getuid?.() ?? 501}`;
+        for (const root of new Set([
+          path.join("/private/tmp", transcriptDirectory),
+          path.join("/tmp", transcriptDirectory),
+          path.join(tmpdir(), transcriptDirectory)
+        ])) {
+          for (const project of directoriesIn(root)) {
+            for (const session of directoriesIn(
+              path.join(root, project.name)
+            )) {
+              const candidate = path.join(
+                root,
+                project.name,
+                session.name,
+                "tasks",
+                `${task.id}.output`
+              );
+              if (!existsSync(candidate)) {
+                continue;
+              }
+              const lines = readFileSync(candidate, "utf-8").trim().split("\n");
+              for (let index = lines.length - 1; index >= 0; index -= 1) {
+                const entry = JSON.parse(lines[index]);
+                if (
+                  entry.type !== "assistant" &&
+                  entry.message?.role !== "assistant"
+                ) {
+                  continue;
+                }
+                const usage = entry.message?.usage;
+                if (!usage || typeof usage.input_tokens !== "number") {
+                  return null;
+                }
+                const values = [
+                  usage.input_tokens,
+                  usage.cache_creation_input_tokens ?? 0,
+                  usage.cache_read_input_tokens ?? 0
+                ];
+                return values.every(
+                  (value) =>
+                    typeof value === "number" &&
+                    Number.isFinite(value) &&
+                    value >= 0
+                )
+                  ? values.reduce((sum, value) => sum + value, 0)
+                  : null;
+              }
+              return null;
+            }
+          }
+        }
+        return null;
+      });
+      const directory =
+        !task.cwd || !input.cwd || task.cwd === input.cwd
+          ? ""
+          : `${BLUE}⌥ ${displayText(path.basename(task.cwd) || task.cwd)}${RESET}`;
+      const tokens =
+        typeof task.tokenCount !== "number" ||
+        !Number.isFinite(task.tokenCount) ||
+        task.tokenCount < 0
+          ? ""
+          : `${DIM}${numberText(task.tokenCount)} tok${RESET}`;
+      const elapsed = elapsedText(elapsedMs);
+      const left = taskLabel(
+        task,
+        new Map([
+          ["completed", { color: GREEN, glyph: "✔" }],
+          ["failed", { color: PINK, glyph: "✗" }],
+          ["killed", { color: DIM, glyph: "⊘" }]
+        ]).get(task.status) || {
+          color: BLUE,
+          glyph: SPINNER[Math.floor(elapsedMs / 1000) % SPINNER.length]
+        }
+      );
+      let right = [
+        directory,
+        tokens,
+        inputTokens === null
+          ? ""
+          : `${DIM}in ${numberText(inputTokens)}${RESET}`,
+        `${DIM}${elapsed.padStart(5, " ")}${RESET}`
+      ]
+        .filter(Boolean)
+        .join(" ");
       if (!columns) {
         return JSON.stringify({ content: `${left} ${right}`, id: task.id });
       }
       if (visibleWidth(right) > columns) {
-        const [directory, tokens, elapsed] = cells.compact;
-        const metrics = [tokens, elapsed].filter(Boolean).join(" ");
+        const compactElapsed = `${DIM}${elapsed}${RESET}`;
+        const metrics = [tokens, compactElapsed].filter(Boolean).join(" ");
         const directoryBudget = columns - visibleWidth(metrics) - 1;
         right =
           directory && directoryBudget > 0
@@ -264,13 +248,19 @@ export const renderRows = (input, nowMs) => {
             : metrics;
         if (visibleWidth(right) > columns) {
           right =
-            visibleWidth(elapsed) <= columns ? elapsed : clip(elapsed, columns);
+            visibleWidth(compactElapsed) <= columns
+              ? compactElapsed
+              : clip(compactElapsed, columns);
         }
       }
       const clippedLeft = clip(left, columns - visibleWidth(right) - 1);
-      const gap = columns - visibleWidth(right) - visibleWidth(clippedLeft);
       return JSON.stringify({
-        content: clippedLeft + " ".repeat(gap) + right,
+        content:
+          clippedLeft +
+          " ".repeat(
+            columns - visibleWidth(right) - visibleWidth(clippedLeft)
+          ) +
+          right,
         id: task.id
       });
     });
