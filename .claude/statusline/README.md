@@ -109,22 +109,32 @@ Use the repository's installation procedure to copy the updated `statusline.mjs`
 
 ## Subagent rows
 
-The project's `subagentStatusLine` setting renders each subagent row in the
-subagent panel through `subagent-statusline.mjs`.
-Claude Code sends the visible rows as JSON on stdin and the script answers
-with one JSON object per row.
-Each row shows the agent name, model, effort, status, token count, and
-progress summary in that order.
-The name falls back to the agent type, and the summary falls back from the
-label to the description.
-The model and effort segments are omitted when a task does not carry them.
-Rows are clipped to the width reported by Claude Code, counting wide
-characters such as Hangul and emoji as two cells.
-The agent name outranks the model, effort, status, token count, and summary
-when the row runs out of space.
-The token count is never truncated mid-value; it drops off whole when the row
-runs out of space.
-Running rows use green, failed and killed rows use the warning color, and all
-other statuses stay dim.
-Rows without a task id keep Claude Code's default rendering.
-Malformed input produces no rows, which also keeps the default rendering.
+On Claude Code versions supporting `subagentStatusLine`, the setting runs
+`subagent-statusline.mjs` with task JSON on stdin.
+The command returns one JSON row per task.
+Claude Code 2.1.323 marks this setting deprecated and ignores the command.
+Updating this script does not customize the built-in rows in that version.
+
+The left side shows status, agent name, model, effort, and description.
+Long text is clipped on grapheme boundaries to reserve the right side for the
+alternate worktree directory, token count, and elapsed time.
+The rightmost field ends at the reported terminal width.
+Hangul, emoji, and combining characters use terminal cell widths rather than
+JavaScript string length.
+In very narrow windows the directory is shortened first, then omitted.
+If even tokens and elapsed time cannot fit, only elapsed time remains.
+Without a valid width, the script emits an unpadded row.
+
+The token field displays Claude Code's supplied `task.tokenCount` as `tok`.
+It is not divided by the context window and is not labelled as context usage.
+In the inspected 2.1.323 implementation, the progress count combines the latest
+input tokens (including cache tokens), cumulative output, and a streaming estimate.
+It is neither the current context size nor a sum of every request's token usage.
+The old independent transcript sum is no longer displayed.
+`in` is shown separately when the matching task transcript supplies a valid
+latest assistant usage record. It sums `input_tokens`,
+`cache_creation_input_tokens`, and `cache_read_input_tokens` from that record,
+not across messages. Duplicate records are not added together. Missing or
+invalid latest usage is hidden rather than replaced with an older value.
+This is the last request's input, not live context after later output or tool
+results. No percentage is inferred from the progress token count.

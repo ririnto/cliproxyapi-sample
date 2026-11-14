@@ -1,13 +1,6 @@
 #!/usr/bin/env node
 
-import {
-  readFileSync,
-  readdirSync,
-  statSync,
-  mkdirSync,
-  writeFileSync,
-  existsSync
-} from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
@@ -19,7 +12,6 @@ const SAND = "\u001B[38;2;246;226;183m";
 const GREEN = "\u001B[38;2;171;223;167m";
 const BLUE = "\u001B[38;2;143;179;239m";
 const STEEL = "\u001B[38;2;166;190;211m";
-const YELLOW = "\u001B[38;2;242;181;144m";
 const PINK = "\u001B[38;2;233;144;169m";
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -42,9 +34,6 @@ const settings =
 const effortFor = (model) =>
   settings.modelSettings?.[model]?.effortLevel || settings.effortLevel || "";
 
-const USAGE_CACHE = path.join(tmpdir(), "subagent-statusline-usage");
-optional(() => mkdirSync(USAGE_CACHE, { recursive: true }));
-
 const directoriesIn = (directory) => {
   try {
     return readdirSync(directory, { withFileTypes: true }).filter((entry) =>
@@ -56,6 +45,9 @@ const directoriesIn = (directory) => {
 };
 
 const findTranscript = (taskId) => {
+  if (path.basename(taskId) !== taskId) {
+    return null;
+  }
   const transcriptDirectory = `claude-${process.getuid?.() ?? 501}`;
   for (const root of new Set([
     path.join("/private/tmp", transcriptDirectory),
@@ -80,53 +72,36 @@ const findTranscript = (taskId) => {
   return null;
 };
 
-const totalUsage = (taskId) => {
+const latestInputTokens = (taskId) => {
   const transcript = findTranscript(taskId);
   if (!transcript) {
     return null;
   }
-  let stat;
-  try {
-    stat = statSync(transcript);
-  } catch {
-    return null;
-  }
-  const cacheFile = path.join(USAGE_CACHE, `${taskId}.json`);
-  const cacheKey = `2:${stat.mtimeMs}:${stat.size}`;
-  const cached = optional(() => JSON.parse(readFileSync(cacheFile, "utf-8")));
-  if (cached?.key === cacheKey) {
-    return cached.total;
-  }
-  let total = 0;
-  const seen = new Set();
-  try {
-    for (const line of readFileSync(transcript, "utf-8").split("\n")) {
-      if (!line.includes('"usage"')) {
+  return optional(() => {
+    const lines = readFileSync(transcript, "utf-8").trim().split("\n");
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const entry = JSON.parse(lines[index]);
+      if (entry.type !== "assistant" && entry.message?.role !== "assistant") {
         continue;
       }
-      let message;
-      try {
-        message = JSON.parse(line)?.message;
-      } catch {
-        continue;
+      const usage = entry.message?.usage;
+      if (!usage || typeof usage.input_tokens !== "number") {
+        return null;
       }
-      if (!message?.id || !message.usage || seen.has(message.id)) {
-        continue;
-      }
-      seen.add(message.id);
-      const { usage } = message;
-      total +=
-        Number(usage.input_tokens || 0) +
-        Number(usage.output_tokens || 0) +
-        Number(usage.cache_creation_input_tokens || 0);
+      const values = [
+        usage.input_tokens,
+        usage.cache_creation_input_tokens ?? 0,
+        usage.cache_read_input_tokens ?? 0
+      ];
+      return values.every(
+        (value) =>
+          typeof value === "number" && Number.isFinite(value) && value >= 0
+      )
+        ? values.reduce((sum, value) => sum + value, 0)
+        : null;
     }
-  } catch {
     return null;
-  }
-  optional(() =>
-    writeFileSync(cacheFile, JSON.stringify({ key: cacheKey, total }))
-  );
-  return total;
+  });
 };
 
 const displayText = (value) =>
@@ -179,34 +154,39 @@ const statusMark = (status, elapsedMs) => {
   };
 };
 
-const barColor = (percentage) => {
-  if (percentage <= 70) {
-    return GREEN;
+const WIDE =
+  /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꥠ-꥿가-힣豈-﫿︐-︙︰-﹯＀-｠￠-￦\u{20000}-\u{3FFFD}]/u;
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const cellWidth = (text) => {
+  if (/^[\p{Mark}\p{Cf}]*$/u.test(text)) {
+    return 0;
   }
-  return percentage <= 90 ? YELLOW : PINK;
+  return WIDE.test(text) || /\p{Emoji_Presentation}|\uFE0F/u.test(text) ? 2 : 1;
 };
-
-const usageBar = (percentage) => {
-  const steps = Math.max(
-    percentage > 0 ? 1 : 0,
-    Math.min(8, Math.round((percentage / 100) * 8))
+const visibleWidth = (text) =>
+  [...graphemes.segment(stripVTControlCharacters(text))].reduce(
+    (width, { segment }) => width + cellWidth(segment),
+    0
   );
-  return "▰".repeat(steps) + DIM + "▱".repeat(8 - steps);
-};
 
-const WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꥠ-꥿가-힣豈-﫿︐-︙︰-﹯＀-｠￠-￦]/gu;
-
-const visibleWidth = (text) => {
-  const plain = stripVTControlCharacters(text);
-  return plain.length + (plain.match(WIDE)?.length || 0);
-};
-
-const contextPercentageFor = (task) => {
-  const contextWindowSize = Number(task.contextWindowSize);
-  if (!Number.isFinite(contextWindowSize) || contextWindowSize <= 0) {
-    return null;
+const clip = (text, columns) => {
+  if (columns <= 0) {
+    return "";
   }
-  return Math.min(100, (Number(task.tokenCount) / contextWindowSize) * 100);
+  if (visibleWidth(text) <= columns) {
+    return text;
+  }
+  let result = "";
+  let width = 0;
+  for (const { segment } of graphemes.segment(stripVTControlCharacters(text))) {
+    const cells = cellWidth(segment);
+    if (width + cells > columns - 1) {
+      return `${DIM}${result}…${RESET}`;
+    }
+    result += segment;
+    width += cells;
+  }
+  return result;
 };
 
 const taskTitle = (task) => {
@@ -223,18 +203,11 @@ const alternateDirectory = (task, input) => {
   return `${BLUE}⌥ ${displayText(path.basename(task.cwd) || task.cwd)}${RESET}`;
 };
 
-const tokenMetric = (task, contextPercentage) => {
-  if (contextPercentage === null) {
-    return `${DIM}${numberText(task.tokenCount).padStart(5, " ")}${RESET}`;
-  }
-  return `${barColor(contextPercentage)}${numberText(task.tokenCount).padStart(5, " ")}${RESET} ${barColor(contextPercentage)}${usageBar(contextPercentage)}${RESET} ${DIM}${String(Math.round(contextPercentage)).padStart(3, " ")}%${RESET}`;
-};
-
-const usageMetric = (usageTotal) => {
-  if (usageTotal === null || usageTotal <= 0) {
-    return "";
-  }
-  return `${YELLOW}Σ${RESET}${DIM}${numberText(usageTotal).padStart(6, " ")}${RESET}`;
+const tokenMetric = (task) => {
+  const tokens = task.tokenCount;
+  return typeof tokens !== "number" || !Number.isFinite(tokens) || tokens < 0
+    ? ""
+    : `${DIM}${numberText(tokens)} tok${RESET}`;
 };
 
 const renderRow = (task, input, nowMs) => {
@@ -245,7 +218,13 @@ const renderRow = (task, input, nowMs) => {
       ? effortFor(displayText(task.model))
       : displayText(task.effort);
   const label = displayText(task.label || task.description || "");
+  const inputTokens = latestInputTokens(task.id);
   return {
+    compact: [
+      alternateDirectory(task, input),
+      tokenMetric(task),
+      `${DIM}${elapsedText(elapsedMs)}${RESET}`
+    ],
     left: [
       `${mark.color}${mark.glyph}${RESET} ${SAND}${BOLD}${taskTitle(task)}${RESET}`,
       task.model
@@ -255,39 +234,46 @@ const renderRow = (task, input, nowMs) => {
     ],
     right: [
       alternateDirectory(task, input),
-      tokenMetric(task, contextPercentageFor(task)),
-      usageMetric(totalUsage(task.id)),
+      tokenMetric(task),
+      inputTokens === null ? "" : `${DIM}in ${numberText(inputTokens)}${RESET}`,
       `${DIM}${elapsedText(elapsedMs).padStart(5, " ")}${RESET}`
     ]
   };
 };
 
 export const renderRows = (input, nowMs) => {
-  const rows = (Array.isArray(input.tasks) ? input.tasks : [])
+  const available = Number(input.columns || input.width);
+  const columns =
+    Number.isFinite(available) && available > 0 ? Math.floor(available) : 0;
+  return (Array.isArray(input.tasks) ? input.tasks : [])
     .filter((task) => task && typeof task.id === "string")
     .map((task) => {
       const cells = renderRow(task, input, nowMs);
-      return {
-        id: task.id,
-        left: cells.left.filter((cell) => cell.length > 0).join(" "),
-        right: cells.right.filter((cell) => cell.length > 0).join(" ")
-      };
+      const left = cells.left.filter(Boolean).join(" ");
+      let right = cells.right.filter(Boolean).join(" ");
+      if (!columns) {
+        return JSON.stringify({ content: `${left} ${right}`, id: task.id });
+      }
+      if (visibleWidth(right) > columns) {
+        const [directory, tokens, elapsed] = cells.compact;
+        const metrics = [tokens, elapsed].filter(Boolean).join(" ");
+        const directoryBudget = columns - visibleWidth(metrics) - 1;
+        right =
+          directory && directoryBudget > 0
+            ? `${clip(directory, directoryBudget)} ${metrics}`
+            : metrics;
+        if (visibleWidth(right) > columns) {
+          right =
+            visibleWidth(elapsed) <= columns ? elapsed : clip(elapsed, columns);
+        }
+      }
+      const clippedLeft = clip(left, columns - visibleWidth(right) - 1);
+      const gap = columns - visibleWidth(right) - visibleWidth(clippedLeft);
+      return JSON.stringify({
+        content: clippedLeft + " ".repeat(gap) + right,
+        id: task.id
+      });
     });
-  const columns = Number(input.columns || input.width) || 0;
-  const rightWidth = Math.max(0, ...rows.map((row) => visibleWidth(row.right)));
-  return rows.map((row) => {
-    const gap = columns - rightWidth - visibleWidth(row.left);
-    return JSON.stringify({
-      content:
-        columns > 0 && gap >= 1 && row.right
-          ? row.left +
-            " ".repeat(gap) +
-            " ".repeat(rightWidth - visibleWidth(row.right)) +
-            row.right
-          : [row.left, row.right].filter((part) => part.length > 0).join(" "),
-      id: row.id
-    });
-  });
 };
 
 export const main = () => {
