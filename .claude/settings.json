@@ -41,6 +41,7 @@
     "workgraph@sinon": true
   },
   "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE": "1",
     "ANTHROPIC_API_KEY": "sk-dummy",
     "ANTHROPIC_BASE_URL": "http://localhost:8317",
     "ANTHROPIC_CUSTOM_MODEL_OPTION": "glm-5.3",
