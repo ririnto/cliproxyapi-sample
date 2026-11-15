@@ -566,15 +566,9 @@ const importAddonModule = async (addon, options) => {
   const { fetchUsage } = module;
   /**
    * @param {RecordValue} input - Provider request.
+   * @returns {unknown} Provider result.
    */
-  const invoke = (input) => {
-    /**
-     * @type {unknown}
-     */
-    const result = Reflect.apply(fetchUsage, module, [input]);
-    return result;
-  };
-  return invoke;
+  return (input) => Reflect.apply(fetchUsage, module, [input]);
 };
 
 /**
