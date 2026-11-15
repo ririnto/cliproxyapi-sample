@@ -236,12 +236,11 @@ const chatgptCredit = (credits) => {
     isRecord(credits) && credits.has_credits === true
       ? credits.balance
       : undefined;
-  let balance = Number.NaN;
-  if (typeof creditBalance === "number") {
-    balance = creditBalance;
-  } else if (typeof creditBalance === "string" && creditBalance.trim() !== "") {
-    balance = Number(creditBalance);
-  }
+  const balance =
+    typeof creditBalance === "number" ||
+    (typeof creditBalance === "string" && creditBalance.trim() !== "")
+      ? Number(creditBalance)
+      : Number.NaN;
   return isFiniteNumber(balance) && balance > 0
     ? { label: "credit", remaining: balance, type: "credit" }
     : undefined;

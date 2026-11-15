@@ -281,9 +281,11 @@ export const renderRows = (input, nowMs) => {
               if (!existsSync(candidate)) {
                 continue;
               }
-              const lines = readFileSync(candidate, "utf-8").trim().split("\n");
-              for (let index = lines.length - 1; index >= 0; index -= 1) {
-                const entry = record(parseJson(lines[index]));
+              for (const line of readFileSync(candidate, "utf-8")
+                .trim()
+                .split("\n")
+                .toReversed()) {
+                const entry = record(parseJson(line));
                 if (
                   entry.type !== "assistant" &&
                   record(entry.message).role !== "assistant"
