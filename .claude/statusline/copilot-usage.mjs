@@ -497,27 +497,6 @@ const quotaMetrics = (payload, reset, index = 0) => {
 };
 
 /**
- * @param {Record<string, unknown>} payload - Usage payload.
- * @param {number} now - Current time.
- */
-const normalizeCopilot = (payload, now) =>
-  snapshot(
-    quotaMetrics(payload, copilotReset(payload, now)),
-    groupLabel(payload)
-  );
-
-/**
- * @param {{host:string,scheme:string,token:string}} candidate - Credential candidate.
- */
-const copilotHeaders = (candidate) => ({
-  Accept: "application/vnd.github+json",
-  Authorization: `${candidate.scheme} ${candidate.token}`,
-  "Content-Type": "application/json",
-  "User-Agent": "copilot",
-  "X-GitHub-Api-Version": "2025-04-01"
-});
-
-/**
  * @param {{host:string,scheme:string,token:string}[]} candidates - Ordered credentials.
  * @param {import("./types.ts").UsageOptions} options - Lookup options.
  * @param {number} [index] - Candidate index.
@@ -528,7 +507,13 @@ const fetchCandidate = async (candidates, options, index = 0) => {
   if (candidate !== undefined) {
     const { status, payload } = await requestJson(
       `${copilotApiHost(candidate.host)}/copilot_internal/user`,
-      copilotHeaders(candidate),
+      {
+        Accept: "application/vnd.github+json",
+        Authorization: `${candidate.scheme} ${candidate.token}`,
+        "Content-Type": "application/json",
+        "User-Agent": "copilot",
+        "X-GitHub-Api-Version": "2025-04-01"
+      },
       options.fetch ?? globalThis.fetch,
       options.onUsageError
     );
@@ -545,7 +530,10 @@ const fetchCandidate = async (candidates, options, index = 0) => {
       options.onUsageError?.();
     }
     return successful && isRecord(payload.quota_snapshots)
-      ? normalizeCopilot(payload, nowValue(options.now))
+      ? snapshot(
+          quotaMetrics(payload, copilotReset(payload, nowValue(options.now))),
+          groupLabel(payload)
+        )
       : undefined;
   }
   return null;
