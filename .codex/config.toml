@@ -137,3 +137,6 @@ status_line = [
   "used-tokens"
 ]
 status_line_use_colors = true
+
+[sandbox_workspace_write]
+network_access = true
