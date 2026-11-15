@@ -454,23 +454,6 @@ const renderRateLimits = (rateLimits, nowMs) =>
   ].filter(Boolean);
 
 /**
- * @param {unknown} group - group input.
- */
-const metricEntries = (group) =>
-  isRecord(group)
-    ? array(group.metrics)
-        .filter(isRecord)
-        .filter((metric) => typeof metric.label === "string")
-    : [];
-
-/**
- * @param {RecordValue} metric - metric input.
- * @param {unknown} hideLabels - hideLabels input.
- */
-const hiddenLabel = (metric, hideLabels) =>
-  Array.isArray(hideLabels) && hideLabels.includes(metric.label);
-
-/**
  * @param {RecordValue} addon - addon input.
  * @param {unknown} snapshot - snapshot input.
  */
@@ -481,16 +464,24 @@ export const renderSnapshot = (addon, snapshot) => {
   return array(snapshot.groups)
     .map(record)
     .map((group) => {
-      const metrics = metricEntries(group).filter(
-        (metric) =>
-          !hiddenLabel(metric, addon.hideLabels) &&
+      const metrics = (
+        isRecord(group)
+          ? array(group.metrics)
+              .filter(isRecord)
+              .filter((metric) => typeof metric.label === "string")
+          : []
+      ).filter((metric) => {
+        const { hideLabels } = addon;
+        return (
+          !(Array.isArray(hideLabels) && hideLabels.includes(metric.label)) &&
           metricPercent(metric) >=
             thresholdFor(
               addon.showAbove,
               textOr(group.label),
               String(metric.label)
             )
-      );
+        );
+      });
       if (!metrics.length) {
         return "";
       }
