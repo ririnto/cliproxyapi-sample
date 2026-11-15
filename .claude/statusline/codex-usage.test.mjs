@@ -7,6 +7,47 @@ import { test } from "node:test";
 
 import { fetchUsage } from "./codex-usage.mjs";
 
+/**
+ * @param {() => unknown} body - Lazy payload, including malformed JSON failures.
+ * @param {number} status - Fixture HTTP status.
+ * @returns {Response} Fetch response preserving fixture payload values.
+ */
+const jsonResponse = (body, status) => {
+  const response = new Response(null, { status });
+  Object.defineProperty(response, "json", { value: async () => await body() });
+  return response;
+};
+
+/**
+ * @param {unknown} value - Data to inspect.
+ * @returns {value is Record<string, unknown>} Whether the value is a record.
+ */
+const isRecord = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * @param {unknown} snapshot - Returned usage snapshot.
+ * @returns {Record<string, unknown>[]} Validated groups.
+ */
+const snapshotGroups = (snapshot) => {
+  assert.ok(isRecord(snapshot));
+  assert.ok(Array.isArray(snapshot.groups));
+  assert.ok(snapshot.groups.every(isRecord));
+  return snapshot.groups;
+};
+
+/**
+ * @param {unknown} group - Returned usage group.
+ * @returns {Record<string, unknown>[]} Validated metrics.
+ */
+const groupMetrics = (group) => {
+  assert.ok(isRecord(group));
+  assert.ok(Array.isArray(group.metrics));
+  assert.ok(group.metrics.every(isRecord));
+  return group.metrics;
+};
+
+/** @param {string} home - Temporary home directory. */
 const writeAuth = async (home) => {
   await mkdir(path.join(home, ".codex"), { recursive: true });
   await writeFile(
@@ -15,7 +56,7 @@ const writeAuth = async (home) => {
   );
 };
 
-test("labels the main group with the ChatGPT plan", async () => {
+await test("labels the main group with the ChatGPT plan", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
@@ -24,8 +65,8 @@ test("labels the main group with the ChatGPT plan", async () => {
       fetch: (_url, options) => {
         assert.equal(options.headers.Authorization, "Bearer tok");
         assert.equal(options.headers["ChatGPT-Account-ID"], "acc");
-        return {
-          json: () => ({
+        return jsonResponse(
+          () => ({
             plan_type: "pro",
             rate_limit: {
               primary_window: {
@@ -38,43 +79,45 @@ test("labels the main group with the ChatGPT plan", async () => {
               }
             }
           }),
-          status: 200
-        };
+          200
+        );
       },
       home
     });
-    assert.equal(snapshot?.groups[0].label, "ChatGPT (Pro)");
+    assert.equal(snapshotGroups(snapshot)[0].label, "ChatGPT (Pro)");
   } finally {
     await rm(home, { force: true, recursive: true });
   }
 });
 
-test("omits the main group label for a missing or unknown plan", async () => {
+await test("omits the main group label for a missing or unknown plan", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
     const snapshots = await Promise.all(
-      [undefined, "not-a-plan"].map((plan_type) =>
-        fetchUsage({
-          cache: false,
-          fetch: () => ({
-            json: () => ({
-              plan_type,
-              rate_limit: {
-                secondary_window: {
-                  limit_window_seconds: 18_000,
-                  used_percent: 1
-                }
-              }
-            }),
-            status: 200
-          }),
-          home
-        })
+      [undefined, "not-a-plan"].map(
+        async (plan_type) =>
+          await fetchUsage({
+            cache: false,
+            fetch: () =>
+              jsonResponse(
+                () => ({
+                  plan_type,
+                  rate_limit: {
+                    secondary_window: {
+                      limit_window_seconds: 18_000,
+                      used_percent: 1
+                    }
+                  }
+                }),
+                200
+              ),
+            home
+          })
       )
     );
     assert.deepEqual(
-      snapshots.map((snapshot) => snapshot?.groups[0].label),
+      snapshots.map((snapshot) => snapshotGroups(snapshot)[0].label),
       [undefined, undefined]
     );
   } finally {
@@ -82,56 +125,61 @@ test("omits the main group label for a missing or unknown plan", async () => {
   }
 });
 
-test("keeps the Additional label for additional rate limits", async () => {
+await test("keeps the Additional label for additional rate limits", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
     const snapshot = await fetchUsage({
       cache: false,
-      fetch: () => ({
-        json: () => ({
-          additional_rate_limits: [
-            {
-              limit_name: "gpt-5.3-codex-spark",
-              rate_limit: {
-                secondary_window: {
-                  limit_window_seconds: 18_000,
-                  used_percent: 5
+      fetch: () =>
+        jsonResponse(
+          () => ({
+            additional_rate_limits: [
+              {
+                limit_name: "gpt-5.3-codex-spark",
+                rate_limit: {
+                  secondary_window: {
+                    limit_window_seconds: 18_000,
+                    used_percent: 5
+                  }
                 }
               }
+            ],
+            plan_type: "plus",
+            rate_limit: {
+              secondary_window: {
+                limit_window_seconds: 18_000,
+                used_percent: 1
+              }
             }
-          ],
-          plan_type: "plus",
-          rate_limit: {
-            secondary_window: { limit_window_seconds: 18_000, used_percent: 1 }
-          }
-        }),
-        status: 200
-      }),
+          }),
+          200
+        ),
       home
     });
-    assert.equal(snapshot?.groups[0].label, "ChatGPT (Plus)");
-    assert.equal(snapshot?.groups[1].label, "Additional");
+    assert.equal(snapshotGroups(snapshot)[0].label, "ChatGPT (Plus)");
+    assert.equal(snapshotGroups(snapshot)[1].label, "Additional");
   } finally {
     await rm(home, { force: true, recursive: true });
   }
 });
 
-test("normalizes finite positive ChatGPT credits without assuming a currency", async () => {
+await test("normalizes finite positive ChatGPT credits without assuming a currency", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
     const snapshot = await fetchUsage({
       cache: false,
-      fetch: () => ({
-        json: () => ({
-          credits: { balance: "12.5", has_credits: true, unlimited: false }
-        }),
-        status: 200
-      }),
+      fetch: () =>
+        jsonResponse(
+          () => ({
+            credits: { balance: "12.5", has_credits: true, unlimited: false }
+          }),
+          200
+        ),
       home
     });
-    assert.deepEqual(snapshot?.groups, [
+    assert.deepEqual(snapshotGroups(snapshot), [
       { metrics: [{ label: "credit", remaining: 12.5, type: "credit" }] }
     ]);
   } finally {
@@ -139,7 +187,7 @@ test("normalizes finite positive ChatGPT credits without assuming a currency", a
   }
 });
 
-test("omits absent, unusable, or unowned ChatGPT credits", async () => {
+await test("omits absent, unusable, or unowned ChatGPT credits", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
@@ -151,12 +199,13 @@ test("omits absent, unusable, or unowned ChatGPT credits", async () => {
           has_credits: true,
           unlimited: false
         }))
-      ].map((credits) =>
-        fetchUsage({
-          cache: false,
-          fetch: () => ({ json: () => ({ credits }), status: 200 }),
-          home
-        })
+      ].map(
+        async (credits) =>
+          await fetchUsage({
+            cache: false,
+            fetch: () => jsonResponse(() => ({ credits }), 200),
+            home
+          })
       )
     );
     assert.deepEqual(snapshots, Array.from({ length: snapshots.length }));
@@ -165,7 +214,7 @@ test("omits absent, unusable, or unowned ChatGPT credits", async () => {
   }
 });
 
-test("caches normalized ChatGPT snapshots in an isolated directory", async () => {
+await test("caches normalized ChatGPT snapshots in an isolated directory", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   let calls = 0;
   try {
@@ -174,12 +223,12 @@ test("caches normalized ChatGPT snapshots in an isolated directory", async () =>
       cacheDir: path.join(home, "cache"),
       fetch: () => {
         calls += 1;
-        return {
-          json: () => ({
+        return jsonResponse(
+          () => ({
             credits: { balance: 8, has_credits: true, unlimited: false }
           }),
-          status: 200
-        };
+          200
+        );
       },
       home,
       now: 1000
@@ -192,7 +241,7 @@ test("caches normalized ChatGPT snapshots in an isolated directory", async () =>
   }
 });
 
-test("retains the last snapshot after a malformed cached response", async () => {
+await test("retains the last snapshot after a malformed cached response", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   let now = 1000;
   let calls = 0;
@@ -203,17 +252,14 @@ test("retains the last snapshot after a malformed cached response", async () => 
       cacheTtlMs: 0,
       fetch: () => {
         calls += 1;
-        return {
-          json: () => {
-            if (calls > 1) {
-              throw new Error("invalid body");
-            }
-            return {
-              credits: { balance: 8, has_credits: true, unlimited: false }
-            };
-          },
-          status: 200
-        };
+        return jsonResponse(() => {
+          if (calls > 1) {
+            throw new Error("invalid body");
+          }
+          return {
+            credits: { balance: 8, has_credits: true, unlimited: false }
+          };
+        }, 200);
       },
       home,
       now
@@ -227,26 +273,30 @@ test("retains the last snapshot after a malformed cached response", async () => 
   }
 });
 
-test("shows owned credits regardless of the unlimited flag", async () => {
+await test("shows owned credits regardless of the unlimited flag", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
     const snapshots = await Promise.all(
-      [undefined, null, "false", 0, 1, true, false].map((unlimited) =>
-        fetchUsage({
-          cache: false,
-          fetch: () => ({
-            json: () => ({
-              credits: { balance: 5, has_credits: true, unlimited }
-            }),
-            status: 200
-          }),
-          home
-        })
+      [undefined, null, "false", 0, 1, true, false].map(
+        async (unlimited) =>
+          await fetchUsage({
+            cache: false,
+            fetch: () =>
+              jsonResponse(
+                () => ({
+                  credits: { balance: 5, has_credits: true, unlimited }
+                }),
+                200
+              ),
+            home
+          })
       )
     );
     assert.deepEqual(
-      snapshots.map((snapshot) => snapshot?.groups[0].metrics[0].remaining),
+      snapshots.map(
+        (snapshot) => groupMetrics(snapshotGroups(snapshot)[0])[0].remaining
+      ),
       snapshots.map(() => 5)
     );
   } finally {
@@ -254,7 +304,7 @@ test("shows owned credits regardless of the unlimited flag", async () => {
   }
 });
 
-test("preserves cached usage for malformed and provider-error payloads", async () => {
+await test("preserves cached usage for malformed and provider-error payloads", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
@@ -270,19 +320,20 @@ test("preserves cached usage for malformed and provider-error payloads", async (
         const options = {
           cacheDir: path.join(home, `cache-${index}`),
           cacheTtlMs: 0,
-          fetch: () => ({
-            json: () => ({ credits: { balance: 5, has_credits: true } }),
-            status: 200
-          }),
+          fetch: () =>
+            jsonResponse(
+              () => ({ credits: { balance: 5, has_credits: true } }),
+              200
+            ),
           home,
           now: 1000
         };
         const previous = await fetchUsage(options);
-        assert.ok(previous);
+        assert.equal(Boolean(previous), true);
         assert.deepEqual(
           await fetchUsage({
             ...options,
-            fetch: () => ({ json, status: 200 }),
+            fetch: () => jsonResponse(json, 200),
             now: 1001
           }),
           previous
@@ -294,7 +345,7 @@ test("preserves cached usage for malformed and provider-error payloads", async (
   }
 });
 
-test("clears cached usage for valid empty and zero-credit payloads", async () => {
+await test("clears cached usage for valid empty and zero-credit payloads", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
@@ -306,18 +357,19 @@ test("clears cached usage for valid empty and zero-credit payloads", async () =>
         const options = {
           cacheDir: path.join(home, `cache-${index}`),
           cacheTtlMs: 0,
-          fetch: () => ({
-            json: () => ({ credits: { balance: 5, has_credits: true } }),
-            status: 200
-          }),
+          fetch: () =>
+            jsonResponse(
+              () => ({ credits: { balance: 5, has_credits: true } }),
+              200
+            ),
           home,
           now: 1000
         };
-        assert.ok(await fetchUsage(options));
+        assert.equal(Boolean(await fetchUsage(options)), true);
         assert.equal(
           await fetchUsage({
             ...options,
-            fetch: () => ({ json: () => payload, status: 200 }),
+            fetch: () => jsonResponse(() => payload, 200),
             now: 1001
           }),
           undefined
@@ -339,14 +391,22 @@ test("clears cached usage for valid empty and zero-credit payloads", async () =>
   }
 });
 
-test("returns undefined instead of throwing when the response fails", async () => {
+await test("returns undefined instead of throwing when the response fails", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
     assert.deepEqual(
       await Promise.all(
-        [{ status: 401 }, { status: undefined }].map((response) =>
-          fetchUsage({ cache: false, fetch: () => response, home })
+        [{ status: 401 }, { status: undefined }].map(
+          async (response) =>
+            await fetchUsage({
+              cache: false,
+              fetch: () =>
+                Object.defineProperty(new Response(null), "status", {
+                  value: response.status
+                }),
+              home
+            })
         )
       ),
       [undefined, undefined]
@@ -356,7 +416,7 @@ test("returns undefined instead of throwing when the response fails", async () =
   }
 });
 
-test("keeps optional diagnostics content-free while using OpenCode credentials", async () => {
+await test("keeps optional diagnostics content-free while using OpenCode credentials", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   const diagnosticContent = "SYNTHETIC_CANARY";
   const fallbackToken = "synthetic-fallback-token";

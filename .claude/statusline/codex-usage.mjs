@@ -7,12 +7,24 @@ import { withUsageCache } from "./usage-cache.mjs";
 
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
+/**
+ * @param {unknown} value Value to validate.
+ * @returns {value is import("./types.ts").JsonRecord} Whether the value has the required shape.
+ */
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/**
+ * @param {string} url Input value.
+ * @param {Record<string, string>} headers Input value.
+ * @param {import("./types.ts").Fetch} fetchFunction Input value.
+ * @param {(() => void) | undefined} onUsageError Input value.
+ */
 const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 3000);
   try {
     const response = await fetchFunction(url, {
       headers,
@@ -20,7 +32,6 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
       signal: controller.signal
     });
     if (
-      !response ||
       typeof response.status !== "number" ||
       !Number.isFinite(response.status)
     ) {
@@ -40,8 +51,15 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
       return { status: response.status };
     }
     try {
+      /**
+       * @type {unknown}
+       */
       const payload = await response.json();
-      if (!isRecord(payload) || payload.error || payload.success === false) {
+      if (
+        !isRecord(payload) ||
+        Boolean(payload.error) ||
+        payload.success === false
+      ) {
         onUsageError?.();
         return { status: response.status };
       }
@@ -57,25 +75,45 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   }
 };
 
+/**
+ * @param {unknown} value Value to validate.
+ * @returns {value is number} Whether the value has the required shape.
+ */
 const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
+/**
+ * @param {string} filePath Auth file.
+ */
 const readJson = async (filePath) => {
   try {
+    /**
+     * @type {unknown}
+     */
     const value = JSON.parse(await readFile(filePath, "utf-8"));
-    return isRecord(value) ? value : undefined;
+    return isRecord(value) ? value : null;
   } catch {
-    if (process.env.STATUSLINE_DEBUG) {
+    if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
       console.error("[codex-usage] unreadable credential data");
     }
+    return null;
   }
 };
 
+/**
+ * @param {unknown} value Seconds.
+ */
 const secondsToMs = (value) =>
   isFiniteNumber(value) && value > 0
     ? Math.max(0, Math.trunc(value * 1000))
     : 0;
 
+/**
+ * @param {string} label Window.
+ * @param {unknown} percentage Usage.
+ * @param {number} resetsInMs Delay.
+ * @returns {import("./types.ts").Metric | undefined} Metric.
+ */
 const percentageMetric = (label, percentage, resetsInMs) =>
   isFiniteNumber(percentage) && percentage >= 0 && percentage <= 100
     ? {
@@ -86,11 +124,14 @@ const percentageMetric = (label, percentage, resetsInMs) =>
       }
     : undefined;
 
+/**
+ * @param {unknown} data Untrusted auth.
+ */
 const readChatgptAuth = (data) => {
-  const tokens = data?.tokens;
+  const tokens = isRecord(data) ? data.tokens : undefined;
   return isRecord(tokens) &&
     typeof tokens.access_token === "string" &&
-    tokens.access_token
+    tokens.access_token !== ""
     ? {
         accountId:
           typeof tokens.account_id === "string" ? tokens.account_id : "",
@@ -99,9 +140,14 @@ const readChatgptAuth = (data) => {
     : undefined;
 };
 
+/**
+ * @param {unknown} data Untrusted auth.
+ */
 const readOpenCodeOpenAiAuth = (data) => {
-  const tokens = data?.openai;
-  return isRecord(tokens) && typeof tokens.access === "string" && tokens.access
+  const tokens = isRecord(data) ? data.openai : undefined;
+  return isRecord(tokens) &&
+    typeof tokens.access === "string" &&
+    tokens.access !== ""
     ? {
         accountId: typeof tokens.accountId === "string" ? tokens.accountId : "",
         token: tokens.access
@@ -109,6 +155,9 @@ const readOpenCodeOpenAiAuth = (data) => {
     : undefined;
 };
 
+/**
+ * @param {import("./types.ts").UsageOptions} options Auth options.
+ */
 const chatgptAuth = async (options) => {
   const home = options.home ?? homedir();
   const codex = readChatgptAuth(
@@ -118,12 +167,19 @@ const chatgptAuth = async (options) => {
     await readJson(path.join(home, ".local", "share", "opencode", "auth.json"))
   );
   return {
-    accountId: codex?.accountId || openCode?.accountId || "",
+    accountId:
+      (codex?.accountId ?? "") === ""
+        ? (openCode?.accountId ?? "")
+        : (codex?.accountId ?? ""),
     codex,
     openCode
   };
 };
 
+/**
+ * @param {unknown} seconds Window length.
+ * @param {string} fallback Default.
+ */
 const windowLabel = (seconds, fallback) => {
   if (
     typeof seconds !== "number" ||
@@ -138,6 +194,10 @@ const windowLabel = (seconds, fallback) => {
   return seconds % 3600 === 0 ? `${seconds / 3600}h` : fallback;
 };
 
+/**
+ * @param {unknown} window Untrusted window.
+ * @param {string} fallback Default label.
+ */
 const chatgptWindow = (window, fallback) =>
   isRecord(window)
     ? percentageMetric(
@@ -147,16 +207,13 @@ const chatgptWindow = (window, fallback) =>
       )
     : undefined;
 
-const compactMetrics = (metrics, index = 0) => {
-  if (index >= metrics.length) {
-    return [];
-  }
-  const rest = compactMetrics(metrics, index + 1);
-  return metrics[index] ? [metrics[index], ...rest] : rest;
-};
-
+/**
+ * @param {unknown} rateLimit Untrusted limit.
+ * @param {string} label Label.
+ * @param {import("./types.ts").Metric} [credit] Credit.
+ */
 const chatgptGroup = (rateLimit, label, credit) => {
-  const metrics = compactMetrics(
+  const metrics = (
     isRecord(rateLimit)
       ? [
           chatgptWindow(rateLimit.secondary_window, "5h"),
@@ -164,19 +221,25 @@ const chatgptGroup = (rateLimit, label, credit) => {
           credit
         ]
       : [credit]
-  );
-  return metrics.length ? { metrics, ...(label ? { label } : {}) } : undefined;
+  ).filter((metric) => metric !== undefined);
+  return metrics.length
+    ? { metrics, ...(label === "" ? {} : { label }) }
+    : undefined;
 };
 
+/**
+ * @param {unknown} credits Untrusted balance.
+ * @returns {import("./types.ts").Metric | undefined} Metric.
+ */
 const chatgptCredit = (credits) => {
-  if (!isRecord(credits) || credits.has_credits !== true) {
-    return;
-  }
-  const { balance: creditBalance } = credits;
+  const creditBalance =
+    isRecord(credits) && credits.has_credits === true
+      ? credits.balance
+      : undefined;
   let balance = Number.NaN;
   if (typeof creditBalance === "number") {
     balance = creditBalance;
-  } else if (typeof creditBalance === "string" && creditBalance.trim()) {
+  } else if (typeof creditBalance === "string" && creditBalance.trim() !== "") {
     balance = Number(creditBalance);
   }
   return isFiniteNumber(balance) && balance > 0
@@ -184,6 +247,9 @@ const chatgptCredit = (credits) => {
     : undefined;
 };
 
+/**
+ * @param {unknown} planType Untrusted plan.
+ */
 const chatgptPlanLabel = (planType) => {
   if (
     typeof planType !== "string" ||
@@ -194,6 +260,10 @@ const chatgptPlanLabel = (planType) => {
   return planType.charAt(0).toUpperCase() + planType.slice(1);
 };
 
+/**
+ * @param {{ token: string, accountId: string }} selected Auth.
+ * @param {import("./types.ts").UsageOptions} options Options.
+ */
 const usageSnapshot = async (selected, options) => {
   const { payload } = await requestJson(
     USAGE_URL,
@@ -201,9 +271,9 @@ const usageSnapshot = async (selected, options) => {
       Authorization: `Bearer ${selected.token}`,
       "Content-Type": "application/json",
       "User-Agent": "codex",
-      ...(selected.accountId
-        ? { "ChatGPT-Account-ID": selected.accountId }
-        : {})
+      ...(selected.accountId === ""
+        ? {}
+        : { "ChatGPT-Account-ID": selected.accountId })
     },
     options.fetch ?? globalThis.fetch,
     options.onUsageError
@@ -213,50 +283,52 @@ const usageSnapshot = async (selected, options) => {
     ? [
         chatgptGroup(
           payload.rate_limit,
-          plan && `ChatGPT (${plan})`,
+          plan === "" ? "" : `ChatGPT (${plan})`,
           chatgptCredit(payload.credits)
         ),
         ...(Array.isArray(payload.additional_rate_limits)
-          ? payload.additional_rate_limits.filter(
-              (limit) =>
-                isRecord(limit) &&
-                typeof limit.limit_name === "string" &&
-                limit.limit_name
-            )
+          ? payload.additional_rate_limits
+              .filter(isRecord)
+              .filter(
+                (limit) =>
+                  isRecord(limit) &&
+                  typeof limit.limit_name === "string" &&
+                  limit.limit_name !== ""
+              )
           : []
-        ).map((limit) =>
-          chatgptGroup(
+        ).map((limit) => {
+          const label =
+            typeof limit.limit_name === "string" ? limit.limit_name : "";
+          return chatgptGroup(
             limit.rate_limit,
-            limit.limit_name === "gpt-5.3-codex-spark"
-              ? "Additional"
-              : limit.limit_name
-          )
-        )
-      ].filter(Boolean)
+            limit.limit_name === "gpt-5.3-codex-spark" ? "Additional" : label
+          );
+        })
+      ].filter((group) => group !== undefined)
     : [];
   return groups.length ? { groups } : undefined;
 };
 
 /**
  * Fetch and normalize ChatGPT Codex usage with local auth fallback.
- * @param {object} [options] Input value.
- * @returns {Promise<object|undefined>} Result.
+ * @param {import("./types.ts").UsageOptions} [options] Input value.
+ * @returns {Promise<import("./types.ts").Snapshot|undefined>} Result.
  */
 export const fetchUsage = async (options = {}) => {
   const auth = await chatgptAuth(options);
   const explicit =
-    typeof options.credential === "string" && options.credential
+    typeof options.credential === "string" && options.credential !== ""
       ? options.credential
       : "";
   const selected = explicit
     ? { accountId: auth.accountId, token: explicit }
     : (auth.codex ?? auth.openCode);
-  return selected?.token
-    ? withUsageCache(
+  return selected !== undefined && selected.token !== ""
+    ? await withUsageCache(
         "chatgpt",
         { accountId: selected.accountId, token: selected.token },
         options,
-        (fetchOptions) => usageSnapshot(selected, fetchOptions)
+        async (fetchOptions) => await usageSnapshot(selected, fetchOptions)
       )
     : undefined;
 };

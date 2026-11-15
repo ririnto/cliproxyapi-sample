@@ -8,6 +8,44 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 
+/**
+ * @typedef {Record<string, unknown>} RecordValue
+ */
+/**
+ * @typedef {{home?: string, baseDir?: string, environment?: Record<string, string | undefined>}} ReferenceOptions
+ */
+/**
+ * @typedef {{addons?: unknown, branch?: string, cwd?: string, nowMs?: number, nativeUsage?: boolean | null, settingsDir?: string, importModule?: (url: URL) => unknown}} RenderOptions
+ */
+/**
+ * @param {unknown} value - Untrusted input.
+ * @returns {RecordValue} Object fields or an empty record.
+ */
+const record = (value) => (isRecord(value) ? value : {});
+/**
+ * @param {unknown} value - Untrusted list.
+ * @returns {unknown[]} Array elements or an empty list.
+ */
+const array = (value) => (Array.isArray(value) ? value : []);
+/**
+ * @param {unknown} value - Untrusted path.
+ * @param {string} fallback - Default path.
+ */
+const textOr = (value, fallback = "") =>
+  typeof value === "string" && value !== "" ? value : fallback;
+
+/**
+ * @param {unknown} value - Candidate value.
+ * @param {unknown} alternative - Falsy fallback.
+ */
+const truthy = Boolean;
+
+/**
+ * @param {unknown} value - Candidate.
+ * @param {unknown} alternative - Fallback.
+ */
+const truthyOr = (value, alternative) => (truthy(value) ? value : alternative);
+
 const RESET = "[0m";
 const DIM = "\u001B[38;2;132;144;156m";
 const BOLD = "[1m";
@@ -20,52 +58,105 @@ const GROUP_SEPARATOR = `${DIM}  │  ${RESET}`;
 const PCT_GREEN = 70;
 const PCT_YELLOW = 90;
 
+/**
+ * @param {unknown} value - value input.
+ */
 const displayText = (value) =>
-  stripVTControlCharacters(`${value}`).replaceAll(
+  stripVTControlCharacters(String(value)).replaceAll(
     /[\p{Cc}\u{2028}\u{2029}]+/gu,
     " "
   );
 
+/**
+ * @param {unknown} value - value input.
+ * @returns {value is RecordValue} Whether value has object fields.
+ */
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/**
+ * @param {RecordValue} metric - metric input.
+ */
 const metricPercentage = (metric) => {
   if (metric?.type === "usage") {
-    return metric.total > 0 ? (metric.used / metric.total) * 100 : 0;
+    return Number(metric.total) > 0
+      ? (Number(metric.used) / Number(metric.total)) * 100
+      : 0;
   }
   return metric?.percentage ?? 0;
 };
 
+/**
+ * @param {string} name - name input.
+ * @param {ReferenceOptions["environment"]} environment - environment input.
+ */
 const environmentValue = (name, environment) =>
-  environment && Object.hasOwn(environment, name)
+  environment !== undefined && Object.hasOwn(environment, name)
     ? (environment[name] ?? "")
     : (process.env[name] ?? "");
 
-const homePath = (value, home) =>
-  value.startsWith("~/") ? path.join(home, value.slice(2)) : value;
-
+/**
+ * @param {string} value - value input.
+ * @param {ReferenceOptions["environment"]} environment - environment input.
+ */
 const replaceEnvironmentReferences = (value, environment) =>
-  value.replaceAll(/\{env:(?<name>[^{}]+)\}/gu, (placeholder, envName) =>
-    String(environmentValue(envName, environment))
+  value.replaceAll(/\{env:(?<name>[^{}]+)\}/gu, (placeholder) =>
+    environmentValue(placeholder.slice(5, -1), environment)
   );
 
+/**
+ * @param {RegExpExecArray} reference - reference input.
+ * @param {string} home - home input.
+ * @param {string} baseDir - baseDir input.
+ */
 const referenceText = async (reference, home, baseDir) => {
-  const referencePath = reference.groups.fileReferencePath;
+  const [, referencePath] = reference;
   if (!referencePath) {
-    return `{file:${referencePath}}`;
+    return reference[0];
   }
-  const pathValue = homePath(referencePath, home);
+  const pathValue = referencePath.startsWith("~/")
+    ? path.join(home, referencePath.slice(2))
+    : referencePath;
   const filePath = path.isAbsolute(pathValue)
     ? pathValue
     : path.resolve(baseDir, pathValue);
   try {
-    const contents = await readFile(filePath, "utf-8");
-    return contents.trim();
+    const text = await readFile(filePath, "utf-8");
+    return text.trim();
   } catch {
-    return `{file:${referencePath}}`;
+    return reference[0];
   }
 };
 
+/**
+ * @param {string} value - value input.
+ * @param {RegExpExecArray[]} references - references input.
+ * @param {string[]} texts - texts input.
+ */
+const spliceReferences = (value, references, texts) => {
+  const last = references.at(-1);
+  if (last === undefined) {
+    return value;
+  }
+  return (
+    references
+      .map(
+        (reference, index) =>
+          value.slice(
+            index
+              ? references[index - 1].index + references[index - 1][0].length
+              : 0,
+            reference.index
+          ) + texts[index]
+      )
+      .join("") + value.slice(last.index + last[0].length)
+  );
+};
+
+/**
+ * @param {string} value - value input.
+ * @param {ReferenceOptions} options - options input.
+ */
 const replaceFileReferences = async (value, options) => {
   const home = options.home ?? homedir();
   const baseDir = options.baseDir ?? process.cwd();
@@ -75,28 +166,40 @@ const replaceFileReferences = async (value, options) => {
   if (!references.length) {
     return value;
   }
-  const texts = await Promise.all(
-    references.map((reference) => referenceText(reference, home, baseDir))
-  );
-  const segments = value.split(/\{file:[^{}]*\}/gu);
-  return segments
-    .map((segment, index) =>
-      index < texts.length ? `${segment}${texts[index]}` : segment
+  return spliceReferences(
+    value,
+    references,
+    await Promise.all(
+      references.map(
+        async (reference) => await referenceText(reference, home, baseDir)
+      )
     )
-    .join("");
+  );
 };
 
-const resolveCredentialReference = (value, options = {}) =>
+/**
+ * @param {unknown} value - value input.
+ * @param {ReferenceOptions} options - options input.
+ */
+const resolveCredentialReference = async (value, options = {}) =>
   typeof value === "string"
-    ? replaceFileReferences(
+    ? await replaceFileReferences(
         replaceEnvironmentReferences(value, options.environment),
         options
       )
     : value;
 
+/**
+ * @param {number} number - number input.
+ * @param {number} divisor - divisor input.
+ * @param {string} suffix - suffix input.
+ */
 const scaledText = (number, divisor, suffix) =>
   `${(number / divisor).toFixed(1).replace(/\.0$/u, "")}${suffix}`;
 
+/**
+ * @param {unknown} value - value input.
+ */
 const numberText = (value) => {
   const number = Number(value);
   if (!Number.isFinite(number)) {
@@ -110,6 +213,9 @@ const numberText = (value) => {
     : String(Number(number.toFixed(1)));
 };
 
+/**
+ * @param {unknown} milliseconds - milliseconds input.
+ */
 const resetText = (milliseconds) => {
   const value = Number(milliseconds);
   if (!Number.isFinite(value) || value <= 0) {
@@ -125,6 +231,9 @@ const resetText = (milliseconds) => {
   return hours > 0 ? `${hours}h${minutes ? `${minutes}m` : ""}` : `${minutes}m`;
 };
 
+/**
+ * @param {number} percentage - percentage input.
+ */
 const barColor = (percentage) => {
   if (!Number.isFinite(percentage)) {
     return "";
@@ -137,6 +246,9 @@ const barColor = (percentage) => {
     : "\u001B[38;2;233;144;169m";
 };
 
+/**
+ * @param {number} percentage - percentage input.
+ */
 const usageBar = (percentage) => {
   const steps = Math.max(
     percentage > 0 ? 1 : 0,
@@ -145,6 +257,9 @@ const usageBar = (percentage) => {
   return "▰".repeat(steps) + DIM + "▱".repeat(8 - steps);
 };
 
+/**
+ * @param {string} cwd - cwd input.
+ */
 const gitBranch = (cwd) => {
   try {
     return execFileSync("git", ["branch", "--show-current"], {
@@ -157,8 +272,11 @@ const gitBranch = (cwd) => {
   }
 };
 
+/**
+ * @param {RecordValue} metric - metric input.
+ */
 const metricDisplay = (metric) => {
-  if (!metric || typeof metric !== "object") {
+  if (!isRecord(metric)) {
     return "";
   }
   if (metric.type === "usage") {
@@ -166,17 +284,20 @@ const metricDisplay = (metric) => {
   }
   if (metric.type === "credit") {
     if (metric.currency === "USD") {
-      return `$${metric.remaining.toFixed(2)}`;
+      return `$${Number(metric.remaining).toFixed(2)}`;
     }
     return Number.isFinite(Number(metric.remaining))
       ? numberText(metric.remaining)
       : String(metric.remaining);
   }
   return metric.type === "budget"
-    ? `$${Number(metric.used || 0).toFixed(2)}/$${Number(metric.total || 0).toFixed(2)}`
-    : `${Number(Math.max(0, 100 - Number(metric.percentage || 0)).toFixed(1))}% left`;
+    ? `$${Number(truthyOr(metric.used, 0)).toFixed(2)}/$${Number(truthyOr(metric.total, 0)).toFixed(2)}`
+    : `${Number(Math.max(0, 100 - Number(truthyOr(metric.percentage, 0))).toFixed(1))}% left`;
 };
 
+/**
+ * @param {RecordValue} metric - metric input.
+ */
 const metricPercent = (metric) => {
   try {
     if (metric.type === "credit") {
@@ -189,51 +310,80 @@ const metricPercent = (metric) => {
   }
 };
 
+/**
+ * @param {unknown} showAbove - showAbove input.
+ * @param {string} groupLabel - groupLabel input.
+ * @param {string} metricLabel - metricLabel input.
+ */
 const thresholdFor = (showAbove, groupLabel, metricLabel) =>
-  showAbove && typeof showAbove === "object" && !Array.isArray(showAbove)
+  isRecord(showAbove)
     ? Number(showAbove[metricLabel] ?? showAbove[groupLabel] ?? 0)
-    : Number(showAbove || 0);
+    : Number(truthyOr(showAbove, 0));
 
+/**
+ * @param {RecordValue} metric - metric input.
+ */
 const renderMetric = (metric) => {
   const reset = metric.resetsInMs ?? metric.resets_in_ms;
   return `${displayText(metric.label)} ${barColor(metricPercent(metric))}${displayText(metricDisplay(metric))}${RESET}${reset === undefined ? "" : ` ${DIM}↻${resetText(reset)}${RESET}`}`;
 };
 
+/**
+ * @param {unknown} value - value input.
+ * @returns {value is number} Whether value is finite.
+ */
 const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
+/**
+ * @param {unknown} window - window input.
+ */
 const windowPercentage = (window) => {
-  const percentage = window?.used_percentage;
+  const percentage = record(window).used_percentage;
   return isFiniteNumber(percentage) && percentage >= 0 ? percentage : null;
 };
 
+/**
+ * @param {unknown} window - window input.
+ */
 const spendDollarPair = (window) => {
-  const used = window?.used_usd;
-  const limit = window?.limit_usd;
+  const used = record(window).used_usd;
+  const limit = record(window).limit_usd;
   return isFiniteNumber(used) && used >= 0 && isFiniteNumber(limit) && limit > 0
     ? { limit, used }
     : null;
 };
 
+/**
+ * @param {unknown} window - window input.
+ */
 const spendPercentage = (window) => {
-  const percentage = window?.used_percentage;
+  const percentage = record(window).used_percentage;
   return isFiniteNumber(percentage) && percentage >= 0 ? percentage : null;
 };
 
+/**
+ * @param {unknown} rateLimits - rateLimits input.
+ */
 const nativeUsageFor = (rateLimits) => {
   if (!isRecord(rateLimits)) {
     return null;
   }
-  const windows = [rateLimits.five_hour, rateLimits.seven_day].some(
-    (window) => windowPercentage(window) !== null
-  );
   return (
-    windows ||
+    [rateLimits.five_hour, rateLimits.seven_day].some(
+      (window) => windowPercentage(window) !== null
+    ) ||
     spendPercentage(rateLimits.spend_limit) !== null ||
     spendDollarPair(rateLimits.spend_limit) !== null
   );
 };
 
+/**
+ * @param {string} key - key input.
+ * @param {string} label - label input.
+ * @param {RecordValue} rateLimits - rateLimits input.
+ * @param {number} nowMs - nowMs input.
+ */
 const windowRow = (key, label, rateLimits, nowMs) => {
   const window = rateLimits?.[key];
   const percentage = windowPercentage(window);
@@ -243,11 +393,17 @@ const windowRow = (key, label, rateLimits, nowMs) => {
   return renderMetric({
     label,
     percentage,
-    resetsInMs: Math.trunc(Number(window.resets_at || 0) * 1000 - nowMs),
+    resetsInMs: Math.trunc(
+      Number(truthyOr(record(window).resets_at, 0)) * 1000 - nowMs
+    ),
     type: "percentage"
   });
 };
 
+/**
+ * @param {{used:number,limit:number} | null} dollars - dollars input.
+ * @param {number} percentage - percentage input.
+ */
 const spendMetric = (dollars, percentage) =>
   dollars
     ? {
@@ -259,8 +415,12 @@ const spendMetric = (dollars, percentage) =>
       }
     : { label: "spend", percentage, type: "percentage" };
 
+/**
+ * @param {RecordValue} rateLimits - rateLimits input.
+ * @param {number} nowMs - nowMs input.
+ */
 const spendRow = (rateLimits, nowMs) => {
-  const spend = rateLimits?.spend_limit;
+  const spend = record(rateLimits.spend_limit);
   const dollars = spendDollarPair(spend);
   const percentage = dollars
     ? (dollars.used / dollars.limit) * 100
@@ -276,6 +436,10 @@ const spendRow = (rateLimits, nowMs) => {
   );
 };
 
+/**
+ * @param {RecordValue} rateLimits - rateLimits input.
+ * @param {number} nowMs - nowMs input.
+ */
 const renderRateLimits = (rateLimits, nowMs) =>
   [
     windowRow("five_hour", "5h", rateLimits, nowMs),
@@ -283,30 +447,43 @@ const renderRateLimits = (rateLimits, nowMs) =>
     spendRow(rateLimits, nowMs)
   ].filter(Boolean);
 
+/**
+ * @param {unknown} group - group input.
+ */
 const metricEntries = (group) =>
-  isRecord(group) && Array.isArray(group.metrics)
-    ? group.metrics.filter(
-        (metric) =>
-          metric &&
-          typeof metric === "object" &&
-          typeof metric.label === "string"
-      )
+  isRecord(group)
+    ? array(group.metrics)
+        .filter(isRecord)
+        .filter((metric) => typeof metric.label === "string")
     : [];
 
+/**
+ * @param {RecordValue} metric - metric input.
+ * @param {unknown} hideLabels - hideLabels input.
+ */
 const hiddenLabel = (metric, hideLabels) =>
   Array.isArray(hideLabels) && hideLabels.includes(metric.label);
 
+/**
+ * @param {RecordValue} addon - addon input.
+ * @param {unknown} snapshot - snapshot input.
+ */
 export const renderSnapshot = (addon, snapshot) => {
-  if (!snapshot || !Array.isArray(snapshot.groups)) {
+  if (!isRecord(snapshot) || !Array.isArray(snapshot.groups)) {
     return "";
   }
-  return snapshot.groups
+  return array(snapshot.groups)
+    .map(record)
     .map((group) => {
       const metrics = metricEntries(group).filter(
         (metric) =>
           !hiddenLabel(metric, addon.hideLabels) &&
           metricPercent(metric) >=
-            thresholdFor(addon.showAbove, group.label || "", metric.label)
+            thresholdFor(
+              addon.showAbove,
+              textOr(group.label),
+              String(metric.label)
+            )
       );
       if (!metrics.length) {
         return "";
@@ -316,30 +493,36 @@ export const renderSnapshot = (addon, snapshot) => {
         typeof group.label === "string" && group.label
           ? group.label
           : addon.name;
-      const displayName = group.label || !addon.hideName ? groupName : "";
-      const name = displayName
-        ? `${PROVIDER}${displayText(displayName).replace(/\s+\((?:Pro|Individual)\)$/u, "")}${RESET}`
-        : "";
-      return displayName ? `${name}  ${content}` : content;
+      const displayName =
+        truthy(group.label) || !truthy(addon.hideName) ? groupName : "";
+      return truthy(displayName)
+        ? `${PROVIDER}${displayText(displayName).replace(/\s+\((?:Pro|Individual)\)$/u, "")}${RESET}  ${content}`
+        : content;
     })
     .filter(Boolean)
     .join(GROUP_SEPARATOR);
 };
 
+/**
+ * @param {unknown} addons - addons input.
+ * @returns {(RecordValue & {script:string})[]} Enabled script definitions.
+ */
 const addonSettings = (addons) =>
-  Array.isArray(addons)
-    ? addons
-        .filter(
-          (addon) =>
-            addon &&
-            typeof addon === "object" &&
-            addon.enabled !== false &&
-            typeof addon.script === "string" &&
-            addon.script.trim()
-        )
-        .map((addon) => ({ ...addon, script: addon.script.trim() }))
-    : [];
+  array(addons).flatMap((addon) => {
+    if (
+      !isRecord(addon) ||
+      addon.enabled === false ||
+      typeof addon.script !== "string" ||
+      addon.script.trim() === ""
+    ) {
+      return [];
+    }
+    return [{ ...addon, script: addon.script.trim() }];
+  });
 
+/**
+ * @param {string} script - script input.
+ */
 const scriptPath = (script) => {
   const home = homedir();
   if (script === "~") {
@@ -353,23 +536,64 @@ const scriptPath = (script) => {
     : fileURLToPath(new URL(expanded, import.meta.url));
 };
 
+/**
+ * @param {{script:string}} addon - addon input.
+ * @param {RenderOptions} options - options input.
+ */
 const importAddonModule = async (addon, options) => {
-  const module = await (options.importModule || ((url) => import(url)))(
-    pathToFileURL(scriptPath(addon.script))
-  );
-  return typeof module.fetchUsage === "function" ? module : undefined;
+  /**
+   * @type {unknown}
+   */
+  const module = await (
+    options.importModule ??
+    (async (url) => {
+      /**
+       * @type {unknown}
+       */
+      const imported = await import(url.href);
+      return imported;
+    })
+  )(pathToFileURL(scriptPath(addon.script)));
+  if (!isRecord(module) || typeof module.fetchUsage !== "function") {
+    return null;
+  }
+  const { fetchUsage } = module;
+  /**
+   * @param {RecordValue} input - Provider request.
+   */
+  const invoke = (input) => {
+    /**
+     * @type {unknown}
+     */
+    const result = Reflect.apply(fetchUsage, module, [input]);
+    return result;
+  };
+  return invoke;
 };
 
+/**
+ * @param {unknown} addons - addons input.
+ * @param {RenderOptions} options - options input.
+ */
 const renderAddonResults = async (addons, options = {}) => {
-  const settingsDir = options.settingsDir || path.join(homedir(), ".claude");
+  const settingsDir = textOr(
+    options.settingsDir,
+    path.join(homedir(), ".claude")
+  );
   const results = await Promise.all(
     addonSettings(addons)
-      .filter((addon) => !(options.nativeUsage && addon.provider === "claude"))
+      .filter(
+        (addon) =>
+          !(options.nativeUsage === true && addon.provider === "claude")
+      )
       .map(async (addon) => {
         try {
           const module = await importAddonModule(addon, options);
+          /**
+           * @type {unknown}
+           */
           const snapshot = module
-            ? await module.fetchUsage({
+            ? await module({
                 baseDir: settingsDir,
                 credential: Object.hasOwn(addon, "credential")
                   ? await resolveCredentialReference(addon.credential, {
@@ -385,46 +609,70 @@ const renderAddonResults = async (addons, options = {}) => {
         }
       })
   );
-  return results.filter(Boolean);
+  return results.filter((result) => result !== null);
 };
 
+/**
+ * @param {unknown} addons - addons input.
+ * @param {RenderOptions} options - options input.
+ */
 export const renderAddons = async (addons, options = {}) => {
   const results = await renderAddonResults(addons, options);
   return results.map((result) => result.line);
 };
 
+/**
+ * @param {RecordValue} workspace - workspace input.
+ */
 const projectDisplay = (workspace) => {
-  const currentDir =
-    workspace?.current_dir || workspace?.project_dir || process.cwd();
-  const projectDir = workspace?.project_dir || currentDir;
+  const currentDir = textOr(
+    workspace.current_dir,
+    textOr(workspace.project_dir, process.cwd())
+  );
+  const projectDir = textOr(workspace.project_dir, currentDir);
   const projectName = path.basename(projectDir);
   return currentDir === projectDir
     ? projectName
     : `${projectName}/${path.basename(currentDir)}`;
 };
 
+/**
+ * @param {RecordValue} input - input input.
+ */
 const renderContext = (input) => {
-  const context = input.context_window || {};
+  const context = record(input.context_window);
   const value = Number(context.used_percentage);
   const known =
     context.used_percentage !== null &&
     context.used_percentage !== undefined &&
     Number.isFinite(value);
   const percentage = known ? Math.max(0, Math.min(100, Math.trunc(value))) : 0;
-  const size = Math.trunc(Number(context.context_window_size || 0));
+  const size = Math.trunc(Number(truthyOr(context.context_window_size, 0)));
   return known
     ? `Context ${barColor(percentage)}${usageBar(percentage)}${RESET} ${barColor(percentage)}${percentage}%${RESET}${size ? ` ${DIM}/ ${numberText(size)}${RESET}` : ""}`
     : `Context ${DIM}${size ? numberText(size) : "waiting"}${RESET}`;
 };
 
+/**
+ * @param {RecordValue} input - input input.
+ * @param {RenderOptions} options - options input.
+ */
 const renderHeader = (input, options) => {
-  const model = input.model || {};
-  const modelName = model.display_name || model.id || "Claude";
-  const effort = input.effort?.level || model.effort || "";
-  const workspace = input.workspace || {};
-  const cost = input.cost || {};
-  const dollars = Number(cost.total_cost_usd || 0);
-  const seconds = Math.trunc(Number(cost.total_duration_ms || 0) / 1000);
+  const model = record(input.model);
+  let modelName = model.display_name;
+  if (!truthy(modelName)) {
+    modelName = truthyOr(model.id, "Claude");
+  }
+  let effort = record(input.effort).level;
+  if (!truthy(effort)) {
+    effort = truthyOr(model.effort, "");
+  }
+  const workspace = record(input.workspace);
+  const cost = record(input.cost);
+  const dollars = Number(truthyOr(cost.total_cost_usd, 0));
+  const seconds = Math.trunc(
+    Number(truthyOr(cost.total_duration_ms, 0)) / 1000
+  );
   const details = [
     ...(dollars > 0 ? [`$${dollars.toFixed(2)}`] : []),
     ...(seconds > 0
@@ -432,11 +680,12 @@ const renderHeader = (input, options) => {
       : [])
   ];
   const branch =
-    options.branch === undefined
-      ? gitBranch(options.cwd || workspace.current_dir || process.cwd())
-      : options.branch;
+    options.branch ??
+    gitBranch(
+      textOr(options.cwd, textOr(workspace.current_dir, process.cwd()))
+    );
   return [
-    `${MODEL_COLOR}${BOLD}${displayText(modelName)}${RESET}${effort ? ` ${DIM}${displayText(effort)}${RESET}` : ""}`,
+    `${MODEL_COLOR}${BOLD}${displayText(modelName)}${RESET}${truthy(effort) ? ` ${DIM}${displayText(effort)}${RESET}` : ""}`,
     `${GREEN}${displayText(projectDisplay(workspace))}${RESET}`,
     ...(branch ? [`${BLUE}${displayText(branch)}${RESET}`] : []),
     ...(details.length ? [`${DIM}${details.join(" · ")}${RESET}`] : []),
@@ -444,9 +693,12 @@ const renderHeader = (input, options) => {
   ].join(SEPARATOR);
 };
 
+/**
+ * @param {RecordValue} input - input input.
+ */
 const renderTokens = (input) => {
-  const context = input.context_window || {};
-  const usage = context.current_usage || {};
+  const context = record(input.context_window);
+  const usage = record(context.current_usage);
   const metrics = [
     ["in", context.total_input_tokens],
     ["out", context.total_output_tokens],
@@ -454,10 +706,13 @@ const renderTokens = (input) => {
     ["cache write", usage.cache_creation_input_tokens]
   ].filter(([, value]) => Number(value) > 0);
   return metrics.length
-    ? `${DIM}${metrics.map(([label, value]) => `${label} ${numberText(value)}`).join(" · ")}${RESET}`
+    ? `${DIM}${metrics.map(([label, value]) => `${String(label)} ${numberText(value)}`).join(" · ")}${RESET}`
     : "";
 };
 
+/**
+ * @param {string[]} rows - rows input.
+ */
 const packProviderRows = (rows) => {
   const packed = [];
   let current = [];
@@ -485,19 +740,22 @@ const packProviderRows = (rows) => {
     if (!right) {
       return [left];
     }
-    const padding = " ".repeat(
+    const combined = `${left}${" ".repeat(
       Math.max(0, columnWidth - stripVTControlCharacters(left).length)
-    );
-    const combined = `${left}${padding}${GROUP_SEPARATOR}${right}`;
+    )}${GROUP_SEPARATOR}${right}`;
     return stripVTControlCharacters(combined).length <= 120
       ? [combined]
       : [left, right];
   });
 };
 
+/**
+ * @param {RecordValue} input - input input.
+ * @param {RenderOptions} options - options input.
+ */
 export const renderStatusline = async (input, options = {}) => {
   const nowMs = options.nowMs ?? Date.now();
-  const nativeRate = renderRateLimits(input.rate_limits || {}, nowMs);
+  const nativeRate = renderRateLimits(record(input.rate_limits), nowMs);
   const addonResults = await renderAddonResults(options.addons ?? [], {
     ...options,
     nativeUsage: nativeUsageFor(input.rate_limits)
@@ -511,20 +769,29 @@ export const renderStatusline = async (input, options = {}) => {
   const primary = nativeRate.length
     ? `${PROVIDER}Claude${RESET}  ${nativeRate.join(SEPARATOR)}`
     : addonResults[primaryIndex]?.line || "";
-  const providerRows = packProviderRows(
-    [
-      primary,
-      ...addonResults
-        .filter((_, index) => index !== primaryIndex)
-        .map((result) => result.line)
-    ].filter(Boolean)
-  );
-  return [header, ...providerRows];
+  return [
+    header,
+    ...packProviderRows(
+      [
+        primary,
+        ...addonResults
+          .filter((_, index) => index !== primaryIndex)
+          .map((result) => result.line)
+      ].filter(Boolean)
+    )
+  ];
 };
 
+/**
+ * @param {string} filePath - filePath input.
+ */
 const readSettings = async (filePath) => {
   try {
-    return JSON.parse(await readFile(filePath, "utf-8"));
+    /**
+     * @type {unknown}
+     */
+    const parsed = JSON.parse(await readFile(filePath, "utf-8"));
+    return isRecord(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -532,30 +799,37 @@ const readSettings = async (filePath) => {
 
 export const main = async () => {
   try {
-    const input = JSON.parse(readFileSync(0, "utf-8"));
-    const globalSettingsDir =
-      process.env.CLAUDE_CONFIG_DIR || path.join(homedir(), ".claude");
-    const projectDir = input.workspace?.project_dir;
+    /**
+     * @type {unknown}
+     */
+    const parsed = JSON.parse(readFileSync(0, "utf-8"));
+    const input = record(parsed);
+    const globalSettingsDir = textOr(
+      process.env.CLAUDE_CONFIG_DIR,
+      path.join(homedir(), ".claude")
+    );
+    const projectDir = record(input.workspace).project_dir;
     const projectSettings =
       typeof projectDir === "string"
         ? await readSettings(path.join(projectDir, ".claude", "settings.json"))
         : null;
     const useProject =
-      projectSettings && Array.isArray(projectSettings.statusLineAddon);
-    const settings = useProject
-      ? projectSettings
-      : (await readSettings(path.join(globalSettingsDir, "settings.json"))) ||
-        {};
+      projectSettings !== null &&
+      Array.isArray(projectSettings.statusLineAddon);
     const rows = await renderStatusline(input, {
-      addons: settings.statusLineAddon || [],
-      cwd: input.workspace?.current_dir || process.cwd(),
+      addons:
+        (useProject
+          ? projectSettings
+          : await readSettings(path.join(globalSettingsDir, "settings.json"))
+        )?.statusLineAddon ?? [],
+      cwd: textOr(record(input.workspace).current_dir, process.cwd()),
       settingsDir: useProject
-        ? path.join(projectDir, ".claude")
+        ? path.join(String(projectDir), ".claude")
         : globalSettingsDir
     });
     process.stdout.write(`${rows.join("\n")}\n`);
   } catch (error) {
-    if (process.env.STATUSLINE_DEBUG) {
+    if (truthy(process.env.STATUSLINE_DEBUG)) {
       console.error("[statusline] unavailable input or settings", error);
     }
   }

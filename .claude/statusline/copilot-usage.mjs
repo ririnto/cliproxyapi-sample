@@ -9,12 +9,24 @@ import { withUsageCache } from "./usage-cache.mjs";
 const GITHUB_COM = "https://github.com";
 const COPILOT_API = "https://api.github.com";
 
+/**
+ * @param {unknown} value Value to validate.
+ * @returns {value is import("./types.ts").JsonRecord} Record check.
+ */
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/**
+ * @param {string} url Input value.
+ * @param {Record<string, string>} headers Input value.
+ * @param {import("./types.ts").Fetch} fetchFunction Input value.
+ * @param {(() => void) | undefined} onUsageError Input value.
+ */
 const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 3000);
   try {
     const response = await fetchFunction(url, {
       headers,
@@ -22,7 +34,6 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
       signal: controller.signal
     });
     if (
-      !response ||
       typeof response.status !== "number" ||
       !Number.isFinite(response.status)
     ) {
@@ -42,6 +53,9 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
       return { status: response.status };
     }
     try {
+      /**
+       * @type {unknown}
+       */
       const payload = await response.json();
       if (!isRecord(payload)) {
         onUsageError?.();
@@ -59,9 +73,16 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   }
 };
 
+/**
+ * @param {unknown} value Value to validate.
+ * @returns {value is number} Finite check.
+ */
 const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
+/**
+ * @param {unknown} value - Timestamp.
+ */
 const nowValue = (value) => {
   if (value instanceof Date) {
     return value.getTime();
@@ -69,6 +90,9 @@ const nowValue = (value) => {
   return isFiniteNumber(value) ? value : Date.now();
 };
 
+/**
+ * @param {string} text - JSONC document.
+ */
 const stripJsonc = (text) => {
   let result = "";
   let inString = false;
@@ -105,39 +129,68 @@ const stripJsonc = (text) => {
   return result;
 };
 
+/**
+ * @param {string} filePath - File location.
+ * @param {boolean} [jsonc] - Strip comments.
+ * @returns {Promise<Record<string,unknown>|undefined|null>} Valid result or absence.
+ */
 const readJson = async (filePath, jsonc = false) => {
   try {
     const text = await readFile(filePath, "utf-8");
+    /**
+     * @type {unknown}
+     */
     const value = JSON.parse(jsonc ? stripJsonc(text) : text);
     return isRecord(value) ? value : undefined;
   } catch {
-    if (process.env.STATUSLINE_DEBUG) {
+    if (
+      process.env.STATUSLINE_DEBUG !== undefined &&
+      process.env.STATUSLINE_DEBUG !== ""
+    ) {
       console.error("[copilot-usage] unreadable credential data");
     }
   }
+  return null;
 };
 
+/**
+ * @param {unknown} timestamp - Reset timestamp.
+ * @param {number} now - Current time.
+ */
 const resetAfter = (timestamp, now) =>
   isFiniteNumber(timestamp) && timestamp > 0
     ? Math.max(0, Math.trunc(timestamp - now))
     : 0;
 
+/**
+ * @param {(import("./types.ts").Metric | undefined)[]} metrics - Candidate metrics.
+ * @param {string} label - Group label.
+ */
 const snapshot = (metrics, label) => {
-  const validMetrics = metrics.filter(Boolean);
-  return validMetrics.length
+  const validMetrics = metrics.filter((metric) => metric !== undefined);
+  return validMetrics.length > 0
     ? {
         groups: [
-          label ? { label, metrics: validMetrics } : { metrics: validMetrics }
+          label === ""
+            ? { metrics: validMetrics }
+            : { label, metrics: validMetrics }
         ]
       }
     : undefined;
 };
 
+/**
+ * @param {string} label - Metric label.
+ * @param {unknown} used - Used amount.
+ * @param {unknown} total - Quota.
+ * @param {number} resetsInMs - Reset delay.
+ * @returns {import("./types.ts").Metric | undefined} Valid metric.
+ */
 const usageMetric = (label, used, total, resetsInMs) =>
   isFiniteNumber(used) && isFiniteNumber(total) && used >= 0 && total >= 0
     ? {
         label,
-        resetsInMs: Math.max(0, resetsInMs || 0),
+        resetsInMs: Math.max(0, resetsInMs ?? 0),
         total,
         type: "usage",
         used
@@ -150,6 +203,11 @@ const ENVIRONMENT_TOKEN_NAMES = [
   "GITHUB_TOKEN"
 ];
 
+/**
+ * @param {Record<string, string | undefined> | undefined} environment - Environment.
+ * @param {number} [index] - Candidate index.
+ * @returns {string[]} Ordered tokens.
+ */
 const candidateEnvironmentTokens = (environment, index = 0) => {
   if (index >= ENVIRONMENT_TOKEN_NAMES.length) {
     return [];
@@ -159,144 +217,183 @@ const candidateEnvironmentTokens = (environment, index = 0) => {
     process.env[ENVIRONMENT_TOKEN_NAMES[index]] ??
     "";
   const rest = candidateEnvironmentTokens(environment, index + 1);
-  return typeof token === "string" && token ? [token, ...rest] : rest;
+  return typeof token === "string" && token !== "" ? [token, ...rest] : rest;
 };
 
+/**
+ * @param {unknown} host - Host input.
+ */
 const normalizeHost = (host) => {
-  if (typeof host !== "string" || !host) {
+  if (typeof host !== "string" || host === "") {
     return GITHUB_COM;
   }
   const trimmed = host.trim().replace(/\/$/u, "");
   return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
 };
 
+/**
+ * @param {unknown} host - Host input.
+ */
 const copilotApiHost = (host) => {
   const normalized = normalizeHost(host);
   return normalized === GITHUB_COM ? COPILOT_API : normalized;
 };
 
+/**
+ * @param {string} home - Home directory.
+ */
+/**
+ * @param {unknown} value - OAuth entry.
+ * @returns {value is Record<string, unknown> & {accessToken: string}} Token-bearing record.
+ */
+const hasAccessToken = (value) =>
+  isRecord(value) &&
+  typeof value.accessToken === "string" &&
+  value.accessToken !== "";
+/**
+ * @param {string} home - Home directory.
+ */
 const intellijCandidates = async (home) => {
   const oauth = await readJson(
     path.join(home, ".config", "github-copilot", "oauth.json")
   );
-  return Object.entries(oauth ?? {})
-    .filter(([, entries]) => Array.isArray(entries))
-    .flatMap(([authority, entries]) =>
-      entries
-        .filter(
-          (entry) =>
-            isRecord(entry) &&
-            typeof entry.accessToken === "string" &&
-            entry.accessToken
-        )
-        .map((entry) => ({
-          host: copilotApiHost(
-            authority.endsWith("/login/oauth")
-              ? authority.slice(0, -12)
-              : authority
-          ),
-          scheme: "token",
-          token: entry.accessToken
-        }))
-    );
+  return Object.entries(oauth ?? {}).flatMap(([authority, entries]) =>
+    (Array.isArray(entries) ? entries : [])
+      .filter(hasAccessToken)
+      .map((entry) => ({
+        host: copilotApiHost(
+          authority.endsWith("/login/oauth")
+            ? authority.slice(0, -12)
+            : authority
+        ),
+        scheme: "token",
+        token: entry.accessToken
+      }))
+  );
 };
 
+/**
+ * @param {string} home - Home directory.
+ */
 const openCodeCopilotCandidates = async (home) => {
   const auth = await readJson(
     path.join(home, ".local", "share", "opencode", "auth.json")
   );
   const oauth = auth?.["github-copilot"];
-  if (oauth?.type !== "oauth") {
+  if (!isRecord(oauth) || oauth.type !== "oauth") {
     return [];
   }
-  const host = copilotApiHost(oauth.enterpriseUrl || GITHUB_COM);
+  const host = copilotApiHost(oauth.enterpriseUrl ?? GITHUB_COM);
   return [
-    ...(typeof oauth.access === "string" && oauth.access
+    ...(typeof oauth.access === "string" && oauth.access !== ""
       ? [{ host, scheme: "token", token: oauth.access }]
       : []),
     ...(typeof oauth.refresh === "string" &&
-    oauth.refresh &&
+    oauth.refresh !== "" &&
     oauth.refresh !== oauth.access
       ? [{ host, scheme: "token", token: oauth.refresh }]
       : [])
   ];
 };
 
+/**
+ * @param {string} home - Home directory.
+ */
 const ghCliCandidates = async (home) => {
   const hosts = await readJson(path.join(home, ".config", "gh", "hosts.json"));
-  return Object.entries(hosts ?? {})
-    .filter(([, entry]) => isRecord(entry))
-    .flatMap(([authority, entry]) => {
-      const host = copilotApiHost(authority);
-      return [
-        ...(isRecord(entry.users)
-          ? Object.values(entry.users)
-              .filter(isRecord)
-              .map((user) => user.oauth_token)
-          : []),
-        entry.oauth_token
-      ]
-        .filter((token) => typeof token === "string" && token)
-        .map((token) => ({ host, scheme: "token", token }));
-    });
+  return Object.entries(hosts ?? {}).flatMap(([authority, value]) => {
+    const entry = isRecord(value) ? value : {};
+    const host = copilotApiHost(authority);
+    return [
+      ...(isRecord(entry.users)
+        ? Object.values(entry.users)
+            .filter(isRecord)
+            .map((user) => user.oauth_token)
+        : []),
+      entry.oauth_token
+    ]
+      .filter((token) => typeof token === "string")
+      .filter((token) => token !== "")
+      .map((token) => ({ host, scheme: "token", token }));
+  });
 };
 
+/**
+ * @param {import("./types.ts").UsageOptions} options - Lookup options.
+ * @param {string} home - Home directory.
+ */
 const keychainToken = (options, home) => {
   if (
     (options.platform ?? process.platform) !== "darwin" ||
-    !(home === homedir() || options.execFile)
+    !(home === homedir() || options.execFile !== undefined)
   ) {
     return "";
   }
   try {
-    return (options.execFile ?? execFileSync)(
-      "security",
-      ["find-generic-password", "-s", "copilot-cli", "-w"],
-      {
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 3000
-      }
+    return String(
+      (options.execFile ?? execFileSync)(
+        "security",
+        ["find-generic-password", "-s", "copilot-cli", "-w"],
+        {
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 3000
+        }
+      )
     ).trim();
   } catch {
     return "";
   }
 };
 
+/**
+ * @param {import("./types.ts").UsageOptions} options - Lookup options.
+ * @param {string} credential - Explicit token.
+ */
 const copilotCandidates = async (options, credential) => {
   const home = options.home ?? homedir();
   const config = await readJson(
     path.join(home, ".copilot", "config.json"),
     true
   );
-  const login = config?.lastLoggedInUser?.login;
-  const session = login && config.copilotTokens?.[`${GITHUB_COM}:${login}`];
+  const user = config?.lastLoggedInUser;
+  const login =
+    isRecord(user) && typeof user.login === "string" ? user.login : "";
+  const tokens = config?.copilotTokens;
+  const session =
+    login !== "" && isRecord(tokens)
+      ? tokens[`${GITHUB_COM}:${login}`]
+      : undefined;
   const keychain = keychainToken(options, home);
   return [
-    ...(credential
-      ? [{ host: COPILOT_API, scheme: "token", token: credential }]
-      : []),
+    ...(credential === ""
+      ? []
+      : [{ host: COPILOT_API, scheme: "token", token: credential }]),
     ...candidateEnvironmentTokens(options.environment).map((token) => ({
       host: COPILOT_API,
       scheme: "token",
       token
     })),
-    ...(typeof session === "string" && session
+    ...(typeof session === "string" && session !== ""
       ? [{ host: COPILOT_API, scheme: "Bearer", token: session }]
       : []),
-    ...(keychain
-      ? [{ host: COPILOT_API, scheme: "token", token: keychain }]
-      : []),
+    ...(keychain === ""
+      ? []
+      : [{ host: COPILOT_API, scheme: "token", token: keychain }]),
     ...(await intellijCandidates(home)),
     ...(await openCodeCopilotCandidates(home)),
     ...(await ghCliCandidates(home))
   ];
 };
 
+/**
+ * @param {Record<string, unknown>} payload - Usage payload.
+ * @param {number} now - Current time.
+ */
 const copilotReset = (payload, now) => {
   if (
     typeof payload.quota_reset_date_utc === "string" &&
-    payload.quota_reset_date_utc
+    payload.quota_reset_date_utc !== ""
   ) {
     const timestamp = Date.parse(payload.quota_reset_date_utc);
     if (Number.isFinite(timestamp)) {
@@ -316,17 +413,26 @@ const COPILOT_PLANS = new Set([
   "team"
 ]);
 
+/**
+ * @param {unknown} plan - Plan metadata.
+ */
 const planLabel = (plan) => {
-  const name = COPILOT_PLANS.has(plan) ? plan.replaceAll("_", " ") : "";
-  return name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
+  const name =
+    typeof plan === "string" && COPILOT_PLANS.has(plan)
+      ? plan.replaceAll("_", " ")
+      : "";
+  return name === "" ? "" : name.charAt(0).toUpperCase() + name.slice(1);
 };
 
+/**
+ * @param {Record<string, unknown>} payload - Usage payload.
+ */
 const groupLabel = (payload) => {
   if (payload.access_type_sku === "free_limited_copilot") {
     return "Copilot (Free)";
   }
   const plan = planLabel(payload.copilot_plan);
-  return plan && `Copilot (${plan})`;
+  return plan === "" ? "" : `Copilot (${plan})`;
 };
 
 const QUOTA_METRICS = [
@@ -335,15 +441,21 @@ const QUOTA_METRICS = [
   ["Premium", "premium_interactions"]
 ];
 
+/**
+ * @param {string} label - Metric label.
+ * @param {unknown} window - Quota payload.
+ * @param {number} reset - Reset delay.
+ */
 const quotaMetric = (label, window, reset) => {
   const entitlement =
     isRecord(window) && isFiniteNumber(window.entitlement)
       ? window.entitlement
       : Number.NaN;
   const total = Math.max(0, entitlement);
-  const remaining = isFiniteNumber(window?.quota_remaining)
-    ? window.quota_remaining
-    : window?.remaining;
+  const record = isRecord(window) ? window : {};
+  const remaining = isFiniteNumber(record.quota_remaining)
+    ? record.quota_remaining
+    : record.remaining;
   return isFiniteNumber(remaining) && entitlement > 0
     ? usageMetric(
         label,
@@ -357,22 +469,46 @@ const quotaMetric = (label, window, reset) => {
     : undefined;
 };
 
+/**
+ * @param {string} label - Metric label.
+ * @param {unknown} window - Quota payload.
+ * @param {number} reset - Reset delay.
+ */
+/**
+ * @param {Record<string, unknown>} payload - Usage payload.
+ * @param {number} reset - Reset delay.
+ * @param {number} [index] - Metric index.
+ * @returns {import("./types.ts").Metric[]} Valid metrics.
+ */
 const quotaMetrics = (payload, reset, index = 0) => {
   if (index >= QUOTA_METRICS.length) {
     return [];
   }
   const [label, key] = QUOTA_METRICS[index];
-  const metric = quotaMetric(label, payload.quota_snapshots?.[key], reset);
+  const metric = quotaMetric(
+    label,
+    isRecord(payload.quota_snapshots)
+      ? payload.quota_snapshots[key]
+      : undefined,
+    reset
+  );
   const rest = quotaMetrics(payload, reset, index + 1);
   return metric ? [metric, ...rest] : rest;
 };
 
+/**
+ * @param {Record<string, unknown>} payload - Usage payload.
+ * @param {number} now - Current time.
+ */
 const normalizeCopilot = (payload, now) =>
   snapshot(
     quotaMetrics(payload, copilotReset(payload, now)),
     groupLabel(payload)
   );
 
+/**
+ * @param {{host:string,scheme:string,token:string}} candidate - Credential candidate.
+ */
 const copilotHeaders = (candidate) => ({
   Accept: "application/vnd.github+json",
   Authorization: `${candidate.scheme} ${candidate.token}`,
@@ -381,9 +517,15 @@ const copilotHeaders = (candidate) => ({
   "X-GitHub-Api-Version": "2025-04-01"
 });
 
+/**
+ * @param {{host:string,scheme:string,token:string}[]} candidates - Ordered credentials.
+ * @param {import("./types.ts").UsageOptions} options - Lookup options.
+ * @param {number} [index] - Candidate index.
+ * @returns {Promise<import("./types.ts").Snapshot|undefined|null>} Available usage.
+ */
 const fetchCandidate = async (candidates, options, index = 0) => {
-  const candidate = candidates[index];
-  if (candidate) {
+  const candidate = candidates.at(index);
+  if (candidate !== undefined) {
     const { status, payload } = await requestJson(
       `${copilotApiHost(candidate.host)}/copilot_internal/user`,
       copilotHeaders(candidate),
@@ -392,23 +534,27 @@ const fetchCandidate = async (candidates, options, index = 0) => {
     );
     if (status === 401 || status === 403) {
       options.onUsageError?.();
-      return fetchCandidate(candidates, options, index + 1);
+      return await fetchCandidate(candidates, options, index + 1);
     }
-    if (status === undefined || status < 200 || status >= 300 || !payload) {
-      return;
-    }
-    if (!isRecord(payload.quota_snapshots)) {
+    const successful =
+      status !== undefined &&
+      status >= 200 &&
+      status < 300 &&
+      payload !== undefined;
+    if (successful && !isRecord(payload.quota_snapshots)) {
       options.onUsageError?.();
-      return;
     }
-    return normalizeCopilot(payload, nowValue(options.now));
+    return successful && isRecord(payload.quota_snapshots)
+      ? normalizeCopilot(payload, nowValue(options.now))
+      : undefined;
   }
+  return null;
 };
 
 /**
  * Fetch and normalize Copilot usage with credential fallback discovery.
- * @param {object} [options] Input value.
- * @returns {Promise<object|undefined>} Result.
+ * @param {import("./types.ts").UsageOptions} [options] Input value.
+ * @returns {Promise<import("./types.ts").Snapshot|undefined>} Result.
  */
 export const fetchUsage = async (options = {}) => {
   const candidates = await copilotCandidates(
@@ -422,10 +568,14 @@ export const fetchUsage = async (options = {}) => {
       copilotApiHost(candidate.host),
       candidate.scheme
     ]);
-    return seen.has(identity) ? false : seen.add(identity);
+    if (seen.has(identity)) {
+      return false;
+    }
+    seen.add(identity);
+    return true;
   });
-  return usable.length
-    ? withUsageCache(
+  return usable.length > 0
+    ? await withUsageCache(
         "copilot",
         usable.map((candidate) => [
           candidate.token,
@@ -433,7 +583,8 @@ export const fetchUsage = async (options = {}) => {
           candidate.scheme
         ]),
         options,
-        (cachedOptions) => fetchCandidate(usable, cachedOptions)
+        async (cachedOptions) =>
+          (await fetchCandidate(usable, cachedOptions)) ?? undefined
       )
     : undefined;
 };

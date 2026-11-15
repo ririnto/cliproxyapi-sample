@@ -5,12 +5,19 @@ import path from "node:path";
 
 import { withUsageCache } from "../.claude/statusline/usage-cache.mjs";
 
-const actions = [
+/** @typedef {{identity: string, outcome: "success" | "failure", elapsed: number}} Action */
+
+/** @type {{identity: string, outcome: "success" | "failure"}[]} */
+const outcomes = [
   { identity: "a", outcome: "success" },
   { identity: "a", outcome: "failure" },
   { identity: "b", outcome: "success" },
   { identity: "b", outcome: "failure" }
-].flatMap((action) => [1000, 6000].map((elapsed) => ({ ...action, elapsed })));
+];
+const actions = outcomes.flatMap((action) =>
+  [1000, 6000].map((elapsed) => ({ ...action, elapsed }))
+);
+/** @type {Action[][]} */
 const sequences = [[]];
 for (let depth = 0; depth < 3; depth += 1) {
   for (const sequence of sequences.filter((item) => item.length === depth)) {
@@ -25,9 +32,14 @@ try {
   const results = await Promise.allSettled(
     sequences.map(async (sequence, index) => {
       const cacheDir = path.join(root, String(index));
+      /**
+       * @param {number} step - Index of the next simulated request.
+       * @param {number} previousNow - Previous simulated time.
+       * @returns {Promise<void>} Resolves when the sequence is complete.
+       */
       const run = async (step, previousNow) => {
         const action = sequence[step];
-        if (!action) {
+        if (action === undefined) {
           return;
         }
         const now = previousNow + action.elapsed;
@@ -36,16 +48,29 @@ try {
           action.identity,
           {
             cacheDir,
-            fetch: () => ({ status: action.outcome === "success" ? 200 : 429 }),
+            fetch: () =>
+              new Response(null, {
+                status: action.outcome === "success" ? 200 : 429
+              }),
             now
           },
           async (options) => {
-            await options.fetch();
-            return { owner: action.identity };
+            assert.ok(options.fetch);
+            await options.fetch("https://example.test", {
+              headers: {},
+              method: "GET",
+              signal: AbortSignal.timeout(3000)
+            });
+            return { owner: action.identity, groups: [] };
           }
         );
         assert.ok(
-          snapshot === undefined || snapshot.owner === action.identity,
+          snapshot === undefined ||
+            (snapshot !== null &&
+              (typeof snapshot === "object" ||
+                typeof snapshot === "function") &&
+              "owner" in snapshot &&
+              snapshot.owner === action.identity),
           `foreign snapshot at ${JSON.stringify(sequence.slice(0, step + 1))}`
         );
         await run(step + 1, now);

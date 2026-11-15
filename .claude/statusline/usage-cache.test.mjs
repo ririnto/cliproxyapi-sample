@@ -13,25 +13,115 @@ import test, { afterEach, beforeEach } from "node:test";
 
 import { withUsageCache } from "./usage-cache.mjs";
 
-const snapshot = { groups: [{ metrics: [{ label: "5h", resetsInMs: 9000 }] }] };
-const response = (retryAfter, status = 200) => ({
-  headers: {
-    get: (name) => (name.toLowerCase() === "retry-after" ? retryAfter : null)
-  },
-  status
-});
+/** @type {import("./types.ts").Snapshot} */
+const snapshot = {
+  groups: [
+    {
+      metrics: [
+        { label: "5h", type: "percentage", percentage: 10, resetsInMs: 9000 }
+      ]
+    }
+  ]
+};
+
+/**
+ * @param {unknown} value - Candidate object.
+ * @returns {value is Record<string, unknown>} Whether the value is a record.
+ */
+const isRecord = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * @param {unknown} value - Imported module to inspect.
+ * @returns {value is {fetchUsage: (options: object) => unknown}} Whether the module exports a callable collector.
+ */
+const isCollector = (value) =>
+  isRecord(value) && typeof value.fetchUsage === "function";
+
+/**
+ * @param {string} text - Serialized cache record.
+ * @returns {Record<string, unknown>} Parsed and validated record.
+ */
+const parseRecord = (text) => {
+  /** @type {unknown} */
+  const parsed = JSON.parse(text);
+  assert.ok(isRecord(parsed));
+  return parsed;
+};
+
+/**
+ * @param {unknown} value - The returned snapshot.
+ * @returns {Record<string, unknown>} The first validated group.
+ */
+const firstGroup = (value) => {
+  assert.ok(value !== null && typeof value === "object" && "groups" in value);
+  assert.ok(Array.isArray(value.groups));
+  const { groups } = value;
+  /** @type {unknown[]} */
+  const safeGroups = groups;
+  const [group] = safeGroups;
+  assert.ok(isRecord(group));
+  return group;
+};
+
+/**
+ * @param {unknown} value - The returned snapshot.
+ * @returns {Record<string, unknown>} The first validated metric.
+ */
+const firstMetric = (value) => {
+  const group = firstGroup(value);
+  assert.ok(Array.isArray(group.metrics));
+  const { metrics } = group;
+  /** @type {unknown[]} */
+  const safeMetrics = metrics;
+  const [metric] = safeMetrics;
+  assert.ok(isRecord(metric));
+  return metric;
+};
+
+/** @type {(value: object) => asserts value is {fetch: (url: string) => unknown, onUsageError?: () => void}} */
+const assertCallbacks = (value) => {
+  assert.ok("fetch" in value && typeof value.fetch === "function");
+  if ("onUsageError" in value && value.onUsageError !== undefined) {
+    assert.equal(typeof value.onUsageError, "function");
+  }
+};
+
+/**
+ * @param {string} [retryAfter] - Optional Retry-After value.
+ * @param {number} [status] - HTTP status returned by the fake response.
+ */
+const response = (retryAfter, status = 200) =>
+  new Response(null, {
+    headers: retryAfter === undefined ? {} : { "Retry-After": retryAfter },
+    status
+  });
+
+/**
+ * @param {string} [retryAfter] - Optional Retry-After value.
+ * @param {number} [status] - HTTP status returned by the fake response.
+ */
 const fetchResponse =
   (retryAfter, status = 200) =>
   () =>
     response(retryAfter, status);
+/**
+ * @param {string} cacheDir - Cache directory.
+ * @param {number} now - Current time in milliseconds.
+ * @param {string} [retryAfter] - Optional Retry-After value.
+ * @param {number} [status] - HTTP status returned by the fake response.
+ */
 const optionsFor = (cacheDir, now, retryAfter, status = 200) => ({
   cacheDir,
   fetch: fetchResponse(retryAfter, status),
   now
 });
+/** @param {object} options - Wrapped request options. */
 const fetchSnapshot = async (options) => {
+  assertCallbacks(options);
   await options.fetch("https://example.test");
 };
+/** @type {string} */
 let cacheDir;
 
 beforeEach(async () => {
@@ -42,7 +132,28 @@ afterEach(async () => {
   await rm(cacheDir, { force: true, recursive: true });
 });
 
-test("reuses a successful snapshot and counts down resetsInMs", async () => {
+await test("uses the second TTL getter value without adding reads", async () => {
+  let reads = 0;
+  const options = {
+    ...optionsFor(cacheDir, 1000),
+    get cacheTtlMs() {
+      reads += 1;
+      return reads;
+    }
+  };
+  await withUsageCache("zai", "account", options, async (wrapped) => {
+    assertCallbacks(wrapped);
+    await wrapped.fetch("https://example.test");
+    return snapshot;
+  });
+  const record = parseRecord(
+    await readFile(path.join(cacheDir, "zai.json"), "utf-8")
+  );
+  assert.equal(record.nextAttemptAt, 1002);
+  assert.equal(reads, 3);
+});
+
+await test("reuses a successful snapshot and counts down resetsInMs", async () => {
   let calls = 0;
   const first = await withUsageCache(
     "zai",
@@ -50,6 +161,7 @@ test("reuses a successful snapshot and counts down resetsInMs", async () => {
     optionsFor(cacheDir, 1000),
     async (options) => {
       calls += 1;
+      assertCallbacks(options);
       await options.fetch("https://example.test");
       return snapshot;
     }
@@ -63,18 +175,33 @@ test("reuses a successful snapshot and counts down resetsInMs", async () => {
     }
   );
   assert.deepEqual(first, snapshot);
-  assert.equal(cached.groups[0].metrics[0].resetsInMs, 8000);
+  assert.equal(firstMetric(cached).resetsInMs, 8000);
   assert.equal(calls, 1);
   const cacheText = await readFile(path.join(cacheDir, "zai.json"), "utf-8");
   assert.equal(cacheText.includes("account-a"), false);
 });
 
-test("refreshes at five seconds and leaves fresh cache bytes unchanged", async () => {
+await test("refreshes at five seconds and leaves fresh cache bytes unchanged", async () => {
   let calls = 0;
+  /** @param {object} options - Wrapped request options. */
   const load = async (options) => {
     calls += 1;
+    assertCallbacks(options);
     await options.fetch("https://example.test");
-    return { groups: [{ metrics: [{ percentage: calls, resetsInMs: 9000 }] }] };
+    return {
+      groups: [
+        {
+          metrics: [
+            {
+              type: "percentage",
+              label: "5h",
+              percentage: calls,
+              resetsInMs: 9000
+            }
+          ]
+        }
+      ]
+    };
   };
   const first = await withUsageCache(
     "zai",
@@ -90,30 +217,32 @@ test("refreshes at five seconds and leaves fresh cache bytes unchanged", async (
     optionsFor(cacheDir, 5999),
     load
   );
-  assert.equal(first.groups[0].metrics[0].percentage, 1);
-  assert.equal(cached.groups[0].metrics[0].percentage, 1);
-  assert.equal(cached.groups[0].metrics[0].resetsInMs, 4001);
+  assert.equal(firstMetric(first).percentage, 1);
+  assert.equal(firstMetric(cached).percentage, 1);
+  assert.equal(firstMetric(cached).resetsInMs, 4001);
   assert.equal(calls, 1);
   assert.deepEqual(await readFile(filePath), bytes);
-  assert.equal(JSON.parse(bytes).nextAttemptAt, 6000);
+  assert.equal(parseRecord(bytes.toString("utf-8")).nextAttemptAt, 6000);
   const refreshed = await withUsageCache(
     "zai",
     "account",
     optionsFor(cacheDir, 6000),
     load
   );
-  assert.equal(refreshed.groups[0].metrics[0].percentage, 2);
+  assert.equal(firstMetric(refreshed).percentage, 2);
   assert.equal(calls, 2);
-  const record = JSON.parse(await readFile(filePath, "utf-8"));
+  const record = parseRecord(await readFile(filePath, "utf-8"));
   assert.equal(record.fetchedAt, 6000);
   assert.equal(record.nextAttemptAt, 11_000);
 });
 
-test("honors an explicit cache directory and custom TTL at its boundary", async () => {
+await test("honors an explicit cache directory and custom TTL at its boundary", async () => {
   const directory = path.join(cacheDir, "explicit");
   let calls = 0;
+  /** @param {object} options - Wrapped request options. */
   const load = async (options) => {
     calls += 1;
+    assertCallbacks(options);
     await options.fetch("https://example.test");
     return snapshot;
   };
@@ -129,12 +258,15 @@ test("honors an explicit cache directory and custom TTL at its boundary", async 
   assert.equal(calls, 2);
   assert.deepEqual(await readdir(cacheDir), ["explicit"]);
   assert.equal(
-    JSON.parse(await readFile(path.join(directory, "zai.json"), "utf-8"))
+    parseRecord(await readFile(path.join(directory, "zai.json"), "utf-8"))
       .nextAttemptAt,
     25_000
   );
 });
 
+/**
+ * @type {{auth?: object, authFile?: string, payload: (value: number) => object, provider: string, script: string, valueField: string}[]}
+ */
 const consumers = [
   {
     auth: { claudeAiOauth: { accessToken: "synthetic-token" } },
@@ -206,11 +338,11 @@ const consumers = [
   }
 ];
 
-test("all five collectors use the home cache and refresh at five seconds", async () => {
+await test("all five collectors use the home cache and refresh at five seconds", async () => {
   await Promise.all(
     consumers.map(async (consumer) => {
       const home = path.join(cacheDir, consumer.provider);
-      if (consumer.authFile) {
+      if (consumer.authFile !== undefined && consumer.authFile !== "") {
         await mkdir(path.dirname(path.join(home, consumer.authFile)), {
           recursive: true
         });
@@ -219,7 +351,10 @@ test("all five collectors use the home cache and refresh at five seconds", async
           JSON.stringify(consumer.auth)
         );
       }
-      const { fetchUsage } = await import(consumer.script);
+      /** @type {unknown} */
+      const collector = await import(consumer.script);
+      assert.ok(isCollector(collector));
+      const { fetchUsage } = collector;
       let calls = 0;
       const options = {
         credential: "synthetic-token",
@@ -236,25 +371,25 @@ test("all five collectors use the home cache and refresh at five seconds", async
       const directory = path.join(home, ".claude", "cache", "usage");
       const filePath = path.join(directory, `${consumer.provider}.json`);
       const bytes = await readFile(filePath);
-      assert.equal(first.groups[0].metrics[0][consumer.valueField], 10);
-      assert.equal(JSON.parse(bytes).nextAttemptAt, 6000);
+      assert.equal(firstMetric(first)[consumer.valueField], 10);
+      assert.equal(parseRecord(bytes.toString("utf-8")).nextAttemptAt, 6000);
       assert.deepEqual(await readdir(directory), [`${consumer.provider}.json`]);
       const cached = await fetchUsage({ ...options, now: 5999 });
-      assert.equal(cached.groups[0].metrics[0][consumer.valueField], 10);
-      assert.equal(cached.groups[0].metrics[0].resetsInMs, 4001);
+      assert.equal(firstMetric(cached)[consumer.valueField], 10);
+      assert.equal(firstMetric(cached).resetsInMs, 4001);
       assert.equal(calls, 1);
       assert.deepEqual(await readFile(filePath), bytes);
       const refreshed = await fetchUsage({ ...options, now: 6000 });
-      assert.equal(refreshed.groups[0].metrics[0][consumer.valueField], 20);
+      assert.equal(firstMetric(refreshed)[consumer.valueField], 20);
       assert.equal(calls, 2);
-      const record = JSON.parse(await readFile(filePath, "utf-8"));
+      const record = parseRecord(await readFile(filePath, "utf-8"));
       assert.equal(record.fetchedAt, 6000);
       assert.equal(record.nextAttemptAt, 11_000);
     })
   );
 });
 
-test("mistral collector uses the home cache and refreshes at five seconds", async () => {
+await test("mistral collector uses the home cache and refreshes at five seconds", async () => {
   const home = path.join(cacheDir, "mistral");
   const { fetchUsage } = await import("./mistral-usage.mjs");
   let calls = 0;
@@ -263,12 +398,9 @@ test("mistral collector uses the home cache and refreshes at five seconds", asyn
     environment: {},
     fetch: () => {
       calls += 1;
-      return {
-        json: () => ({
-          api_budget: { reset_at: null, usage_percentage: calls * 10 }
-        }),
-        status: 200
-      };
+      return Response.json({
+        api_budget: { reset_at: null, usage_percentage: calls * 10 }
+      });
     },
     home,
     now: 1000,
@@ -278,23 +410,23 @@ test("mistral collector uses the home cache and refreshes at five seconds", asyn
   const directory = path.join(home, ".claude", "cache", "usage");
   const filePath = path.join(directory, "mistral.json");
   const bytes = await readFile(filePath);
-  assert.equal(first.groups[0].label, "Mistral");
-  assert.equal(first.groups[0].metrics[0].percentage, 10);
-  assert.equal(JSON.parse(bytes).nextAttemptAt, 6000);
+  assert.equal(firstGroup(first).label, "Mistral");
+  assert.equal(firstMetric(first).percentage, 10);
+  assert.equal(parseRecord(bytes.toString("utf-8")).nextAttemptAt, 6000);
   assert.deepEqual(await readdir(directory), ["mistral.json"]);
   const cached = await fetchUsage({ ...options, now: 5999 });
-  assert.equal(cached.groups[0].metrics[0].percentage, 10);
+  assert.equal(firstMetric(cached).percentage, 10);
   assert.equal(calls, 1);
   assert.deepEqual(await readFile(filePath), bytes);
   const refreshed = await fetchUsage({ ...options, now: 6000 });
-  assert.equal(refreshed.groups[0].metrics[0].percentage, 20);
+  assert.equal(firstMetric(refreshed).percentage, 20);
   assert.equal(calls, 2);
-  const record = JSON.parse(await readFile(filePath, "utf-8"));
+  const record = parseRecord(await readFile(filePath, "utf-8"));
   assert.equal(record.fetchedAt, 6000);
   assert.equal(record.nextAttemptAt, 11_000);
 });
 
-test("invalidates data when credential identity changes", async () => {
+await test("invalidates data when credential identity changes", async () => {
   await withUsageCache(
     "zai",
     "account-a",
@@ -311,7 +443,7 @@ test("invalidates data when credential identity changes", async () => {
   assert.equal(calls, 1);
 });
 
-test("honors Retry-After during initial rate limiting", async () => {
+await test("honors Retry-After during initial rate limiting", async () => {
   const options = optionsFor(cacheDir, 1000, "600", 429);
   await withUsageCache("zai", "account", options, fetchSnapshot);
   const cached = await withUsageCache(
@@ -322,18 +454,19 @@ test("honors Retry-After during initial rate limiting", async () => {
   );
   assert.equal(cached, undefined);
   assert.equal(
-    JSON.parse(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
+    parseRecord(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
       .nextAttemptAt,
     601_000
   );
 });
 
-test("omits expired stale data while preserving an active cooldown", async () => {
+await test("omits expired stale data while preserving an active cooldown", async () => {
   await withUsageCache(
     "zai",
     "account",
     optionsFor(cacheDir, 1000),
     async (wrapped) => {
+      assertCallbacks(wrapped);
       await wrapped.fetch("https://example.test");
       return snapshot;
     }
@@ -343,6 +476,7 @@ test("omits expired stale data while preserving an active cooldown", async () =>
     "account",
     optionsFor(cacheDir, 62_000, "600", 429),
     async (wrapped) => {
+      assertCallbacks(wrapped);
       await wrapped.fetch("https://example.test");
     }
   );
@@ -360,20 +494,21 @@ test("omits expired stale data while preserving an active cooldown", async () =>
     undefined
   );
   assert.equal(calls, 0);
-  const file = JSON.parse(
+  const file = parseRecord(
     await readFile(path.join(cacheDir, "zai.json"), "utf-8")
   );
   assert.equal(file.nextAttemptAt, 662_000);
   assert.equal(file.snapshot, undefined);
 });
 
-test("keeps a fresh snapshot valid for a custom TTL longer than five minutes", async () => {
+await test("keeps a fresh snapshot valid for a custom TTL longer than five minutes", async () => {
   let calls = 0;
   const options = {
     ...optionsFor(cacheDir, 1000),
     cacheTtlMs: 600_000
   };
   await withUsageCache("zai", "account", options, async (wrapped) => {
+    assertCallbacks(wrapped);
     await wrapped.fetch("https://example.test");
     calls += 1;
     return snapshot;
@@ -386,16 +521,17 @@ test("keeps a fresh snapshot valid for a custom TTL longer than five minutes", a
       calls += 1;
     }
   );
-  assert.equal(result.groups[0].metrics[0].resetsInMs, 0);
+  assert.equal(firstMetric(result).resetsInMs, 0);
   assert.equal(calls, 1);
 });
 
-test("recovers stale data after a network failure", async () => {
+await test("recovers stale data after a network failure", async () => {
   await withUsageCache(
     "zai",
     "account",
     optionsFor(cacheDir, 1000),
     async (wrapped) => {
+      assertCallbacks(wrapped);
       await wrapped.fetch("https://example.test");
       return snapshot;
     }
@@ -411,18 +547,20 @@ test("recovers stale data after a network failure", async () => {
       now: 62_000
     },
     async (wrapped) => {
+      assertCallbacks(wrapped);
       await wrapped.fetch("https://example.test");
     }
   );
-  assert.equal(result.groups[0].metrics[0].resetsInMs, 0);
+  assert.equal(firstMetric(result).resetsInMs, 0);
 });
 
-test("preserves prior data when a successful HTTP body is malformed", async () => {
+await test("preserves prior data when a successful HTTP body is malformed", async () => {
   await withUsageCache(
     "zai",
     "account",
     optionsFor(cacheDir, 1000),
     async (wrapped) => {
+      assertCallbacks(wrapped);
       await wrapped.fetch("https://example.test");
       return snapshot;
     }
@@ -432,22 +570,24 @@ test("preserves prior data when a successful HTTP body is malformed", async () =
     "zai",
     "account",
     optionsFor(cacheDir, 62_000),
-    async ({ fetch, onUsageError: markUsageError }) => {
+    async (options) => {
+      assertCallbacks(options);
+      const { fetch, onUsageError: markUsageError } = options;
       await fetch("https://example.test");
       onUsageError = markUsageError;
       markUsageError?.();
     }
   );
   assert.equal(typeof onUsageError, "function");
-  assert.equal(result.groups[0].metrics[0].label, "5h");
+  assert.equal(firstMetric(result).label, "5h");
   assert.deepEqual(
-    JSON.parse(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
+    parseRecord(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
       .snapshot,
     snapshot
   );
 });
 
-test("honors HTTP-date Retry-After cooldowns", async () => {
+await test("honors HTTP-date Retry-After cooldowns", async () => {
   const now = 1000;
   const retryAt = now + 600_000;
   const options = optionsFor(
@@ -458,18 +598,19 @@ test("honors HTTP-date Retry-After cooldowns", async () => {
   );
   await withUsageCache("zai", "account", options, fetchSnapshot);
   assert.equal(
-    JSON.parse(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
+    parseRecord(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
       .nextAttemptAt,
     retryAt
   );
 });
 
-test("serves prior snapshot during a rate limit", async () => {
+await test("serves prior snapshot during a rate limit", async () => {
   await withUsageCache(
     "zai",
     "account",
     optionsFor(cacheDir, 1000),
     async (wrapped) => {
+      assertCallbacks(wrapped);
       await wrapped.fetch("https://example.test");
       return snapshot;
     }
@@ -479,18 +620,20 @@ test("serves prior snapshot during a rate limit", async () => {
     "account",
     optionsFor(cacheDir, 62_000, undefined, 429),
     async (wrapped) => {
+      assertCallbacks(wrapped);
       await wrapped.fetch("https://example.test");
     }
   );
-  assert.equal(result.groups[0].metrics[0].resetsInMs, 0);
+  assert.equal(firstMetric(result).resetsInMs, 0);
 });
 
-test("clears cached credits on successful authoritative empty response", async () => {
+await test("clears cached credits on successful authoritative empty response", async () => {
   await withUsageCache(
     "zai",
     "account",
     optionsFor(cacheDir, 1000),
     async (wrapped) => {
+      assertCallbacks(wrapped);
       await wrapped.fetch("https://example.test");
       return snapshot;
     }
@@ -501,19 +644,20 @@ test("clears cached credits on successful authoritative empty response", async (
       "account",
       optionsFor(cacheDir, 62_000),
       async (wrapped) => {
+        assertCallbacks(wrapped);
         await wrapped.fetch("https://example.test");
       }
     ),
     undefined
   );
   assert.equal(
-    JSON.parse(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
+    parseRecord(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
       .snapshot,
     undefined
   );
 });
 
-test("ignores corrupt cache files and persists fresh results", async () => {
+await test("ignores corrupt cache files and persists fresh results", async () => {
   const filePath = path.join(cacheDir, "zai.json");
   await writeFile(filePath, "{");
   assert.deepEqual(
@@ -522,6 +666,7 @@ test("ignores corrupt cache files and persists fresh results", async () => {
       "account",
       optionsFor(cacheDir, 1000),
       async (wrapped) => {
+        assertCallbacks(wrapped);
         await wrapped.fetch("https://example.test");
         return snapshot;
       }
@@ -529,17 +674,18 @@ test("ignores corrupt cache files and persists fresh results", async () => {
     snapshot
   );
   assert.deepEqual(
-    JSON.parse(await readFile(filePath, "utf-8")).snapshot,
+    parseRecord(await readFile(filePath, "utf-8")).snapshot,
     snapshot
   );
 });
 
-test("generated request sequences never return another account's snapshot", async () => {
+await test("generated request sequences never return another account's snapshot", async () => {
   const actions = ["a", "b"].flatMap((identity) =>
     [200, 429].flatMap((status) =>
       [1000, 6000].map((elapsed) => ({ elapsed, identity, status }))
     )
   );
+  /** @type {{elapsed: number, identity: string, status: number}[][]} */
   let sequences = [[]];
   for (let depth = 0; depth < 3; depth += 1) {
     sequences = sequences.flatMap((sequence) =>
@@ -549,9 +695,14 @@ test("generated request sequences never return another account's snapshot", asyn
   await Promise.all(
     sequences.map(async (sequence, index) => {
       const directory = path.join(cacheDir, String(index));
+      /**
+       * @param {number} step - Sequence index.
+       * @param {number} previousNow - Previous timestamp.
+       * @returns {Promise<void>} Sequence execution.
+       */
       const run = async (step, previousNow) => {
         const action = sequence[step];
-        if (!action) {
+        if (action === undefined) {
           return;
         }
         const now = previousNow + action.elapsed;
@@ -560,12 +711,14 @@ test("generated request sequences never return another account's snapshot", asyn
           action.identity,
           optionsFor(directory, now, undefined, action.status),
           async (options) => {
+            assertCallbacks(options);
             await options.fetch("https://example.test");
-            return { owner: action.identity };
+            return { owner: action.identity, groups: [] };
           }
         );
         assert.ok(
-          result === undefined || result.owner === action.identity,
+          result === undefined ||
+            (isRecord(result) && result.owner === action.identity),
           JSON.stringify(sequence)
         );
         await run(step + 1, now);
@@ -575,7 +728,7 @@ test("generated request sequences never return another account's snapshot", asyn
   );
 });
 
-test("generated cooldowns never serve a snapshot beyond the stale limit", async () => {
+await test("generated cooldowns never serve a snapshot beyond the stale limit", async () => {
   await Promise.all(
     [299_999, 300_000, 300_001, 600_000].flatMap((age) =>
       [601, 1200].map(async (retrySeconds) => {
@@ -585,6 +738,7 @@ test("generated cooldowns never serve a snapshot beyond the stale limit", async 
           "account",
           optionsFor(directory, 1000),
           async (options) => {
+            assertCallbacks(options);
             await options.fetch("https://example.test");
             return snapshot;
           }
@@ -607,10 +761,10 @@ test("generated cooldowns never serve a snapshot beyond the stale limit", async 
   );
 });
 
-test("bypasses cache when disabled", async () => {
+await test("bypasses cache when disabled", async () => {
   let calls = 0;
-  const run = () =>
-    withUsageCache(
+  const run = async () =>
+    await withUsageCache(
       "zai",
       "account",
       { cache: false, cacheDir, now: 1000 },
@@ -622,4 +776,249 @@ test("bypasses cache when disabled", async () => {
   await Promise.all([run(), run()]);
   assert.equal(calls, 2);
   assert.deepEqual(await readdir(cacheDir), []);
+});
+
+await test("bypass preserves synchronous and asynchronous primitive results", async () => {
+  const values = [null, 0, "snapshot"];
+  await Promise.all(
+    ["zai", "unknown-provider"].flatMap((provider) =>
+      values.map(async (value) => {
+        const options = { cache: false, cacheDir };
+        let observed;
+        const synchronous = await withUsageCache(
+          provider,
+          "account",
+          options,
+          (input) => {
+            observed = input;
+            return value;
+          }
+        );
+        assert.equal(synchronous, value);
+        assert.equal(observed, options);
+        assert.equal(
+          await withUsageCache(
+            provider,
+            "account",
+            options,
+            async () => await Promise.resolve(value)
+          ),
+          value
+        );
+      })
+    )
+  );
+  await Promise.all(
+    values.map(async (value) => {
+      assert.equal(
+        await withUsageCache(
+          "unknown-provider",
+          "account",
+          { cacheDir },
+          () => value
+        ),
+        value
+      );
+      assert.equal(
+        await withUsageCache(
+          "unknown-provider",
+          "account",
+          { cacheDir },
+          async () => await Promise.resolve(value)
+        ),
+        value
+      );
+    })
+  );
+});
+
+await test("bypass propagates thrown and rejected callback failures", async () => {
+  await Promise.all(
+    [
+      { options: { cache: false, cacheDir }, provider: "zai" },
+      { options: { cacheDir }, provider: "unknown-provider" }
+    ].map(async ({ provider, options }) => {
+      const failure = new Error("callback failure");
+      await assert.rejects(
+        withUsageCache(provider, "account", options, () => {
+          throw failure;
+        }),
+        (error) => error === failure
+      );
+      await assert.rejects(
+        withUsageCache(provider, "account", options, async () => {
+          await Promise.resolve();
+          throw failure;
+        }),
+        (error) => error === failure
+      );
+    })
+  );
+});
+
+await test("cached path wraps fetch and replaces the usage error callback", async () => {
+  let originalErrors = 0;
+  const originalFetch = fetchResponse();
+  const originalOnUsageError = () => {
+    originalErrors += 1;
+  };
+  const options = {
+    cacheDir,
+    fetch: originalFetch,
+    now: 1000,
+    onUsageError: originalOnUsageError
+  };
+  let observed;
+  const result = await withUsageCache(
+    "zai",
+    "account",
+    options,
+    async (input) => {
+      observed = input;
+      assertCallbacks(input);
+      assert.notEqual(input.fetch, originalFetch);
+      assert.notEqual(input.onUsageError, originalOnUsageError);
+      await input.fetch("https://example.test");
+      input.onUsageError?.();
+      return snapshot;
+    }
+  );
+  assert.notEqual(observed, options);
+  assert.equal(originalErrors, 0);
+  assert.equal(result, undefined);
+});
+
+await test("cached path catches callback failures", async () => {
+  let syncCalls = 0;
+  let asyncCalls = 0;
+  const [syncResult, asyncResult] = await Promise.all([
+    withUsageCache(
+      "zai",
+      "account",
+      { cacheDir: path.join(cacheDir, "sync"), now: 1000 },
+      () => {
+        syncCalls += 1;
+        throw new Error("sync");
+      }
+    ),
+    withUsageCache(
+      "zai",
+      "account",
+      { cacheDir: path.join(cacheDir, "async"), now: 1000 },
+      async () => {
+        asyncCalls += 1;
+        await Promise.resolve();
+        throw new Error("async");
+      }
+    )
+  ]);
+  assert.equal(syncCalls, 1);
+  assert.equal(asyncCalls, 1);
+  assert.equal(syncResult, undefined);
+  assert.equal(asyncResult, undefined);
+});
+
+await test("cached path returns primitive snapshots after a successful fetch", async () => {
+  await Promise.all(
+    [null, 0, "snapshot"].map(async (value, index) => {
+      let calls = 0;
+      const result = await withUsageCache(
+        "zai",
+        "account",
+        optionsFor(path.join(cacheDir, String(index)), 1000),
+        async (options) => {
+          calls += 1;
+          assertCallbacks(options);
+          await options.fetch("https://example.test");
+          return value;
+        }
+      );
+      assert.equal(calls, 1);
+      assert.equal(result, value);
+    })
+  );
+});
+
+await test("rejects persisted budget metrics with missing or string percentage and fetches fresh data", async () => {
+  await Promise.all(
+    [undefined, "10"].map(async (percentage) => {
+      const directory = path.join(
+        cacheDir,
+        percentage === undefined ? "missing" : "string"
+      );
+      await withUsageCache(
+        "zai",
+        "account",
+        optionsFor(directory, 1000),
+        async (options) => {
+          await fetchSnapshot(options);
+          return snapshot;
+        }
+      );
+      const filePath = path.join(directory, "zai.json");
+      await writeFile(
+        filePath,
+        JSON.stringify({
+          ...parseRecord(await readFile(filePath, "utf-8")),
+          snapshot: {
+            groups: [
+              {
+                metrics: [
+                  {
+                    label: "budget",
+                    type: "budget",
+                    used: 10,
+                    total: 100,
+                    percentage
+                  }
+                ]
+              }
+            ]
+          }
+        })
+      );
+      let calls = 0;
+      assert.deepEqual(
+        await withUsageCache(
+          "zai",
+          "account",
+          optionsFor(directory, 2000),
+          async (options) => {
+            calls += 1;
+            await fetchSnapshot(options);
+            return snapshot;
+          }
+        ),
+        snapshot
+      );
+      assert.equal(calls, 1);
+      assert.deepEqual(
+        parseRecord(await readFile(filePath, "utf-8")).snapshot,
+        snapshot
+      );
+    })
+  );
+});
+
+await test("resets normalization failure for a later successful HTTP attempt", async () => {
+  let calls = 0;
+  let hookAvailable = false;
+  assert.deepEqual(
+    await withUsageCache(
+      "zai",
+      "account",
+      optionsFor(cacheDir, 1000),
+      async (wrapped) => {
+        await fetchSnapshot(wrapped);
+        hookAvailable = typeof wrapped.onUsageError === "function";
+        wrapped.onUsageError?.();
+        await fetchSnapshot(wrapped);
+        calls += 1;
+        return snapshot;
+      }
+    ),
+    snapshot
+  );
+  assert.equal(calls, 1);
+  assert.equal(hookAvailable, true);
 });

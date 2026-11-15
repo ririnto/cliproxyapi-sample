@@ -5,7 +5,8 @@ import { fetchUsage } from "./mistral-usage.mjs";
 
 const BUDGET_URL = "https://api.mistral.ai/v1/billing/budget";
 
-test("reports the API and Vibe budget percentages with their reset", async () => {
+await test("reports the API and Vibe budget percentages with their reset", async () => {
+  /** @type {{authorization: string, url: string}[]} */
   const requests = [];
   const snapshot = await fetchUsage({
     cache: false,
@@ -13,7 +14,7 @@ test("reports the API and Vibe budget percentages with their reset", async () =>
     fetch: (url, options) => {
       requests.push({
         authorization: options.headers.Authorization,
-        url: String(url)
+        url
       });
       return Response.json({
         api_budget: {
@@ -67,7 +68,7 @@ test("reports the API and Vibe budget percentages with their reset", async () =>
   });
 });
 
-test("omits a budget whose usage percentage is missing or negative", async () => {
+await test("omits a budget whose usage percentage is missing or negative", async () => {
   const snapshot = await fetchUsage({
     cache: false,
     credential: "synthetic-mistral-key",
@@ -81,7 +82,7 @@ test("omits a budget whose usage percentage is missing or negative", async () =>
   assert.equal(snapshot, undefined);
 });
 
-test("omits the reset when the budget carries no parseable reset time", async () => {
+await test("omits the reset when the budget carries no parseable reset time", async () => {
   const snapshot = await fetchUsage({
     cache: false,
     credential: "synthetic-mistral-key",
@@ -105,29 +106,33 @@ test("omits the reset when the budget carries no parseable reset time", async ()
   });
 });
 
-test("reports a usage error when the budget endpoint fails", async () => {
+await test("reports a usage error when the budget endpoint fails", async () => {
+  /** @type {string[]} */
   const requests = [];
   const errors = [];
-  let signal;
+  /** @type {AbortSignal[]} */
+  const signals = [];
   assert.equal(
     await fetchUsage({
       cache: false,
       credential: "synthetic-mistral-key",
       fetch: (url, options) => {
-        requests.push(String(url));
-        ({ signal } = options);
+        requests.push(url);
+        signals.push(options.signal);
         return new Response(null, { status: 503 });
       },
-      onUsageError: () => errors.push(1)
+      onUsageError: () => {
+        errors.push(1);
+      }
     }),
     undefined
   );
   assert.deepEqual(requests, [BUDGET_URL]);
-  assert.equal(signal.aborted, true);
+  assert.equal(signals[0]?.aborted, true);
   assert.equal(errors.length, 1);
 });
 
-test("returns without a request when the credential is missing", () => {
+await test("returns without a request when the credential is missing", () => {
   assert.equal(
     fetchUsage({
       cache: false,

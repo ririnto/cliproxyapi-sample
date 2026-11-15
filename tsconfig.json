@@ -1,0 +1,10 @@
+{
+  "extends": "@tsconfig/node-lts/tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true
+  },
+  "include": ["**/*.mjs", ".claude/**/*.mjs", "**/*.ts", "**/*.tsx"]
+}

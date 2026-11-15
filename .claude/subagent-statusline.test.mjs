@@ -8,10 +8,36 @@ import { stripVTControlCharacters } from "node:util";
 
 import { renderRows } from "./subagent-statusline.mjs";
 
+/**
+ * @param {unknown} input - Statusline fixture.
+ * @param {number} time - Timestamp for rendering.
+ * @returns {string[]} Validated JSON rows.
+ */
+const validatedRows = (input, time) => {
+  /** @type {unknown} */
+  const rows = renderRows(input, time);
+  assert.ok(Array.isArray(rows));
+  assert.ok(rows.every((row) => typeof row === "string"));
+  return rows;
+};
+
+/**
+ * @param {string} row - Serialized row.
+ * @returns {{id: string, content: string}} Validated output.
+ */
+const parseRow = (row) => {
+  /** @type {unknown} */
+  const result = JSON.parse(row);
+  assert.ok(result !== null && typeof result === "object");
+  assert.ok("id" in result && typeof result.id === "string");
+  assert.ok("content" in result && typeof result.content === "string");
+  return { content: result.content, id: result.id };
+};
+
 const nowMs = 1_700_000_000_000;
 
-test("subagent rows preserve task ids and align right metrics", () => {
-  const rows = renderRows(
+await test("subagent rows preserve task ids and align right metrics", () => {
+  const rows = validatedRows(
     {
       columns: 100,
       cwd: "/workspace/project",
@@ -43,36 +69,33 @@ test("subagent rows preserve task ids and align right metrics", () => {
 
   assert.equal(rows.length, 2);
   assert.deepEqual(
-    rows.map((row) => JSON.parse(row).id),
+    rows.map((row) => parseRow(row).id),
     ["task-1", "task-2"]
   );
   assert.match(
-    stripVTControlCharacters(JSON.parse(rows[0]).content),
+    stripVTControlCharacters(parseRow(rows[0]).content),
     /glm-5.3 high/u
   );
-  assert.match(
-    stripVTControlCharacters(JSON.parse(rows[0]).content),
-    /20k tok/u
-  );
+  assert.match(stripVTControlCharacters(parseRow(rows[0]).content), /20k tok/u);
   assert.doesNotMatch(
-    stripVTControlCharacters(JSON.parse(rows[0]).content),
+    stripVTControlCharacters(parseRow(rows[0]).content),
     /▰|▱|%/u
   );
   assert.match(
-    stripVTControlCharacters(JSON.parse(rows[1]).content),
+    stripVTControlCharacters(parseRow(rows[1]).content),
     /✔ explorer\s+0 tok\s+2m05s/u
   );
   const firstRightEdge = stripVTControlCharacters(
-    JSON.parse(rows[0]).content
+    parseRow(rows[0]).content
   ).length;
   const secondRightEdge = stripVTControlCharacters(
-    JSON.parse(rows[1]).content
+    parseRow(rows[1]).content
   ).length;
   assert.equal(firstRightEdge, secondRightEdge);
 });
 
-test("subagent rows omit missing metrics and sanitize task labels", () => {
-  const [row] = renderRows(
+await test("subagent rows omit missing metrics and sanitize task labels", () => {
+  const [row] = validatedRows(
     {
       columns: 0,
       tasks: [
@@ -90,7 +113,7 @@ test("subagent rows omit missing metrics and sanitize task labels", () => {
     },
     nowMs
   );
-  const content = stripVTControlCharacters(JSON.parse(row).content);
+  const content = stripVTControlCharacters(parseRow(row).content);
 
   assert.match(
     content,
@@ -99,7 +122,7 @@ test("subagent rows omit missing metrics and sanitize task labels", () => {
   assert.doesNotMatch(content, /▰|▱|⌥/u);
 });
 
-test("long descriptions give way to right-aligned worktree and metrics", () => {
+await test("long descriptions give way to right-aligned worktree and metrics", () => {
   const input = {
     columns: 80,
     cwd: "/project",
@@ -119,21 +142,21 @@ test("long descriptions give way to right-aligned worktree and metrics", () => {
     ]
   };
   const plain = stripVTControlCharacters(
-    JSON.parse(renderRows(input, nowMs)[0]).content
+    parseRow(validatedRows(input, nowMs)[0]).content
   );
   assert.equal(plain.length, 80);
   assert.match(plain, /…\s+⌥ feature\s+12\.3k.*1m05s$/u);
   for (const columns of [16, 20, 30]) {
     const compact = stripVTControlCharacters(
-      JSON.parse(renderRows({ ...input, columns }, nowMs)[0]).content
+      parseRow(validatedRows({ ...input, columns }, nowMs)[0]).content
     );
     assert.equal(compact.length, columns);
     assert.match(compact, /12\.3k tok 1m05s$/u);
   }
 });
 
-test("wide and combined descriptions clip on grapheme boundaries", () => {
-  const [row] = renderRows(
+await test("wide and combined descriptions clip on grapheme boundaries", () => {
+  const [row] = validatedRows(
     {
       columns: 40,
       tasks: [
@@ -149,7 +172,7 @@ test("wide and combined descriptions clip on grapheme boundaries", () => {
     },
     nowMs
   );
-  const plain = stripVTControlCharacters(JSON.parse(row).content);
+  const plain = stripVTControlCharacters(parseRow(row).content);
   assert.equal(
     plain
       .replaceAll("한", "HH")
@@ -162,8 +185,8 @@ test("wide and combined descriptions clip on grapheme boundaries", () => {
   assert.doesNotMatch(plain.replaceAll("👩‍💻", ""), /👩|💻|\u200D/u);
 });
 
-test("tokens use the supplied task count, not a context ratio", () => {
-  const [row] = renderRows(
+await test("tokens use the supplied task count, not a context ratio", () => {
+  const [row] = validatedRows(
     {
       columns: 50,
       tasks: [
@@ -177,29 +200,33 @@ test("tokens use the supplied task count, not a context ratio", () => {
     },
     nowMs
   );
-  const plain = stripVTControlCharacters(JSON.parse(row).content);
+  const plain = stripVTControlCharacters(parseRow(row).content);
   assert.match(plain, /450k tok/u);
   assert.doesNotMatch(plain, /%|▰|▱/u);
   for (const tokenCount of [undefined, null, false, "", "invalid", -1]) {
-    const [unknown] = renderRows(
+    const [unknown] = validatedRows(
       { columns: 50, tasks: [{ id: "unknown", name: "worker", tokenCount }] },
       nowMs
     );
     assert.doesNotMatch(
-      stripVTControlCharacters(JSON.parse(unknown).content),
+      stripVTControlCharacters(parseRow(unknown).content),
       /Σ|tok|%/u
     );
   }
 });
 
+/** @param {Record<string, string | number>} [usage] - Request token usage. */
 const entry = (usage) => ({
   message: { id: "same-message", role: "assistant", usage },
   type: "assistant"
 });
 
-test("last request input includes cache tokens without summing duplicate records", (t) => {
+await test("last request input includes cache tokens without summing duplicate records", (t) => {
   const directory = mkdtempSync(path.join(tmpdir(), "subagent-input-test-"));
-  t.after(() => rmSync(directory, { force: true, recursive: true }));
+  t.after(() => {
+    rmSync(directory, { force: true, recursive: true });
+  });
+  assert.ok(process.getuid);
   const tasks = path.join(
     directory,
     `claude-${process.getuid()}`,
@@ -209,6 +236,7 @@ test("last request input includes cache tokens without summing duplicate records
   );
   mkdirSync(tasks, { recursive: true });
   const transcript = path.join(tasks, "input-fixture.output");
+  /** @param {ReturnType<typeof entry>[]} entries - Transcript entries. */
   const run = (entries) => {
     writeFileSync(
       transcript,
@@ -227,7 +255,7 @@ test("last request input includes cache tokens without summing duplicate records
       }
     );
     assert.equal(result.status, 0, result.stderr);
-    return stripVTControlCharacters(JSON.parse(result.stdout).content);
+    return stripVTControlCharacters(parseRow(result.stdout).content);
   };
   const earlier = entry({
     cache_creation_input_tokens: 200,
@@ -249,5 +277,39 @@ test("last request input includes cache tokens without summing duplicate records
       entry({ cache_read_input_tokens: "unknown", input_tokens: 1 })
     ]),
     / in /u
+  );
+});
+
+await test("task guards preserve lazy fallback and do not enumerate unrelated getters", () => {
+  const task = {
+    id: "../skip-transcript",
+    label: "Visible label",
+    name: "worker",
+    effort: "high",
+    startTime: nowMs,
+    get description() {
+      throw new Error("unused description");
+    },
+    get type() {
+      throw new Error("unused type");
+    },
+    get unrelated() {
+      throw new Error("must not enumerate the task");
+    }
+  };
+  const rows = validatedRows(
+    {
+      columns: 100,
+      get width() {
+        throw new Error("unused width");
+      },
+      tasks: [task]
+    },
+    nowMs
+  );
+  assert.equal(rows.length, 1);
+  assert.match(
+    stripVTControlCharacters(parseRow(rows[0]).content),
+    /Visible label/u
   );
 });

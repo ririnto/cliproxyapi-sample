@@ -5,6 +5,52 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
+/**
+ * @typedef {Record<string, unknown>} RecordValue
+ */
+/**
+ * @param {unknown} value - Untrusted input.
+ * @returns {value is RecordValue} Object shape.
+ */
+const isRecord = (value) =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+/**
+ * @param {unknown} value - Untrusted input.
+ * @returns {RecordValue} Object fields.
+ */
+const record = (value) => (isRecord(value) ? value : {});
+/**
+ * @param {unknown} value - Untrusted list.
+ * @returns {unknown[]} Elements.
+ */
+const array = (value) => (Array.isArray(value) ? value : []);
+const truthy = Boolean;
+/**
+ * @param {unknown} value - Candidate.
+ * @param {() => unknown} alternative - Lazy fallback.
+ */
+const truthyOr = (value, alternative) =>
+  truthy(value) ? value : alternative();
+/**
+ * @param {unknown} value - Path input.
+ * @param {string} fallback - Default path.
+ */
+const textOr = (value, fallback = "") =>
+  typeof value === "string" && value !== "" ? value : fallback;
+
+/** @param {unknown} value - Task boundary.
+ * @returns {value is RecordValue & {id: string}} Task with an identifier.
+ */
+const isTask = (value) => isRecord(value) && typeof value.id === "string";
+/** @param {unknown} value - Optional receiver.
+ * @param {() => string} key - Lazy property name.
+ * @returns {unknown} Optional field.
+ */
+const optionalField = (value, key) =>
+  value === null || value === undefined
+    ? undefined
+    : Reflect.get(new Object(value), key());
+
 const RESET = "\u001B[0m";
 const DIM = "\u001B[38;2;132;144;156m";
 const BOLD = "\u001B[1m";
@@ -15,25 +61,40 @@ const STEEL = "\u001B[38;2;166;190;211m";
 const PINK = "\u001B[38;2;233;144;169m";
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/** @template T
+ * @param {() => T} operation - Optional operation.
+ * @returns {NonNullable<T> | null} Result when available.
+ */
 const optional = (operation) => {
   try {
     return operation() ?? null;
   } catch (error) {
-    if (process.env.STATUSLINE_DEBUG) {
+    if (truthy(process.env.STATUSLINE_DEBUG)) {
       console.error(error);
     }
     return null;
   }
 };
+/**
+ * @param {string} text - JSON text.
+ * @returns {unknown} Parsed input.
+ */
+const parseJson = (text) => JSON.parse(text);
+
 const settings =
   optional(() =>
-    JSON.parse(
-      readFileSync(
-        `${process.env.CLAUDE_CONFIG_DIR || `${process.env.HOME || ""}/.claude`}/settings.json`,
-        "utf-8"
+    record(
+      parseJson(
+        readFileSync(
+          `${textOr(process.env.CLAUDE_CONFIG_DIR, `${textOr(process.env.HOME)}/.claude`)}/settings.json`,
+          "utf-8"
+        )
       )
     )
   ) ?? {};
+/**
+ * @param {string} directory - directory input.
+ */
 const directoriesIn = (directory) => {
   try {
     return readdirSync(directory, { withFileTypes: true }).filter((entry) =>
@@ -44,14 +105,25 @@ const directoriesIn = (directory) => {
   }
 };
 
+/**
+ * @param {unknown} value - value input.
+ */
 const displayText = (value) =>
-  stripVTControlCharacters(`${value}`)
+  stripVTControlCharacters(String(value))
     .replaceAll(/[\p{Cc}\u{2028}\u{2029}]+/gu, " ")
     .trim();
 
+/**
+ * @param {number} divisor - divisor input.
+ * @param {string} suffix - suffix input.
+ * @returns {(number:number)=>string} Numeric formatter.
+ */
 const scaledText = (divisor, suffix) => (number) =>
   `${(number / divisor).toFixed(1).replace(/\.0$/u, "")}${suffix}`;
 
+/**
+ * @param {unknown} value - value input.
+ */
 const numberText = (value) => {
   const number = Number(value);
   if (!Number.isFinite(number)) {
@@ -63,6 +135,9 @@ const numberText = (value) => {
   return number >= 1000 ? scaledText(1000, "k")(number) : String(number);
 };
 
+/**
+ * @param {number} milliseconds - milliseconds input.
+ */
 const elapsedText = (milliseconds) => {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   const hours = Math.floor(seconds / 3600);
@@ -79,6 +154,9 @@ const elapsedText = (milliseconds) => {
 };
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+/**
+ * @param {string} text - text input.
+ */
 const cellWidth = (text) => {
   if (/^[\p{Mark}\p{Cf}]*$/u.test(text)) {
     return 0;
@@ -89,12 +167,19 @@ const cellWidth = (text) => {
     ? 2
     : 1;
 };
+/**
+ * @param {string} text - text input.
+ */
 const visibleWidth = (text) =>
   [...graphemes.segment(stripVTControlCharacters(text))].reduce(
     (width, { segment }) => width + cellWidth(segment),
     0
   );
 
+/**
+ * @param {string} text - text input.
+ * @param {number} columns - columns input.
+ */
 const clip = (text, columns) => {
   if (columns <= 0) {
     return "";
@@ -115,22 +200,38 @@ const clip = (text, columns) => {
   return result;
 };
 
+/**
+ * @param {RecordValue} task - task input.
+ * @param {{color:string,glyph:string}} mark - mark input.
+ */
 const taskLabel = (task, mark) => {
   const effortText =
     task.effort === undefined
-      ? settings.modelSettings?.[displayText(task.model)]?.effortLevel ||
-        settings.effortLevel ||
-        ""
+      ? truthyOr(
+          optionalField(
+            optionalField(settings.modelSettings, () =>
+              displayText(task.model)
+            ),
+            () => "effortLevel"
+          ),
+          () => truthyOr(settings.effortLevel, () => "")
+        )
       : displayText(task.effort);
-  const label = displayText(task.label || task.description || "");
+  const label = displayText(
+    truthyOr(task.label, () => truthyOr(task.description, () => ""))
+  );
   return [
     `${mark.color}${mark.glyph}${RESET} ${SAND}${BOLD}${
-      task.name && task.agentType && task.name !== task.agentType
+      truthy(task.name) &&
+      truthy(task.agentType) &&
+      task.name !== task.agentType
         ? `${displayText(task.name)} ${DIM}(${displayText(task.agentType)})${RESET}`
-        : displayText(task.name || task.agentType || task.type)
+        : displayText(
+            truthyOr(task.name, () => truthyOr(task.agentType, () => task.type))
+          )
     }${RESET}`,
-    task.model
-      ? `${STEEL}${displayText(task.model)}${RESET}${effortText ? ` ${DIM}${effortText}${RESET}` : ""}`
+    truthy(task.model)
+      ? `${STEEL}${displayText(task.model)}${RESET}${truthy(effortText) ? ` ${DIM}${displayText(effortText)}${RESET}` : ""}`
       : "",
     label ? `${DIM}${label}${RESET}` : ""
   ]
@@ -138,14 +239,24 @@ const taskLabel = (task, mark) => {
     .join(" ");
 };
 
+/**
+ * @param {unknown} input - input input.
+ * @param {number} nowMs - nowMs input.
+ */
 export const renderRows = (input, nowMs) => {
-  const available = Number(input.columns || input.width);
+  if (!isRecord(input)) {
+    throw new TypeError("Status payload must be an object");
+  }
+  const available = Number(truthyOr(input.columns, () => input.width));
   const columns =
     Number.isFinite(available) && available > 0 ? Math.floor(available) : 0;
-  return (Array.isArray(input.tasks) ? input.tasks : [])
-    .filter((task) => task && typeof task.id === "string")
+  return (Array.isArray(input.tasks) ? array(input.tasks) : [])
+    .filter(isTask)
     .map((task) => {
-      const elapsedMs = Math.max(0, nowMs - Number(task.startTime || nowMs));
+      const elapsedMs = Math.max(
+        0,
+        nowMs - Number(truthyOr(task.startTime, () => nowMs))
+      );
       const inputTokens = optional(() => {
         if (path.basename(task.id) !== task.id) {
           return null;
@@ -172,15 +283,15 @@ export const renderRows = (input, nowMs) => {
               }
               const lines = readFileSync(candidate, "utf-8").trim().split("\n");
               for (let index = lines.length - 1; index >= 0; index -= 1) {
-                const entry = JSON.parse(lines[index]);
+                const entry = record(parseJson(lines[index]));
                 if (
                   entry.type !== "assistant" &&
-                  entry.message?.role !== "assistant"
+                  record(entry.message).role !== "assistant"
                 ) {
                   continue;
                 }
-                const usage = entry.message?.usage;
-                if (!usage || typeof usage.input_tokens !== "number") {
+                const usage = record(record(entry.message).usage);
+                if (typeof usage.input_tokens !== "number") {
                   return null;
                 }
                 const values = [
@@ -194,7 +305,10 @@ export const renderRows = (input, nowMs) => {
                     Number.isFinite(value) &&
                     value >= 0
                 )
-                  ? values.reduce((sum, value) => sum + value, 0)
+                  ? values.reduce(
+                      (sum, value) => Number(sum) + Number(value),
+                      0
+                    )
                   : null;
               }
               return null;
@@ -204,9 +318,9 @@ export const renderRows = (input, nowMs) => {
         return null;
       });
       const directory =
-        !task.cwd || !input.cwd || task.cwd === input.cwd
+        !truthy(task.cwd) || !truthy(input.cwd) || task.cwd === input.cwd
           ? ""
-          : `${BLUE}⌥ ${displayText(path.basename(task.cwd) || task.cwd)}${RESET}`;
+          : `${BLUE}⌥ ${displayText(path.basename(String(task.cwd)) || String(task.cwd))}${RESET}`;
       const tokens =
         typeof task.tokenCount !== "number" ||
         !Number.isFinite(task.tokenCount) ||
@@ -220,7 +334,7 @@ export const renderRows = (input, nowMs) => {
           ["completed", { color: GREEN, glyph: "✔" }],
           ["failed", { color: PINK, glyph: "✗" }],
           ["killed", { color: DIM, glyph: "⊘" }]
-        ]).get(task.status) || {
+        ]).get(String(task.status)) ?? {
           color: BLUE,
           glyph: SPINNER[Math.floor(elapsedMs / 1000) % SPINNER.length]
         }
@@ -267,20 +381,15 @@ export const renderRows = (input, nowMs) => {
 };
 
 export const main = () => {
-  const rows = renderRows(JSON.parse(readFileSync(0, "utf-8")), Date.now());
+  const rows = renderRows(
+    record(parseJson(readFileSync(0, "utf-8"))),
+    Date.now()
+  );
   if (rows.length) {
     process.stdout.write(`${rows.join("\n")}\n`);
   }
 };
 
-if (process.argv[1]) {
-  let isEntrypoint = false;
-  try {
-    isEntrypoint = path.resolve(process.argv[1]) === import.meta.filename;
-  } catch {
-    isEntrypoint = false;
-  }
-  if (isEntrypoint) {
-    main();
-  }
+if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
+  main();
 }
