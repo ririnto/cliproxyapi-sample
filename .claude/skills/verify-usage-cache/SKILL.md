@@ -9,7 +9,7 @@ The cache must never return a snapshot belonging to a different credential ident
 Otherwise, a user switching accounts can see another account's quota and make
 decisions from the wrong usage data.
 
-Run from the repository root with Node.js 26.13.0:
+Run from the repository root with Node.js 24.22.3:
 
 ```sh
 node verification/usage-cache.mjs
@@ -28,7 +28,7 @@ behaves normally.
 
 Coverage is `.claude/statusline/usage-cache.mjs`, especially `withUsageCache`,
 `readCache`, and `validRecord`.
-The verification was synchronized with source commit `3b591aed6b93113d53b31f6468b695f3a6651013`.
+The verification was synchronized with source commit `8c4edb64a3c5c74c2957d994356fa999d4884f7e`.
 When covered code changes after that commit, compare its behavior and assumptions
 with the script before trusting the result.
 Move the sync commit forward only after confirming that the verification still
