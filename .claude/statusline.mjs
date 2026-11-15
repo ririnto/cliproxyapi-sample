@@ -105,14 +105,14 @@ const replaceEnvironmentReferences = (value, environment) =>
   );
 
 /**
- * @param {RegExpExecArray} reference - reference input.
+ * @param {{index:number,text:string,path:string}} reference - File reference.
  * @param {string} home - home input.
  * @param {string} baseDir - baseDir input.
  */
 const referenceText = async (reference, home, baseDir) => {
-  const [, referencePath] = reference;
+  const referencePath = reference.path;
   if (!referencePath) {
-    return reference[0];
+    return reference.text;
   }
   const pathValue = referencePath.startsWith("~/")
     ? path.join(home, referencePath.slice(2))
@@ -124,13 +124,13 @@ const referenceText = async (reference, home, baseDir) => {
     const text = await readFile(filePath, "utf-8");
     return text.trim();
   } catch {
-    return reference[0];
+    return reference.text;
   }
 };
 
 /**
  * @param {string} value - value input.
- * @param {RegExpExecArray[]} references - references input.
+ * @param {{index:number,text:string,path:string}[]} references - File references.
  * @param {string[]} texts - texts input.
  */
 const spliceReferences = (value, references, texts) => {
@@ -144,12 +144,12 @@ const spliceReferences = (value, references, texts) => {
         (reference, index) =>
           value.slice(
             index
-              ? references[index - 1].index + references[index - 1][0].length
+              ? references[index - 1].index + references[index - 1].text.length
               : 0,
             reference.index
           ) + texts[index]
       )
-      .join("") + value.slice(last.index + last[0].length)
+      .join("") + value.slice(last.index + last.text.length)
   );
 };
 
@@ -161,8 +161,14 @@ const replaceFileReferences = async (value, options) => {
   const home = options.home ?? homedir();
   const baseDir = options.baseDir ?? process.cwd();
   const references = [
-    ...value.matchAll(/\{file:(?<fileReferencePath>[^{}]*)\}/gu)
-  ];
+    ...value.matchAll(
+      /(?<fileReference>\{file:(?<fileReferencePath>[^{}]*)\})/gu
+    )
+  ].map(({ groups, index }) => ({
+    index,
+    path: groups?.fileReferencePath ?? "",
+    text: groups?.fileReference ?? ""
+  }));
   if (!references.length) {
     return value;
   }
