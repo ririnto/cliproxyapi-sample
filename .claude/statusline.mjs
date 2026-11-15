@@ -659,14 +659,12 @@ const renderContext = (input) => {
  */
 const renderHeader = (input, options) => {
   const model = record(input.model);
-  let modelName = model.display_name;
-  if (!truthy(modelName)) {
-    modelName = truthyOr(model.id, "Claude");
-  }
-  let effort = record(input.effort).level;
-  if (!truthy(effort)) {
-    effort = truthyOr(model.effort, "");
-  }
+  const displayName = model.display_name;
+  const modelName = truthy(displayName)
+    ? displayName
+    : truthyOr(model.id, "Claude");
+  const effortLevel = record(input.effort).level;
+  const effort = truthy(effortLevel) ? effortLevel : truthyOr(model.effort, "");
   const workspace = record(input.workspace);
   const cost = record(input.cost);
   const dollars = Number(truthyOr(cost.total_cost_usd, 0));

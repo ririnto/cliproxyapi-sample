@@ -66,7 +66,6 @@ await test("subagent rows preserve task ids and align right metrics", () => {
     },
     nowMs
   );
-
   assert.equal(rows.length, 2);
   assert.deepEqual(
     rows.map((row) => parseRow(row).id),
@@ -114,7 +113,6 @@ await test("subagent rows omit missing metrics and sanitize task labels", () => 
     nowMs
   );
   const content = stripVTControlCharacters(parseRow(row).content);
-
   assert.match(
     content,
     /✗ worker gpt-6.1-sol low safe label value\s+0 tok\s+0s/u
