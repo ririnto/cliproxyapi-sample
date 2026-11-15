@@ -7,7 +7,52 @@ import { test } from "node:test";
 
 import { fetchUsage } from "./copilot-usage.mjs";
 
-test("reads Copilot CLI Keychain token when file credentials are absent", async () => {
+/**
+ * @param {() => unknown} body - Lazy payload, including malformed JSON failures.
+ * @param {number} status - Fixture HTTP status.
+ * @returns {Response} Fetch response preserving fixture payload values.
+ */
+const jsonResponse = (body, status) => {
+  const response = new Response(null, { status });
+  Object.defineProperty(response, "json", { value: async () => await body() });
+  return response;
+};
+
+/** @typedef {{label: string, type: string, used: number, total: number, resetsInMs: number}} SnapshotMetric */
+/** @typedef {{groups: {label?: string, metrics: SnapshotMetric[]}[]}} Snapshot */
+/** @type {(value: unknown) => asserts value is Snapshot} */
+const assertSnapshot = (value) => {
+  assert.ok(value !== null && typeof value === "object" && "groups" in value);
+  const { groups: rawGroups } = value;
+  assert.ok(Array.isArray(rawGroups));
+  /** @type {unknown[]} */
+  const groups = rawGroups;
+  assert.ok(groups.length > 0);
+  for (const group of groups) {
+    assert.ok(
+      group !== null && typeof group === "object" && "metrics" in group
+    );
+    if ("label" in group && group.label !== undefined) {
+      assert.equal(typeof group.label, "string");
+    }
+    const { metrics: rawMetrics } = group;
+    assert.ok(Array.isArray(rawMetrics));
+    /** @type {unknown[]} */
+    const metrics = rawMetrics;
+    for (const metric of metrics) {
+      assert.ok(metric !== null && typeof metric === "object");
+      assert.ok("label" in metric && typeof metric.label === "string");
+      assert.ok("type" in metric && typeof metric.type === "string");
+      assert.ok("used" in metric && typeof metric.used === "number");
+      assert.ok("total" in metric && typeof metric.total === "number");
+      assert.ok(
+        "resetsInMs" in metric && typeof metric.resetsInMs === "number"
+      );
+    }
+  }
+};
+
+await test("reads Copilot CLI Keychain token when file credentials are absent", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
   try {
     const snapshot = await fetchUsage({
@@ -29,27 +74,29 @@ test("reads Copilot CLI Keychain token when file credentials are absent", async 
       },
       fetch: (_url, options) => {
         assert.equal(options.headers.Authorization, "token keychain-token");
-        return {
-          json: () => ({
+        return jsonResponse(
+          () => ({
             quota_reset_date_utc: "2026-10-01T00:00:00Z",
             quota_snapshots: {
               premium_interactions: { entitlement: 100, quota_remaining: 80 }
             }
           }),
-          status: 200
-        };
+          200
+        );
       },
       home,
       now: Date.parse("2026-09-23T00:00:00Z"),
       platform: "darwin"
     });
-    assert.equal(snapshot?.groups[0].metrics[0].used, 20);
+    assertSnapshot(snapshot);
+    assert.equal(snapshot.groups[0].metrics[0].used, 20);
   } finally {
     await rm(home, { force: true, recursive: true });
   }
 });
 
-test("does not query Keychain on non-macOS platforms", async () => {
+await test("does not query Keychain on non-macOS platforms", async () => {
+  /** @type {string[][]} */
   const requested = [];
   const snapshot = await fetchUsage({
     cache: false,
@@ -61,23 +108,24 @@ test("does not query Keychain on non-macOS platforms", async () => {
     },
     fetch: (_url, options) => {
       assert.equal(options.headers.Authorization, "token file-token");
-      return {
-        json: () => ({
+      return jsonResponse(
+        () => ({
           quota_snapshots: {
             premium_interactions: { entitlement: 100, quota_remaining: 80 }
           }
         }),
-        status: 200
-      };
+        200
+      );
     },
     home: "/nonexistent",
     platform: "linux"
   });
+  assertSnapshot(snapshot);
   assert.equal(snapshot.groups[0].metrics[0].used, 20);
   assert.deepEqual(requested, []);
 });
 
-test("0 엔타이틀먼트는 한도가 아니어서 지표를 만들지 않는다", async () => {
+await test("0 엔타이틀먼트는 한도가 아니어서 지표를 만들지 않는다", async () => {
   assert.equal(
     await fetchUsage({
       cache: false,
@@ -86,112 +134,120 @@ test("0 엔타이틀먼트는 한도가 아니어서 지표를 만들지 않는�
       execFile: () => {
         throw new Error("no keychain");
       },
-      fetch: () => ({
-        json: () => ({
+      fetch: () =>
+        jsonResponse(
+          () => ({
+            quota_snapshots: {
+              premium_interactions: {
+                credits_used: 0,
+                entitlement: 0,
+                quota_remaining: 0,
+                remaining: 0
+              }
+            },
+            token_based_billing: true
+          }),
+          200
+        ),
+      home: "/nonexistent"
+    }),
+    undefined
+  );
+});
+
+await test("잘못된 엔타이틀먼트는 해당 지표만 생략한다", async () => {
+  const snapshot = await fetchUsage({
+    cache: false,
+    credential: "tok",
+    environment: {},
+    execFile: () => {
+      throw new Error("no keychain");
+    },
+    fetch: () =>
+      jsonResponse(
+        () => ({
           quota_snapshots: {
+            chat: { entitlement: "200", quota_remaining: 200 },
+            premium_interactions: { entitlement: 1500, quota_remaining: 1200 }
+          }
+        }),
+        200
+      ),
+    home: "/nonexistent"
+  });
+  assertSnapshot(snapshot);
+  assert.deepEqual(
+    snapshot.groups[0].metrics.map((metric) => metric.label),
+    ["Premium"]
+  );
+});
+
+await test("모든 지표가 사라지면 스냅샷을 생략한다", async () => {
+  assert.equal(
+    await fetchUsage({
+      cache: false,
+      credential: "tok",
+      environment: {},
+      execFile: () => {
+        throw new Error("no keychain");
+      },
+      fetch: () =>
+        jsonResponse(
+          () => ({
+            copilot_plan: "individual",
+            quota_snapshots: {
+              chat: { entitlement: 0, quota_remaining: 0 },
+              completions: { entitlement: 0, quota_remaining: 0 },
+              premium_interactions: { entitlement: 0, quota_remaining: 0 }
+            },
+            token_based_billing: true
+          }),
+          200
+        ),
+      home: "/nonexistent"
+    }),
+    undefined
+  );
+});
+
+await test("양수 엔타이틀먼트 Chat을 남기고 0 엔타이틀먼트 Premium은 생략한다", async () => {
+  const snapshot = await fetchUsage({
+    cache: false,
+    credential: "tok",
+    environment: {},
+    execFile: () => {
+      throw new Error("no keychain");
+    },
+    fetch: () =>
+      jsonResponse(
+        () => ({
+          quota_snapshots: {
+            chat: {
+              credits_used: 0,
+              entitlement: 200,
+              has_quota: true,
+              quota_remaining: 200
+            },
             premium_interactions: {
               credits_used: 0,
               entitlement: 0,
+              has_quota: false,
               quota_remaining: 0,
               remaining: 0
             }
           },
           token_based_billing: true
         }),
-        status: 200
-      }),
-      home: "/nonexistent"
-    }),
-    undefined
-  );
-});
-
-test("잘못된 엔타이틀먼트는 해당 지표만 생략한다", async () => {
-  const snapshot = await fetchUsage({
-    cache: false,
-    credential: "tok",
-    environment: {},
-    execFile: () => {
-      throw new Error("no keychain");
-    },
-    fetch: () => ({
-      json: () => ({
-        quota_snapshots: {
-          chat: { entitlement: "200", quota_remaining: 200 },
-          premium_interactions: { entitlement: 1500, quota_remaining: 1200 }
-        }
-      }),
-      status: 200
-    }),
+        200
+      ),
     home: "/nonexistent"
   });
-  assert.deepEqual(
-    (snapshot?.groups[0].metrics ?? []).map((metric) => metric.label),
-    ["Premium"]
-  );
-});
-
-test("모든 지표가 사라지면 스냅샷을 생략한다", async () => {
-  assert.equal(
-    await fetchUsage({
-      cache: false,
-      credential: "tok",
-      environment: {},
-      execFile: () => {
-        throw new Error("no keychain");
-      },
-      fetch: () => ({
-        json: () => ({
-          copilot_plan: "individual",
-          quota_snapshots: {
-            chat: { entitlement: 0, quota_remaining: 0 },
-            completions: { entitlement: 0, quota_remaining: 0 },
-            premium_interactions: { entitlement: 0, quota_remaining: 0 }
-          },
-          token_based_billing: true
-        }),
-        status: 200
-      }),
-      home: "/nonexistent"
-    }),
-    undefined
-  );
-});
-
-test("양수 엔타이틀먼트 Chat을 남기고 0 엔타이틀먼트 Premium은 생략한다", async () => {
-  const snapshot = await fetchUsage({
-    cache: false,
-    credential: "tok",
-    environment: {},
-    execFile: () => {
-      throw new Error("no keychain");
-    },
-    fetch: () => ({
-      json: () => ({
-        quota_snapshots: {
-          chat: {
-            credits_used: 0,
-            entitlement: 200,
-            has_quota: true,
-            quota_remaining: 200
-          },
-          premium_interactions: {
-            credits_used: 0,
-            entitlement: 0,
-            has_quota: false,
-            quota_remaining: 0,
-            remaining: 0
-          }
-        },
-        token_based_billing: true
-      }),
-      status: 200
-    }),
-    home: "/nonexistent"
-  });
-  const metrics = snapshot?.groups[0].metrics ?? [];
+  assertSnapshot(snapshot);
+  const [{ metrics }] = snapshot.groups;
   const chat = metrics.find((metric) => metric.label === "Chat");
   const premium = metrics.find((metric) => metric.label === "Premium");
+  assert.equal(chat?.type, "usage");
+  assert.ok(chat?.type === "usage");
   assert.deepEqual(
     { total: chat?.total, type: chat?.type, used: chat?.used },
     { total: 200, type: "usage", used: 0 }
@@ -199,7 +255,7 @@ test("양수 엔타이틀먼트 Chat을 남기고 0 엔타이틀먼트 Premium�
   assert.equal(premium, undefined);
 });
 
-test("한도가 있는 Chat과 Completions만 표시하고 사용량을 한도 이내로 유지한다", async () => {
+await test("한도가 있는 Chat과 Completions만 표시하고 사용량을 한도 이내로 유지한다", async () => {
   const snapshot = await fetchUsage({
     cache: false,
     credential: "tok",
@@ -207,40 +263,44 @@ test("한도가 있는 Chat과 Completions만 표시하고 사용량을 한도 �
     execFile: () => {
       throw new Error("no keychain");
     },
-    fetch: () => ({
-      json: () => ({
-        quota_snapshots: {
-          chat: {
-            credits_used: 0,
-            entitlement: 200,
-            has_quota: true,
-            quota_remaining: 200
+    fetch: () =>
+      jsonResponse(
+        () => ({
+          quota_snapshots: {
+            chat: {
+              credits_used: 0,
+              entitlement: 200,
+              has_quota: true,
+              quota_remaining: 200
+            },
+            completions: {
+              credits_used: 2001,
+              entitlement: 2000,
+              has_quota: false,
+              overage_count: 1,
+              quota_remaining: -1
+            },
+            premium_interactions: {
+              credits_used: 0,
+              entitlement: 0,
+              has_quota: false,
+              quota_remaining: 0,
+              remaining: 0
+            }
           },
-          completions: {
-            credits_used: 2001,
-            entitlement: 2000,
-            has_quota: false,
-            overage_count: 1,
-            quota_remaining: -1
-          },
-          premium_interactions: {
-            credits_used: 0,
-            entitlement: 0,
-            has_quota: false,
-            quota_remaining: 0,
-            remaining: 0
-          }
-        },
-        token_based_billing: true
-      }),
-      status: 200
-    }),
+          token_based_billing: true
+        }),
+        200
+      ),
     home: "/nonexistent"
   });
-  const metrics = snapshot?.groups[0].metrics ?? [];
+  assertSnapshot(snapshot);
+  const [{ metrics }] = snapshot.groups;
   const byLabel = Object.fromEntries(
     metrics.map((metric) => [metric.label, metric])
   );
+  assert.ok(byLabel.Chat.type === "usage");
+  assert.ok(byLabel.Completions.type === "usage");
   assert.deepEqual(
     { total: byLabel.Chat?.total, used: byLabel.Chat?.used },
     { total: 200, used: 0 }
@@ -257,86 +317,94 @@ test("한도가 있는 Chat과 Completions만 표시하고 사용량을 한도 �
   assert.equal(byLabel.Premium, undefined);
 });
 
-test("labels the group with the Copilot plan", async () => {
+await test("labels the group with the Copilot plan", async () => {
   const snapshot = await fetchUsage({
     cache: false,
     credential: "tok",
     environment: {},
-    fetch: () => ({
-      json: () => ({
-        copilot_plan: "free",
-        quota_snapshots: {
-          premium_interactions: { entitlement: 100, quota_remaining: 90 }
-        }
-      }),
-      status: 200
-    }),
+    fetch: () =>
+      jsonResponse(
+        () => ({
+          copilot_plan: "free",
+          quota_snapshots: {
+            premium_interactions: { entitlement: 100, quota_remaining: 90 }
+          }
+        }),
+        200
+      ),
     home: "/nonexistent"
   });
-  assert.equal(snapshot?.groups[0].label, "Copilot (Free)");
+  assertSnapshot(snapshot);
+  assert.equal(snapshot.groups[0].label, "Copilot (Free)");
 });
 
-test("access_type_sku가 free_limited_copilot이면 individual 계획도 Free로 표시한다", async () => {
+await test("access_type_sku가 free_limited_copilot이면 individual 계획도 Free로 표시한다", async () => {
   const snapshot = await fetchUsage({
     cache: false,
     credential: "tok",
     environment: {},
-    fetch: () => ({
-      json: () => ({
-        access_type_sku: "free_limited_copilot",
-        copilot_plan: "individual",
-        quota_snapshots: {
-          premium_interactions: { entitlement: 100, quota_remaining: 90 }
-        }
-      }),
-      status: 200
-    }),
+    fetch: () =>
+      jsonResponse(
+        () => ({
+          access_type_sku: "free_limited_copilot",
+          copilot_plan: "individual",
+          quota_snapshots: {
+            premium_interactions: { entitlement: 100, quota_remaining: 90 }
+          }
+        }),
+        200
+      ),
     home: "/nonexistent"
   });
-  assert.equal(snapshot?.groups[0].label, "Copilot (Free)");
+  assertSnapshot(snapshot);
+  assert.equal(snapshot.groups[0].label, "Copilot (Free)");
 });
 
-test("모든 개별 individual 계획을 Free로 바꾸지 않는다", async () => {
+await test("모든 개별 individual 계획을 Free로 바꾸지 않는다", async () => {
   const snapshot = await fetchUsage({
     cache: false,
     credential: "tok",
     environment: {},
-    fetch: () => ({
-      json: () => ({
-        access_type_sku: "monthly_subscriber_quota",
-        copilot_plan: "individual",
-        quota_snapshots: {
-          premium_interactions: { entitlement: 1500, quota_remaining: 1200 }
-        },
-        token_based_billing: true
-      }),
-      status: 200
-    }),
+    fetch: () =>
+      jsonResponse(
+        () => ({
+          access_type_sku: "monthly_subscriber_quota",
+          copilot_plan: "individual",
+          quota_snapshots: {
+            premium_interactions: { entitlement: 1500, quota_remaining: 1200 }
+          },
+          token_based_billing: true
+        }),
+        200
+      ),
     home: "/nonexistent"
   });
-  assert.equal(snapshot?.groups[0].label, "Copilot (Individual)");
+  assertSnapshot(snapshot);
+  assert.equal(snapshot.groups[0].label, "Copilot (Individual)");
 });
 
-test("omits the group label for an unknown plan", async () => {
+await test("omits the group label for an unknown plan", async () => {
   const snapshot = await fetchUsage({
     cache: false,
     credential: "tok",
     environment: {},
-    fetch: () => ({
-      json: () => ({
-        copilot_plan: "mystery_tier",
-        quota_snapshots: {
-          premium_interactions: { entitlement: 100, quota_remaining: 90 }
-        }
-      }),
-      status: 200
-    }),
+    fetch: () =>
+      jsonResponse(
+        () => ({
+          copilot_plan: "mystery_tier",
+          quota_snapshots: {
+            premium_interactions: { entitlement: 100, quota_remaining: 90 }
+          }
+        }),
+        200
+      ),
     home: "/nonexistent"
   });
-  assert.equal(snapshot?.groups[0].label, undefined);
+  assertSnapshot(snapshot);
+  assert.equal(snapshot.groups[0].label, undefined);
 });
 
-test("preserves prior usage for malformed and provider-error responses", async () => {
+await test("preserves prior usage for malformed and provider-error responses", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
   const cacheDir = await mkdtemp(path.join(tmpdir(), "copilot-cache-"));
   try {
@@ -347,14 +415,15 @@ test("preserves prior usage for malformed and provider-error responses", async (
       execFile: () => {
         throw new Error("no keychain");
       },
-      fetch: () => ({
-        json: () => ({
-          quota_snapshots: {
-            premium_interactions: { entitlement: 100, quota_remaining: 80 }
-          }
-        }),
-        status: 200
-      }),
+      fetch: () =>
+        jsonResponse(
+          () => ({
+            quota_snapshots: {
+              premium_interactions: { entitlement: 100, quota_remaining: 80 }
+            }
+          }),
+          200
+        ),
       home,
       now: 1_700_000_000_000
     };
@@ -362,29 +431,25 @@ test("preserves prior usage for malformed and provider-error responses", async (
     assert.deepEqual(
       await fetchUsage({
         ...options,
-        fetch: () => ({
-          json: () => ({ message: "temporary error" }),
-          status: 200
-        }),
+        fetch: () => jsonResponse(() => ({ message: "temporary error" }), 200),
         now: options.now + 60_000
       }),
       initial
     );
     const malformed = await fetchUsage({
       ...options,
-      fetch: () => ({
-        json: () => {
+      fetch: () =>
+        jsonResponse(() => {
           throw new Error("malformed body");
-        },
-        status: 200
-      }),
+        }, 200),
       now: options.now + 120_000
     });
+    assertSnapshot(malformed);
     assert.equal(malformed.groups[0].metrics[0].used, 20);
     assert.equal(
       await fetchUsage({
         ...options,
-        fetch: () => ({ json: () => ({ quota_snapshots: {} }), status: 200 }),
+        fetch: () => jsonResponse(() => ({ quota_snapshots: {} }), 200),
         now: options.now + 180_000
       }),
       undefined
@@ -395,7 +460,7 @@ test("preserves prior usage for malformed and provider-error responses", async (
   }
 });
 
-test("resets request errors while recovering with a later Copilot candidate", async () => {
+await test("resets request errors while recovering with a later Copilot candidate", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
   const cacheDir = await mkdtemp(path.join(tmpdir(), "copilot-cache-"));
   try {
@@ -415,21 +480,22 @@ test("resets request errors while recovering with a later Copilot candidate", as
         calls += 1;
         if (calls === 1) {
           assert.equal(request.headers.Authorization, "token first-token");
-          return { json: () => ({}), status: 401 };
+          return jsonResponse(() => ({}), 401);
         }
         assert.equal(request.headers.Authorization, "token second-token");
-        return {
-          json: () => ({
+        return jsonResponse(
+          () => ({
             quota_snapshots: {
               premium_interactions: { entitlement: 100, quota_remaining: 70 }
             }
           }),
-          status: 200
-        };
+          200
+        );
       },
       home,
       now: 1_700_000_000_000
     });
+    assertSnapshot(snapshot);
     assert.equal(snapshot.groups[0].metrics[0].used, 30);
     assert.equal(calls, 2);
   } finally {
@@ -438,7 +504,7 @@ test("resets request errors while recovering with a later Copilot candidate", as
   }
 });
 
-test("falls back to file credentials when Keychain lookup fails", async () => {
+await test("falls back to file credentials when Keychain lookup fails", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
   try {
     await mkdir(path.join(home, ".config", "gh"), { recursive: true });
@@ -446,6 +512,7 @@ test("falls back to file credentials when Keychain lookup fails", async () => {
       path.join(home, ".config", "gh", "hosts.json"),
       JSON.stringify({ "github.com": { oauth_token: "file-token" } })
     );
+    /** @type {string[][]} */
     const requested = [];
     const snapshot = await fetchUsage({
       cache: false,
@@ -456,14 +523,14 @@ test("falls back to file credentials when Keychain lookup fails", async () => {
       },
       fetch: (_url, options) => {
         assert.equal(options.headers.Authorization, "token file-token");
-        return {
-          json: () => ({
+        return jsonResponse(
+          () => ({
             quota_snapshots: {
               premium_interactions: { entitlement: 100, quota_remaining: 100 }
             }
           }),
-          status: 200
-        };
+          200
+        );
       },
       home,
       platform: "darwin"
@@ -471,15 +538,17 @@ test("falls back to file credentials when Keychain lookup fails", async () => {
     assert.deepEqual(requested, [
       ["security", "find-generic-password", "-s", "copilot-cli", "-w"]
     ]);
-    assert.equal(snapshot?.groups[0].metrics[0].used, 0);
+    assertSnapshot(snapshot);
+    assert.equal(snapshot.groups[0].metrics[0].used, 0);
   } finally {
     await rm(home, { force: true, recursive: true });
   }
 });
 
-test("disposes HTTP error response bodies before returning", async () => {
+await test("disposes HTTP error response bodies before returning", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
   let cancellations = 0;
+  /** @type {AbortSignal | undefined} */
   let requestSignal;
   const errorResponse = new Response(
     new ReadableStream({
@@ -521,6 +590,7 @@ test("disposes HTTP error response bodies before returning", async () => {
       undefined
     );
     assert.equal(cancellations, 1);
+    assert.ok(requestSignal);
     assert.equal(requestSignal.aborted, true);
     assert.equal(errorResponse.bodyUsed, true);
   } finally {
@@ -528,7 +598,7 @@ test("disposes HTTP error response bodies before returning", async () => {
   }
 });
 
-test("disposes unauthorized responses before fallback, even when cancellation rejects", async () => {
+await test("disposes unauthorized responses before fallback, even when cancellation rejects", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
   try {
     await Promise.all(
@@ -545,10 +615,15 @@ test("disposes unauthorized responses before fallback, even when cancellation re
     );
     await Promise.all(
       [401, 403].map(async (status) => {
+        /** @type {string[]} */
         const events = [];
+        /** @type {string[]} */
         const authorizations = [];
+        /** @type {{bodyUsed: boolean, signalAborted: boolean}[]} */
         const fallbackStates = [];
+        /** @type {Response | undefined} */
         let firstResponse;
+        /** @type {AbortSignal | undefined} */
         let firstSignal;
         let calls = 0;
         let usageErrors = 0;
@@ -580,6 +655,8 @@ test("disposes unauthorized responses before fallback, even when cancellation re
               return firstResponse;
             }
             events.push("fallback");
+            assert.ok(firstResponse);
+            assert.ok(firstSignal);
             fallbackStates.push({
               bodyUsed: firstResponse.bodyUsed,
               signalAborted: firstSignal.aborted
@@ -603,6 +680,7 @@ test("disposes unauthorized responses before fallback, even when cancellation re
           },
           platform: "linux"
         });
+        assertSnapshot(snapshot);
         assert.equal(snapshot.groups[0].metrics[0].used, 30);
         assert.equal(calls, 2);
         assert.equal(usageErrors, 1);
@@ -621,18 +699,20 @@ test("disposes unauthorized responses before fallback, even when cancellation re
   }
 });
 
-test("keeps optional diagnostics content-free while using environment credentials", async () => {
+await test("keeps optional diagnostics content-free while using environment credentials", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
   const diagnosticContent = "SYNTHETIC_CANARY";
   const fallbackToken = "synthetic-fallback-token";
   try {
+    /** @type {[string[], string][]} */
+    const files = [
+      [[".copilot", "config.json"], diagnosticContent],
+      [[".config", "github-copilot", "oauth.json"], "{}"],
+      [[".local", "share", "opencode", "auth.json"], "{}"],
+      [[".config", "gh", "hosts.json"], "{}"]
+    ];
     await Promise.all(
-      [
-        [[".copilot", "config.json"], diagnosticContent],
-        [[".config", "github-copilot", "oauth.json"], "{}"],
-        [[".local", "share", "opencode", "auth.json"], "{}"],
-        [[".config", "gh", "hosts.json"], "{}"]
-      ].map(async ([parts, content]) => {
+      files.map(async ([parts, content]) => {
         const filePath = path.join(home, ...parts);
         await mkdir(path.dirname(filePath), { recursive: true });
         await writeFile(filePath, content);

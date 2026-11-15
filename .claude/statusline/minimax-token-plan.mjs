@@ -5,12 +5,24 @@ import { withUsageCache } from "./usage-cache.mjs";
 const USAGE_URL =
   "https://api.minimax.io/v1/api/openplatform/coding_plan/remains";
 
+/**
+ * @param {unknown} value Value to validate.
+ * @returns {value is import("./types.ts").JsonRecord} Whether the value has the required shape.
+ */
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/**
+ * @param {string} url Input value.
+ * @param {Record<string, string>} headers Input value.
+ * @param {import("./types.ts").Fetch} fetchFunction Input value.
+ * @param {(() => void) | undefined} onUsageError Input value.
+ */
 const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 3000);
   try {
     const response = await fetchFunction(url, {
       headers,
@@ -18,7 +30,6 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
       signal: controller.signal
     });
     if (
-      !response ||
       typeof response.status !== "number" ||
       !Number.isFinite(response.status)
     ) {
@@ -38,6 +49,9 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
       return { status: response.status };
     }
     try {
+      /**
+       * @type {unknown}
+       */
       const payload = await response.json();
       if (!isRecord(payload)) {
         onUsageError?.();
@@ -55,28 +69,37 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
   }
 };
 
+/**
+ * @param {unknown} value Value to validate.
+ * @returns {value is number} Whether the value has the required shape.
+ */
 const isFiniteNumber = (value) =>
   typeof value === "number" && Number.isFinite(value);
 
-const compactMetrics = (metrics, index = 0) => {
-  if (index >= metrics.length) {
-    return [];
-  }
-  const rest = compactMetrics(metrics, index + 1);
-  return metrics[index] ? [metrics[index], ...rest] : rest;
-};
-
+/**
+ * @param {(import("./types.ts").Metric | undefined)[]} metrics Values.
+ * @param {string} [label] Tier label.
+ */
 const snapshot = (metrics, label) => {
-  const validMetrics = compactMetrics(metrics);
+  const validMetrics = metrics.filter((metric) => metric !== undefined);
   return validMetrics.length
     ? {
         groups: [
-          label ? { label, metrics: validMetrics } : { metrics: validMetrics }
+          label !== undefined && label !== ""
+            ? { label, metrics: validMetrics }
+            : { metrics: validMetrics }
         ]
       }
     : undefined;
 };
 
+/**
+ * @param {string} label Window.
+ * @param {unknown} used Usage.
+ * @param {unknown} total Total.
+ * @param {number} resetsInMs Reset delay.
+ * @returns {import("./types.ts").Metric | undefined} Normalized metric.
+ */
 const usageMetric = (label, used, total, resetsInMs) =>
   isFiniteNumber(used) && isFiniteNumber(total) && used >= 0 && total >= 0
     ? {
@@ -88,6 +111,9 @@ const usageMetric = (label, used, total, resetsInMs) =>
       }
     : undefined;
 
+/**
+ * @param {import("./types.ts").JsonRecord} model Valid model record.
+ */
 const usageSnapshot = (model) => {
   const intervalTotal = isFiniteNumber(model.current_interval_total_count)
     ? Math.max(0, model.current_interval_total_count)
@@ -127,8 +153,8 @@ const usageSnapshot = (model) => {
 
 /**
  * Fetch and normalize MiniMax coding plan usage.
- * @param {object} [options] Input value.
- * @returns {Promise<object|undefined>} Result.
+ * @param {import("./types.ts").UsageOptions} [options] Input value.
+ * @returns {Promise<import("./types.ts").Snapshot|undefined>} Result.
  */
 const fetchUsageUncached = async (options = {}) => {
   const credential =
@@ -144,30 +170,34 @@ const fetchUsageUncached = async (options = {}) => {
         options.onUsageError
       )
     : {};
-  if (
-    payload?.base_resp?.status_code !== 0 ||
-    !Array.isArray(payload.model_remains)
-  ) {
+  /**
+   * @type {unknown[] | null}
+   */
+  const entries =
+    payload !== undefined &&
+    isRecord(payload.base_resp) &&
+    payload.base_resp.status_code === 0 &&
+    Array.isArray(payload.model_remains)
+      ? payload.model_remains
+      : null;
+  if (entries === null) {
     options.onUsageError?.();
-    return;
   }
-  const model = payload.model_remains.find(
-    (entry) => isRecord(entry) && entry.model_name === "MiniMax-M*"
-  );
-  return model ? usageSnapshot(model) : undefined;
+  const model = entries
+    ?.filter(isRecord)
+    .find((entry) => entry.model_name === "MiniMax-M*");
+  return model === undefined ? undefined : usageSnapshot(model);
 };
 
 /**
  * 자격 증명별 영구 캐시를 사용해 MiniMax 사용량을 조회합니다.
- * @param {object} [options] 입력 옵션입니다.
- * @returns {Promise<object|undefined>} 사용량 스냅샷입니다.
+ * @param {import("./types.ts").UsageOptions} [options] 입력 옵션입니다.
+ * @returns {Promise<import("./types.ts").Snapshot|undefined>} 사용량 스냅샷입니다.
  */
-export const fetchUsage = (options = {}) => {
+export const fetchUsage = async (options = {}) => {
   const credential =
     typeof options.credential === "string" ? options.credential : "";
   return credential
-    ? withUsageCache("minimax", credential, options, (cachedOptions) =>
-        fetchUsageUncached(cachedOptions)
-      )
+    ? await withUsageCache("minimax", credential, options, fetchUsageUncached)
     : undefined;
 };

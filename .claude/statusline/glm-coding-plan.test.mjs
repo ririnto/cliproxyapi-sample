@@ -5,17 +5,77 @@ import path from "node:path";
 
 import { fetchUsage } from "./glm-coding-plan.mjs";
 
+/**
+ * @param {() => unknown} body - Lazy payload, including malformed JSON failures.
+ * @param {number} status - Fixture HTTP status.
+ * @returns {Response} Fetch response preserving fixture payload values.
+ */
+const jsonResponse = (body, status) => {
+  const response = new Response(null, { status });
+  Object.defineProperty(response, "json", { value: async () => await body() });
+  return response;
+};
+
 const NOW = 1_700_000_000_000;
 
-const response = (limits, level) => ({
-  json: () => ({
-    data: { limits, ...(level ? { level } : {}) },
-    success: true
-  }),
-  ok: true,
-  status: 200
-});
+/**
+ * @param {unknown} value - The returned snapshot.
+ * @returns {Record<string, unknown>} The first validated group.
+ */
+const firstGroup = (value) => {
+  assert.ok(value !== null && typeof value === "object" && "groups" in value);
+  assert.ok(Array.isArray(value.groups));
+  const { groups } = value;
+  /** @type {unknown[]} */
+  const safeGroups = groups;
+  const [group] = safeGroups;
+  assert.ok(
+    group !== null && typeof group === "object" && !Array.isArray(group)
+  );
+  return Object.fromEntries(Object.entries(group));
+};
 
+/**
+ * @param {unknown} value - The returned snapshot.
+ * @returns {Record<string, unknown>} The first validated metric.
+ */
+const firstMetric = (value) => {
+  const group = firstGroup(value);
+  assert.ok(Array.isArray(group.metrics));
+  const { metrics } = group;
+  /** @type {unknown[]} */
+  const safeMetrics = metrics;
+  const [metric] = safeMetrics;
+  assert.ok(
+    metric !== null && typeof metric === "object" && !Array.isArray(metric)
+  );
+  return Object.fromEntries(Object.entries(metric));
+};
+
+/**
+ * @typedef {{nextResetTime: number, number: number, percentage: number, type: string, unit: number}} Limit
+ */
+
+/**
+ * @param {Limit[]} limits - Quota entries.
+ * @param {string} [level] - Optional subscription level.
+ */
+const response = (limits, level) =>
+  jsonResponse(
+    () => ({
+      data: {
+        limits,
+        ...(level !== undefined && level !== "" ? { level } : {})
+      },
+      success: true
+    }),
+    200
+  );
+
+/**
+ * @param {Partial<Limit>} overrides - Changed quota fields.
+ * @returns {Limit} A quota entry.
+ */
 const limit = (overrides) => ({
   nextResetTime: NOW + 3_600_000,
   number: 5,
@@ -25,8 +85,12 @@ const limit = (overrides) => ({
   ...overrides
 });
 
-const run = (limits, level) =>
-  fetchUsage({
+/**
+ * @param {Limit[]} limits - Quota entries.
+ * @param {string} [level] - Optional subscription level.
+ */
+const run = async (limits, level) =>
+  await fetchUsage({
     cache: false,
     credential: "test-key",
     fetch: () => response(limits, level),
@@ -88,13 +152,13 @@ assert.deepEqual(
 );
 
 const pro = await run([limit({ number: 5, percentage: 10, unit: 3 })], "pro");
-assert.equal(pro.groups[0].label, "Z.AI (Pro)");
+assert.equal(firstGroup(pro).label, "Z.AI (Pro)");
 
 const ultra = await run(
   [limit({ number: 5, percentage: 10, unit: 3 })],
   "enterprise-ultra"
 );
-assert.equal(ultra.groups[0].label, undefined);
+assert.equal(firstGroup(ultra).label, undefined);
 
 assert.equal(
   await run([limit({ type: "TIME_LIMIT" }), limit({ number: 1 })]),
@@ -116,32 +180,29 @@ try {
   };
   const first = await fetchUsage(options);
   const cached = await fetchUsage({ ...options, now: NOW + 1000 });
-  assert.equal(first.groups[0].metrics[0].resetsInMs, 3_600_000);
-  assert.equal(cached.groups[0].metrics[0].resetsInMs, 3_599_000);
+  assert.equal(firstMetric(first).resetsInMs, 3_600_000);
+  assert.equal(firstMetric(cached).resetsInMs, 3_599_000);
   assert.equal(calls, 1);
   const errorPayload = await fetchUsage({
     ...options,
     fetch: () => {
       calls += 1;
-      return { json: () => ({ success: false }), status: 200 };
+      return jsonResponse(() => ({ success: false }), 200);
     },
     now: NOW + 60_000
   });
-  assert.equal(errorPayload.groups[0].metrics[0].percentage, 25);
+  assert.equal(firstMetric(errorPayload).percentage, 25);
   const malformedBody = await fetchUsage({
     ...options,
     fetch: () => {
       calls += 1;
-      return {
-        json: () => {
-          throw new Error("malformed body");
-        },
-        status: 200
-      };
+      return jsonResponse(() => {
+        throw new Error("malformed body");
+      }, 200);
     },
     now: NOW + 120_000
   });
-  assert.equal(malformedBody.groups[0].metrics[0].percentage, 25);
+  assert.equal(firstMetric(malformedBody).percentage, 25);
   assert.equal(
     await fetchUsage({
       ...options,

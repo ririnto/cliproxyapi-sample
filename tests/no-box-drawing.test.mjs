@@ -5,6 +5,7 @@ import { lint } from "markdownlint/sync";
 
 import noBoxDrawing from "../rules/no-box-drawing.ts";
 
+/** @param {string} input - Markdown to lint. */
 const violations = (input) => {
   const result = lint({
     config: { default: false, "docs/no-box-drawing": true },
@@ -17,14 +18,14 @@ const violations = (input) => {
   }));
 };
 
-test("accepts ASCII-only Markdown", () => {
+await test("accepts ASCII-only Markdown", () => {
   assert.deepEqual(
     violations("Plain ASCII text with +-- and | markers.\n"),
     []
   );
 });
 
-test("rejects both Unicode block boundaries and reports physical line ranges", () => {
+await test("rejects both Unicode block boundaries and reports physical line ranges", () => {
   const lowerBoundary = String.fromCodePoint(0x25_00);
   const upperBoundary = String.fromCodePoint(0x25_7f);
   assert.deepEqual(
@@ -44,7 +45,7 @@ test("rejects both Unicode block boundaries and reports physical line ranges", (
   );
 });
 
-test("reports one violation per physical line", () => {
+await test("reports one violation per physical line", () => {
   const lowerBoundary = String.fromCodePoint(0x25_00);
   const upperBoundary = String.fromCodePoint(0x25_7f);
   assert.deepEqual(violations(`${lowerBoundary} a\n${upperBoundary} b\n`), [
@@ -56,7 +57,7 @@ test("reports one violation per physical line", () => {
   ]);
 });
 
-test("reports diagnostic coordinates after an astral prefix", () => {
+await test("reports diagnostic coordinates after an astral prefix", () => {
   assert.deepEqual(violations(`\u{1F6F0}${String.fromCodePoint(0x25_00)}\n`), [
     { lineNumber: 1, range: [3, 1] }
   ]);

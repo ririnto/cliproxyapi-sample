@@ -28,12 +28,18 @@ const snapshot = {
   ]
 };
 const addon = { hideLabels: ["Premium"] };
+/** @param {unknown} value - Value to render as plain text. */
 const plainText = (value) => stripVTControlCharacters(String(value));
 const RED_TEXT = "\u001B[31m";
 const PROVIDER_COLOR = "\u001B[38;2;166;190;211m";
 const WARNING_COLOR = "\u001B[38;2;233;144;169m";
 const RESET_CODE = "\u001B[0m";
 const nowMs = 1_700_000_000_000;
+/**
+ * @param {string} label - Metric label.
+ * @param {number} value - Usage percentage.
+ * @param {number} [minutes] - Minutes until reset.
+ */
 const percentage = (label, value, minutes) => ({
   label,
   percentage: value,
@@ -41,8 +47,12 @@ const percentage = (label, value, minutes) => ({
   ...(minutes === undefined ? {} : { resetsInMs: minutes * 60_000 })
 });
 
-const renderProviderRows = (providers, options = {}) =>
-  renderStatusline(options.input || {}, {
+/**
+ * @param {{name: string, metrics: Record<string, unknown>[], primary?: boolean, provider?: string, hideName?: boolean}[]} providers - Provider fixtures.
+ * @param {{input?: Record<string, unknown>}} [options] - Input overrides.
+ */
+const renderProviderRows = async (providers, options = {}) =>
+  await renderStatusline(options.input ?? {}, {
     addons: providers.map(({ name, primary, provider, hideName }) => ({
       hideName,
       name,
@@ -51,21 +61,24 @@ const renderProviderRows = (providers, options = {}) =>
       script: `./${name}.mjs`
     })),
     branch: "",
-    importModule: (url) => {
-      const provider = providers.find(({ name }) =>
-        decodeURIComponent(url.pathname).endsWith(`${name}.mjs`)
-      );
-      return {
-        fetchUsage: () => ({
-          groups: [{ label: provider.name, metrics: provider.metrics }]
-        })
-      };
-    },
+    importModule:
+      /** @param {URL} url - Imported provider location. */
+      (url) => {
+        const provider = providers.find(({ name }) =>
+          decodeURIComponent(url.pathname).endsWith(`${name}.mjs`)
+        );
+        assert.ok(provider);
+        return {
+          fetchUsage: () => ({
+            groups: [{ label: provider.name, metrics: provider.metrics }]
+          })
+        };
+      },
     nowMs,
     ...options
   });
 
-test("session information stays on the first row in priority order", async () => {
+await test("session information stays on the first row in priority order", async () => {
   const rows = await renderStatusline(
     {
       context_window: {
@@ -96,7 +109,7 @@ test("session information stays on the first row in priority order", async () =>
   assert.doesNotMatch(plainText(rows[0]), /cache write/u);
 });
 
-test("idle output omits empty metrics and distinguishes unknown context", async () => {
+await test("idle output omits empty metrics and distinguishes unknown context", async () => {
   const [row] = await renderStatusline(
     { context_window: { context_window_size: 305_000 } },
     { branch: "" }
@@ -112,7 +125,7 @@ test("idle output omits empty metrics and distinguishes unknown context", async 
   assert.match(plainText(short), /20s · Context/u);
 });
 
-test("context uses eight cells with at least one filled cell for positive usage", async () => {
+await test("context uses eight cells with at least one filled cell for positive usage", async () => {
   await Promise.all(
     [0, 1, 6, 9, 50, 100, 120, -1].map(async (value) => {
       const [row] = await renderStatusline(
@@ -121,7 +134,7 @@ test("context uses eight cells with at least one filled cell for positive usage"
       );
       const text = plainText(row);
       const match = /Context (?<bar>[▰▱]{8}) (?<percentage>\d+)%/u.exec(text);
-      assert.ok(match);
+      assert.ok(match?.groups);
       assert.equal(
         Number(match.groups.percentage),
         Math.max(0, Math.min(100, value))
@@ -131,7 +144,7 @@ test("context uses eight cells with at least one filled cell for positive usage"
   );
 });
 
-test("providers use two columns with compact names and remaining percentages", async () => {
+await test("providers use two columns with compact names and remaining percentages", async () => {
   const rows = await renderProviderRows([
     {
       metrics: [percentage("5h", 26, 265), percentage("7d", 18, 8040)],
@@ -167,7 +180,7 @@ test("providers use two columns with compact names and remaining percentages", a
   assert.equal(first.indexOf("│"), second.indexOf("│"));
 });
 
-test("column alignment follows reset-length transitions", async () => {
+await test("column alignment follows reset-length transitions", async () => {
   await Promise.all(
     [
       [1439, 1439],
@@ -190,7 +203,7 @@ test("column alignment follows reset-length transitions", async () => {
   );
 });
 
-test("provider wrapping ignores ANSI and respects the 120-character limit", async () => {
+await test("provider wrapping ignores ANSI and respects the 120-character limit", async () => {
   await Promise.all(
     [0, 1].map(async (extra) => {
       const rows = await renderProviderRows([
@@ -210,7 +223,7 @@ test("provider wrapping ignores ANSI and respects the 120-character limit", asyn
   assert.ok(plainText(rows[1]).startsWith("P".repeat(130)));
 });
 
-test("alignment padding does not push a pair beyond the row budget", async () => {
+await test("alignment padding does not push a pair beyond the row budget", async () => {
   const rows = await renderProviderRows([
     { metrics: [percentage("x", 1)], name: "A".repeat(55) },
     { metrics: [percentage("x", 1)], name: "B" },
@@ -221,7 +234,7 @@ test("alignment padding does not push a pair beyond the row budget", async () =>
   assert.ok(rows.slice(1).every((row) => plainText(row).length <= 120));
 });
 
-test("primary provider stays below session information and precedes other providers", async () => {
+await test("primary provider stays below session information and precedes other providers", async () => {
   await Promise.all(
     [
       undefined,
@@ -253,7 +266,7 @@ test("primary provider stays below session information and precedes other provid
   );
 });
 
-test("native windows display remaining usage before addon providers", async () => {
+await test("native windows display remaining usage before addon providers", async () => {
   const rows = await renderProviderRows(
     [
       { metrics: [percentage("5h", 10)], name: "Primary", primary: true },
@@ -276,7 +289,7 @@ test("native windows display remaining usage before addon providers", async () =
   assert.match(plainText(rows[2]), /^Other/u);
 });
 
-test("valid native usage skips the Claude collector; malformed limits allow fallback", async () => {
+await test("valid native usage skips the Claude collector; malformed limits allow fallback", async () => {
   await Promise.all(
     [
       { five_hour: { used_percentage: 0 } },
@@ -289,6 +302,7 @@ test("valid native usage skips the Claude collector; malformed limits allow fall
       },
       { spend_limit: { limit_usd: 500, used_percentage: -1, used_usd: -10 } }
     ].map(async (rateLimits) => {
+      /** @type {string[]} */
       const imported = [];
       const rows = await renderStatusline(
         { rate_limits: rateLimits },
@@ -302,19 +316,21 @@ test("valid native usage skips the Claude collector; malformed limits allow fall
             { name: "ZAI", script: "./zai.mjs" }
           ],
           branch: "",
-          importModule: (url) => {
-            imported.push(url.pathname);
-            return {
-              fetchUsage: () =>
-                url.pathname.endsWith("claude-usage.mjs")
-                  ? snapshot
-                  : {
-                      groups: [
-                        { label: "ZAI", metrics: [percentage("5h", 10)] }
-                      ]
-                    }
-            };
-          },
+          importModule:
+            /** @param {URL} url - Imported provider location. */
+            (url) => {
+              imported.push(url.pathname);
+              return {
+                fetchUsage: () =>
+                  url.pathname.endsWith("claude-usage.mjs")
+                    ? snapshot
+                    : {
+                        groups: [
+                          { label: "ZAI", metrics: [percentage("5h", 10)] }
+                        ]
+                      }
+              };
+            },
           nowMs
         }
       );
@@ -334,7 +350,7 @@ test("valid native usage skips the Claude collector; malformed limits allow fall
   );
 });
 
-test("spend limits preserve budgets and fall back only to valid percentages", async () => {
+await test("spend limits preserve budgets and fall back only to valid percentages", async () => {
   const cases = [
     [
       {
@@ -392,7 +408,7 @@ test("spend limits preserve budgets and fall back only to valid percentages", as
   );
 });
 
-test("malformed addon configuration is ignored", async () => {
+await test("malformed addon configuration is ignored", async () => {
   const [plainRows, nativeRows] = await Promise.all([
     renderStatusline({}, { addons: "claude", branch: "" }),
     renderStatusline(
@@ -404,14 +420,16 @@ test("malformed addon configuration is ignored", async () => {
   assert.equal(nativeRows.length, 2);
 });
 
-test("credits and usage counts are compact without changing raw values", () => {
-  for (const [metric, expected] of [
+await test("credits and usage counts are compact without changing raw values", () => {
+  /** @type {[Record<string, string | number>, string][]} */
+  const cases = [
     [{ currency: "USD", remaining: 12.5, type: "credit" }, "$12.50"],
     [{ remaining: 57_500, type: "credit" }, "57.5k"],
     [{ total: 1500, type: "usage", used: 211.3214152413 }, "211.3/1.5k"],
     [{ total: 1500, type: "usage", used: 211.39 }, "211.4/1.5k"],
     [{ total: 1500, type: "usage", used: 211 }, "211/1.5k"]
-  ]) {
+  ];
+  for (const [metric, expected] of cases) {
     const original = structuredClone(metric);
     assert.equal(
       plainText(
@@ -424,6 +442,7 @@ test("credits and usage counts are compact without changing raw values", () => {
     );
     assert.deepEqual(metric, original);
   }
+  /** @type {unknown} */
   const line = renderSnapshot(
     { name: "Test", showAbove: 5 },
     {
@@ -440,27 +459,29 @@ test("credits and usage counts are compact without changing raw values", () => {
   assert.equal(plainText(line), "Test  credit $3.00");
 });
 
-test("provider names use muted blue and hidden names leave no empty title", () => {
+await test("provider names use muted blue and hidden names leave no empty title", () => {
   const groups = [{ metrics: [percentage("5h", 10)] }];
-  assert.ok(
-    renderSnapshot({ name: "Fallback" }, { groups }).startsWith(
-      `${PROVIDER_COLOR}Fallback${RESET_CODE}  `
-    )
-  );
+  /** @type {unknown} */
+  const rendered = renderSnapshot({ name: "Fallback" }, { groups });
+  assert.ok(typeof rendered === "string");
+  assert.ok(rendered.startsWith(`${PROVIDER_COLOR}Fallback${RESET_CODE}  `));
   assert.equal(
     plainText(renderSnapshot({ hideName: true, name: "Fallback" }, { groups })),
     "5h 90% left"
   );
 });
 
-test("hideLabels filters metric rows", () => {
+await test("hideLabels filters metric rows", () => {
+  /** @type {unknown} */
   const line = renderSnapshot(addon, snapshot);
+  assert.ok(typeof line === "string");
   assert.match(line, /Chat /u);
   assert.match(line, /Completions /u);
   assert.doesNotMatch(line, /Premium/u);
 });
 
-test("all metrics hidden yields no bare group", () => {
+await test("all metrics hidden yields no bare group", () => {
+  /** @type {unknown} */
   const line = renderSnapshot(
     { hideLabels: ["Chat", "Completions", "Premium"] },
     snapshot
@@ -468,12 +489,14 @@ test("all metrics hidden yields no bare group", () => {
   assert.equal(line, "");
 });
 
-test("no hideLabels keeps all metrics visible", () => {
+await test("no hideLabels keeps all metrics visible", () => {
+  /** @type {unknown} */
   const line = renderSnapshot({}, snapshot);
+  assert.ok(typeof line === "string");
   assert.match(line, /Premium /u);
 });
 
-test("raw labels remain available for hideLabels and showAbove", () => {
+await test("raw labels remain available for hideLabels and showAbove", () => {
   const groupLabel = "Group\nRAW\u001B[31m";
   const metricLabel = "Metric\nRAW\u001B[31m";
   const rawSnapshot = {
@@ -497,7 +520,7 @@ test("raw labels remain available for hideLabels and showAbove", () => {
   assert.equal(rawSnapshot.groups[0].metrics[0].label, metricLabel);
 });
 
-test("external addon names and metric values stay on one plain-text row", async () => {
+await test("external addon names and metric values stay on one plain-text row", async () => {
   const rows = await renderStatusline(
     {},
     {
@@ -533,7 +556,7 @@ test("external addon names and metric values stay on one plain-text row", async 
   assert.ok(output.includes(`${PROVIDER_COLOR}Credit FAKE GROUP${RESET_CODE}`));
 });
 
-test("external header strings stay on one plain-text row", async () => {
+await test("external header strings stay on one plain-text row", async () => {
   const rows = await renderStatusline(
     {
       effort: { level: "High\r\nFAKE ROW\u001B[31m" },
@@ -557,24 +580,28 @@ test("external header strings stay on one plain-text row", async () => {
   assert.ok(output.includes("\u001B[38;2;143;179;239m"));
 });
 
-test("resolves large credential reference lists without stack overflow", async () => {
+await test("resolves large credential reference lists without stack overflow", async () => {
   const { renderAddons } = await import("./statusline.mjs");
   const credential = "{file:}".repeat(12_000);
   const rows = await renderAddons(
     [{ credential, name: "Test", script: "./glm-coding-plan.mjs" }],
     {
       importModule: () => ({
-        fetchUsage: ({ credential: resolved }) =>
-          resolved === credential ? snapshot : undefined
+        fetchUsage:
+          /** @param {{credential: string}} options - Resolved credential. */
+          ({ credential: resolved }) =>
+            resolved === credential ? snapshot : undefined
       })
     }
   );
   assert.equal(rows.length, 1);
 });
 
-test("public CLI resolves addon settings from the configured directory", async (t) => {
+await test("public CLI resolves addon settings from the configured directory", async (t) => {
   const fixtureDir = mkdtempSync(path.join(tmpdir(), "statusline-cli-"));
-  t.after(() => rmSync(fixtureDir, { force: true, recursive: true }));
+  t.after(() => {
+    rmSync(fixtureDir, { force: true, recursive: true });
+  });
   const homeDir = path.join(fixtureDir, "home");
   const homeSettingsDir = path.join(homeDir, ".claude");
   const configDir = path.join(fixtureDir, "custom-config");
@@ -650,6 +677,11 @@ test("public CLI resolves addon settings from the configured directory", async (
   symlinkSync(statuslinePath, scriptSymlinkPath);
   symlinkSync(statuslinePath, path.join(installationDir, "statusline.mjs"));
   symlinkSync(installationDir, symlinkedConfigDir, "dir");
+  /**
+   * @param {string} workspaceProjectDir - Fixture project directory.
+   * @param {NodeJS.ProcessEnv} [environment] - Environment overrides.
+   * @param {string} [commandPath] - Executable script path.
+   */
   const run = (
     workspaceProjectDir,
     environment = {},
@@ -669,6 +701,10 @@ test("public CLI resolves addon settings from the configured directory", async (
     assert.equal(result.stderr, "");
     return result.stdout;
   };
+  /**
+   * @param {string} workspaceProjectDir - Fixture project directory.
+   * @param {NodeJS.ProcessEnv} [environment] - Environment overrides.
+   */
   const runPlainText = (workspaceProjectDir, environment = {}) =>
     plainText(run(workspaceProjectDir, environment));
   await t.test(
@@ -778,9 +814,11 @@ test("public CLI resolves addon settings from the configured directory", async (
   });
 });
 
-test("module imports do not render for absent or unrelated argv", (t) => {
+await test("module imports do not render for absent or unrelated argv", (t) => {
   const fixtureDir = mkdtempSync(path.join(tmpdir(), "statusline-import-"));
-  t.after(() => rmSync(fixtureDir, { force: true, recursive: true }));
+  t.after(() => {
+    rmSync(fixtureDir, { force: true, recursive: true });
+  });
   const moduleUrl = new URL("statusline.mjs", import.meta.url).href;
   const importSource = `await import(${JSON.stringify(moduleUrl)});`;
   const unrelatedPath = path.join(fixtureDir, "unrelated.mjs");
@@ -805,9 +843,11 @@ test("module imports do not render for absent or unrelated argv", (t) => {
   }
 });
 
-test("collectors handle HTTP errors and cancel response bodies", (t) => {
+await test("collectors handle HTTP errors and cancel response bodies", (t) => {
   const home = mkdtempSync(path.join(tmpdir(), "statusline-runtime-"));
-  t.after(() => rmSync(home, { force: true, recursive: true }));
+  t.after(() => {
+    rmSync(home, { force: true, recursive: true });
+  });
   const codexDirectory = path.join(home, ".codex");
   mkdirSync(codexDirectory);
   writeFileSync(
@@ -930,9 +970,11 @@ test("collectors handle HTTP errors and cancel response bodies", (t) => {
   });
 });
 
-test("Codex additional-limit labels stay inside the display row", async (t) => {
+await test("Codex additional-limit labels stay inside the display row", async (t) => {
   const home = mkdtempSync(path.join(tmpdir(), "statusline-codex-"));
-  t.after(() => rmSync(home, { force: true, recursive: true }));
+  t.after(() => {
+    rmSync(home, { force: true, recursive: true });
+  });
   const codexDirectory = path.join(home, ".codex");
   mkdirSync(codexDirectory);
   writeFileSync(
@@ -942,8 +984,8 @@ test("Codex additional-limit labels stay inside the display row", async (t) => {
   const { fetchUsage } = await import("./statusline/codex-usage.mjs");
   const codexSnapshot = await fetchUsage({
     cache: false,
-    fetch: () => ({
-      json: () => ({
+    fetch: () =>
+      Response.json({
         additional_rate_limits: [
           {
             limit_name: "Additional\nFAKE ROW\u001B[31m",
@@ -956,14 +998,20 @@ test("Codex additional-limit labels stay inside the display row", async (t) => {
           }
         ]
       }),
-      status: 200
-    }),
     home
   });
-  assert.equal(
-    codexSnapshot?.groups[0].label,
-    "Additional\nFAKE ROW\u001B[31m"
+  assert.ok(
+    codexSnapshot !== null &&
+      typeof codexSnapshot === "object" &&
+      "groups" in codexSnapshot
   );
+  const { groups: rawGroups } = codexSnapshot;
+  assert.ok(Array.isArray(rawGroups));
+  /** @type {unknown[]} */
+  const groups = rawGroups;
+  const [group] = groups;
+  assert.ok(group !== null && typeof group === "object" && "label" in group);
+  assert.equal(group.label, "Additional\nFAKE ROW\u001B[31m");
   const rows = await renderStatusline(
     {},
     {
@@ -976,4 +1024,35 @@ test("Codex additional-limit labels stay inside the display row", async (t) => {
   assert.equal(output.trimEnd().split("\n").length, 2);
   assert.match(plainText(output), /Additional FAKE ROW {2}5h 90% left/u);
   assert.equal(output.includes(RED_TEXT), false);
+});
+
+await test("header reads model and effort fallbacks only when needed", async () => {
+  let displayReads = 0;
+  let idReads = 0;
+  let effortReads = 0;
+  const [row] = await renderStatusline(
+    {
+      effort: { level: "high" },
+      model: {
+        get display_name() {
+          displayReads += 1;
+          return "Known";
+        },
+        get effort() {
+          effortReads += 1;
+          throw new Error("unexpected effort fallback");
+        },
+        get id() {
+          idReads += 1;
+          throw new Error("unexpected model fallback");
+        }
+      }
+    },
+    { branch: "" }
+  );
+  assert.match(plainText(row), /Known/u);
+  assert.match(plainText(row), /high/u);
+  assert.equal(displayReads, 1);
+  assert.equal(idReads, 0);
+  assert.equal(effortReads, 0);
 });
