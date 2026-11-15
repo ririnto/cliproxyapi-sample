@@ -18,6 +18,12 @@ max_concurrent_threads_per_session = 12
 [apps._default]
 default_tools_approval_mode = "approve"
 
+[features]
+fast_mode = false
+local_thread_store_compression = true
+memories = true
+prevent_idle_sleep = true
+
 [features.code_mode]
 default_exec_yield_time_ms = 270000
 
@@ -30,12 +36,6 @@ enabled = true
 hide_spawn_agent_metadata = false
 min_wait_timeout_ms = 120000
 tool_namespace = "agents"
-
-[features]
-fast_mode = false
-local_thread_store_compression = true
-memories = true
-prevent_idle_sleep = true
 
 [marketplaces.cursor-plugins]
 source = "https://github.com/cursor/plugins.git"
@@ -120,6 +120,9 @@ enabled = true
 [plugins."workgraph@sinon"]
 enabled = true
 
+[sandbox_workspace_write]
+network_access = true
+
 [tools.experimental_request_user_input]
 enabled = true
 
@@ -137,6 +140,3 @@ status_line = [
   "used-tokens"
 ]
 status_line_use_colors = true
-
-[sandbox_workspace_write]
-network_access = true
