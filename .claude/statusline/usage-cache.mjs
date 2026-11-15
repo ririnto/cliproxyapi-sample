@@ -106,15 +106,6 @@ const isSuccessfulResponse = (status, usageError) =>
   !usageError && isFiniteNumber(status) && status >= 200 && status < 300;
 
 /**
- * @param {string} provider Provider name.
- * @param {unknown} identity Credential identity.
- */
-const identityHash = (provider, identity) =>
-  createHash("sha256")
-    .update(JSON.stringify([provider, identity]))
-    .digest("hex");
-
-/**
  * @param {unknown} value Persisted data.
  * @param {string} credentialHash Expected identity.
  * @returns {value is CacheRecord} Valid cache entry.
@@ -268,7 +259,9 @@ export const withUsageCache = async (
     options.cacheDir ??
     path.join(options.home ?? homedir(), ".claude", "cache", "usage");
   const filePath = path.join(directory, `${provider}.json`);
-  const credentialHash = identityHash(provider, credentialIdentity);
+  const credentialHash = createHash("sha256")
+    .update(JSON.stringify([provider, credentialIdentity]))
+    .digest("hex");
   const cached = await readCache(filePath, credentialHash);
   if (cached && now < cached.nextAttemptAt) {
     return await serveCached(directory, filePath, cached, now, ttl);
