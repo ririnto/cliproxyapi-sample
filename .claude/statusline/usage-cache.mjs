@@ -198,7 +198,8 @@ const staleDuringCooldown = (cached, now, ttl) =>
 /**
  * @param {string} directory Cache directory.
  * @param {string} filePath Cache path.
- * @param {Omit<CacheRecord, "snapshot"> & {snapshot?: unknown}} record Entry to serialize; persisted snapshots are validated when read.
+ * @param {Omit<CacheRecord, "snapshot"> & {snapshot?: unknown}} record Entry to serialize.
+ * Persisted snapshots are validated when read.
  */
 const writeCache = async (directory, filePath, record) => {
   let temporaryPath;
