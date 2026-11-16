@@ -18,7 +18,7 @@
 - Test references do not count as production reuse.
 - Change production code only for real product requirements or actual defects.
 - Adapt tests to real production interfaces and behavior without exposing internals, adding test hooks or manufacturing test seams.
-- Preserve behavior, evaluation order, side effects, resource lifetimes and required production interfaces when inlining.
+- Use each implementation correctly for its purpose when inlining. Existing evaluation order is not a preservation constraint: reorder freely as long as functional requirements, observable side effects, resource lifetimes and required production interfaces still hold.
 - Do not suppress, weaken or reconfigure lint to force a preferred code shape.
 
 ## Memory maintenance
