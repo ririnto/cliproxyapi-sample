@@ -172,10 +172,10 @@
         "output": 0.5
       },
       "gpt-6.2-astra": {
-        "cacheRead": 1,
-        "cacheWrite": 12.5,
-        "input": 10,
-        "output": 50
+        "cacheRead": 0.4,
+        "cacheWrite": 10,
+        "input": 8,
+        "output": 40
       },
       "gpt-6.2-sol": {
         "cacheRead": 0.1,
