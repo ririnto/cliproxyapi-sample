@@ -1,4 +1,11 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "permissions": [{ "action": "*", "resource": "*", "effect": "allow" }]
+  "permissions": [
+    {
+      "action": "*",
+      "resource": "*",
+      "effect": "allow"
+    }
+  ],
+  "model": "gpt-6.2-sol"
 }
