@@ -5,6 +5,8 @@
 - Stop discovery when the implementation decision has sufficient evidence.
 - Prefer existing code, platform capabilities, and installed dependencies before adding custom code or packages.
 - Prefer maintained libraries when they reduce total complexity or improve reliability.
+- Do not configure minimumReleaseAge.
+  Use LTS, stable, or latest releases that install and work without it, with Node.js 24 as the runtime baseline.
 - Add an abstraction only for a stated requirement or a second real caller.
 - Replace obsolete interfaces and their consumers together, removing superseded implementations.
 - Remove superseded compatibility paths and parallel implementations.
