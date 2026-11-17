@@ -63,9 +63,9 @@ V1은 설정 형식이 다르므로 이 파일을 그대로 사용할 수 없다
 
 | 선택자 | 대상 |
 | --- | --- |
-| `ANTHROPIC_DEFAULT_FABLE_MODEL` | `gpt-6-astra` |
+| `ANTHROPIC_DEFAULT_FABLE_MODEL` | `gpt-6.2-astra` |
 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `gpt-6-luna` |
-| `ANTHROPIC_DEFAULT_OPUS_MODEL` | `gpt-6.1-sol` |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | `gpt-6.2-sol` |
 | `ANTHROPIC_DEFAULT_SONNET_MODEL` | `gpt-6.1-terra` |
 
 `ANTHROPIC_CUSTOM_MODEL_OPTION`은 `glm-5.3`을 모델 선택기에 추가한다.
