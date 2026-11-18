@@ -177,16 +177,6 @@ const readCache = async (filePath, credentialHash) => {
 };
 
 /**
- * @param {CacheRecord} cached Cached entry.
- * @param {number} now Current time.
- * @param {number} ttl Cache lifetime.
- */
-const staleDuringCooldown = (cached, now, ttl) =>
-  cached.snapshot !== undefined &&
-  now - cached.fetchedAt > MAX_STALE_MS &&
-  cached.nextAttemptAt - cached.fetchedAt > ttl;
-
-/**
  * @param {string} directory Cache directory.
  * @param {string} filePath Cache path.
  * @param {Omit<CacheRecord, "snapshot"> & {snapshot?: unknown}} record Entry to serialize.
@@ -218,22 +208,6 @@ const writeCache = async (directory, filePath, record) => {
 };
 
 /**
- * @param {string} directory Cache directory.
- * @param {string} filePath Cache path.
- * @param {CacheRecord} cached Valid entry.
- * @param {number} now Current time.
- * @param {number} ttl Cache lifetime.
- */
-const serveCached = async (directory, filePath, cached, now, ttl) => {
-  if (staleDuringCooldown(cached, now, ttl)) {
-    await writeCache(directory, filePath, { ...cached, snapshot: undefined });
-  }
-  return staleDuringCooldown(cached, now, ttl)
-    ? undefined
-    : adjustedSnapshot(cached.snapshot, Math.max(0, now - cached.fetchedAt));
-};
-
-/**
  * 자격 증명별 영구 캐시를 통해 provider 사용량 스냅샷을 가져옵니다.
  * @template T
  * @param {string} provider 내부 provider 식별자입니다.
@@ -252,8 +226,9 @@ export const withUsageCache = async (
     return await fetchSnapshot(options);
   }
   const now = nowValue(options.now);
-  const ttl = isFiniteNumber(options.cacheTtlMs)
-    ? Math.max(0, options.cacheTtlMs)
+  const { cacheTtlMs } = options;
+  const ttl = isFiniteNumber(cacheTtlMs)
+    ? Math.max(0, cacheTtlMs)
     : DEFAULT_USAGE_CACHE_TTL_MS;
   const directory =
     options.cacheDir ??
@@ -264,7 +239,16 @@ export const withUsageCache = async (
     .digest("hex");
   const cached = await readCache(filePath, credentialHash);
   if (cached && now < cached.nextAttemptAt) {
-    return await serveCached(directory, filePath, cached, now, ttl);
+    const age = Math.max(0, now - cached.fetchedAt);
+    if (
+      cached.snapshot !== undefined &&
+      age > MAX_STALE_MS &&
+      cached.nextAttemptAt - cached.fetchedAt > ttl
+    ) {
+      cached.snapshot = undefined;
+      await writeCache(directory, filePath, cached);
+    }
+    return adjustedSnapshot(cached.snapshot, age);
   }
   /**
    * @type {number | undefined}
@@ -297,27 +281,24 @@ export const withUsageCache = async (
   } catch {
     status = undefined;
   }
-  const successful = isSuccessfulResponse(status, usageError);
   const nextAttemptAt = now + Math.max(ttl, delay);
-  await writeCache(
-    directory,
-    filePath,
-    successful
-      ? { credentialHash, fetchedAt: now, nextAttemptAt, snapshot }
-      : {
-          credentialHash,
-          fetchedAt: cached?.fetchedAt ?? now,
-          nextAttemptAt,
-          snapshot:
-            cached && now - cached.fetchedAt <= MAX_STALE_MS
-              ? cached.snapshot
-              : undefined
-        }
-  );
-  if (successful) {
+  if (isSuccessfulResponse(status, usageError)) {
+    await writeCache(directory, filePath, {
+      credentialHash,
+      fetchedAt: now,
+      nextAttemptAt,
+      snapshot
+    });
     return snapshot;
   }
-  return cached && now - cached.fetchedAt <= MAX_STALE_MS
-    ? adjustedSnapshot(cached.snapshot, Math.max(0, now - cached.fetchedAt))
-    : undefined;
+  const fetchedAt = cached?.fetchedAt ?? now;
+  const age = Math.max(0, now - fetchedAt);
+  const fallback = age <= MAX_STALE_MS ? cached?.snapshot : undefined;
+  await writeCache(directory, filePath, {
+    credentialHash,
+    fetchedAt,
+    nextAttemptAt,
+    snapshot: fallback
+  });
+  return adjustedSnapshot(fallback, age);
 };

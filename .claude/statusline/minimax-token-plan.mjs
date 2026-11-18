@@ -1,6 +1,5 @@
-import { setTimeout as delay } from "node:timers/promises";
-
 import { withUsageCache } from "./usage-cache.mjs";
+import { requestJson } from "./usage-http.mjs";
 
 const USAGE_URL =
   "https://api.minimax.io/v1/api/openplatform/coding_plan/remains";
@@ -11,63 +10,6 @@ const USAGE_URL =
  */
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-/**
- * @param {string} url Input value.
- * @param {Record<string, string>} headers Input value.
- * @param {import("./types.ts").Fetch} fetchFunction Input value.
- * @param {(() => void) | undefined} onUsageError Input value.
- */
-const requestJson = async (url, headers, fetchFunction, onUsageError) => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 3000);
-  try {
-    const response = await fetchFunction(url, {
-      headers,
-      method: "GET",
-      signal: controller.signal
-    });
-    if (
-      typeof response.status !== "number" ||
-      !Number.isFinite(response.status)
-    ) {
-      return { status: undefined };
-    }
-    if (response.status < 200 || response.status >= 300) {
-      try {
-        await Promise.race([
-          response.body?.cancel(),
-          delay(3000, undefined, { signal: controller.signal })
-        ]);
-      } catch {
-        controller.abort();
-        return { status: response.status };
-      }
-      controller.abort();
-      return { status: response.status };
-    }
-    try {
-      /**
-       * @type {unknown}
-       */
-      const payload = await response.json();
-      if (!isRecord(payload)) {
-        onUsageError?.();
-        return { status: response.status };
-      }
-      return { payload, status: response.status };
-    } catch {
-      onUsageError?.();
-      return { status: response.status };
-    }
-  } catch {
-    return { status: undefined };
-  } finally {
-    clearTimeout(timeout);
-  }
-};
 
 /**
  * @param {unknown} value Value to validate.

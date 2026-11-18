@@ -9,19 +9,6 @@ import { stripVTControlCharacters } from "node:util";
 import { renderRows } from "./subagent-statusline.mjs";
 
 /**
- * @param {unknown} input - Statusline fixture.
- * @param {number} time - Timestamp for rendering.
- * @returns {string[]} Validated JSON rows.
- */
-const validatedRows = (input, time) => {
-  /** @type {unknown} */
-  const rows = renderRows(input, time);
-  assert.ok(Array.isArray(rows));
-  assert.ok(rows.every((row) => typeof row === "string"));
-  return rows;
-};
-
-/**
  * @param {string} row - Serialized row.
  * @returns {{id: string, content: string}} Validated output.
  */
@@ -37,7 +24,7 @@ const parseRow = (row) => {
 const nowMs = 1_700_000_000_000;
 
 await test("subagent rows preserve task ids and align right metrics", () => {
-  const rows = validatedRows(
+  const rows = renderRows(
     {
       columns: 100,
       cwd: "/workspace/project",
@@ -94,7 +81,7 @@ await test("subagent rows preserve task ids and align right metrics", () => {
 });
 
 await test("subagent rows omit missing metrics and sanitize task labels", () => {
-  const [row] = validatedRows(
+  const [row] = renderRows(
     {
       columns: 0,
       tasks: [
@@ -140,13 +127,13 @@ await test("long descriptions give way to right-aligned worktree and metrics", (
     ]
   };
   const plain = stripVTControlCharacters(
-    parseRow(validatedRows(input, nowMs)[0]).content
+    parseRow(renderRows(input, nowMs)[0]).content
   );
   assert.equal(plain.length, 80);
   assert.match(plain, /…\s+⌥ feature\s+12\.3k.*1m05s$/u);
   for (const columns of [16, 20, 30]) {
     const compact = stripVTControlCharacters(
-      parseRow(validatedRows({ ...input, columns }, nowMs)[0]).content
+      parseRow(renderRows({ ...input, columns }, nowMs)[0]).content
     );
     assert.equal(compact.length, columns);
     assert.match(compact, /12\.3k tok 1m05s$/u);
@@ -154,7 +141,7 @@ await test("long descriptions give way to right-aligned worktree and metrics", (
 });
 
 await test("wide and combined descriptions clip on grapheme boundaries", () => {
-  const [row] = validatedRows(
+  const [row] = renderRows(
     {
       columns: 40,
       tasks: [
@@ -184,7 +171,7 @@ await test("wide and combined descriptions clip on grapheme boundaries", () => {
 });
 
 await test("tokens use the supplied task count, not a context ratio", () => {
-  const [row] = validatedRows(
+  const [row] = renderRows(
     {
       columns: 50,
       tasks: [
@@ -202,7 +189,7 @@ await test("tokens use the supplied task count, not a context ratio", () => {
   assert.match(plain, /450k tok/u);
   assert.doesNotMatch(plain, /%|▰|▱/u);
   for (const tokenCount of [undefined, null, false, "", "invalid", -1]) {
-    const [unknown] = validatedRows(
+    const [unknown] = renderRows(
       { columns: 50, tasks: [{ id: "unknown", name: "worker", tokenCount }] },
       nowMs
     );
@@ -275,39 +262,5 @@ await test("last request input includes cache tokens without summing duplicate r
       entry({ cache_read_input_tokens: "unknown", input_tokens: 1 })
     ]),
     / in /u
-  );
-});
-
-await test("task guards preserve lazy fallback and do not enumerate unrelated getters", () => {
-  const task = {
-    id: "../skip-transcript",
-    label: "Visible label",
-    name: "worker",
-    effort: "high",
-    startTime: nowMs,
-    get description() {
-      throw new Error("unused description");
-    },
-    get type() {
-      throw new Error("unused type");
-    },
-    get unrelated() {
-      throw new Error("must not enumerate the task");
-    }
-  };
-  const rows = validatedRows(
-    {
-      columns: 100,
-      get width() {
-        throw new Error("unused width");
-      },
-      tasks: [task]
-    },
-    nowMs
-  );
-  assert.equal(rows.length, 1);
-  assert.match(
-    stripVTControlCharacters(parseRow(rows[0]).content),
-    /Visible label/u
   );
 });

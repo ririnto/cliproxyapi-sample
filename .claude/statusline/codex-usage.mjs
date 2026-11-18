@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 
 import { withUsageCache } from "./usage-cache.mjs";
+import { requestJson } from "./usage-http.mjs";
 
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
@@ -13,67 +13,6 @@ const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
  */
 const isRecord = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-/**
- * @param {string} url Input value.
- * @param {Record<string, string>} headers Input value.
- * @param {import("./types.ts").Fetch} fetchFunction Input value.
- * @param {(() => void) | undefined} onUsageError Input value.
- */
-const requestJson = async (url, headers, fetchFunction, onUsageError) => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 3000);
-  try {
-    const response = await fetchFunction(url, {
-      headers,
-      method: "GET",
-      signal: controller.signal
-    });
-    if (
-      typeof response.status !== "number" ||
-      !Number.isFinite(response.status)
-    ) {
-      return { status: undefined };
-    }
-    if (response.status < 200 || response.status >= 300) {
-      try {
-        await Promise.race([
-          response.body?.cancel(),
-          delay(3000, undefined, { signal: controller.signal })
-        ]);
-      } catch {
-        controller.abort();
-        return { status: response.status };
-      }
-      controller.abort();
-      return { status: response.status };
-    }
-    try {
-      /**
-       * @type {unknown}
-       */
-      const payload = await response.json();
-      if (
-        !isRecord(payload) ||
-        Boolean(payload.error) ||
-        payload.success === false
-      ) {
-        onUsageError?.();
-        return { status: response.status };
-      }
-      return { payload, status: response.status };
-    } catch {
-      onUsageError?.();
-      return { status: response.status };
-    }
-  } catch {
-    return { status: undefined };
-  } finally {
-    clearTimeout(timeout);
-  }
-};
 
 /**
  * @param {unknown} value Value to validate.
@@ -264,7 +203,7 @@ const chatgptPlanLabel = (planType) => {
  * @param {import("./types.ts").UsageOptions} options Options.
  */
 const usageSnapshot = async (selected, options) => {
-  const { payload } = await requestJson(
+  let { payload } = await requestJson(
     USAGE_URL,
     {
       Authorization: `Bearer ${selected.token}`,
@@ -277,6 +216,10 @@ const usageSnapshot = async (selected, options) => {
     options.fetch ?? globalThis.fetch,
     options.onUsageError
   );
+  if (payload && (Boolean(payload.error) || payload.success === false)) {
+    options.onUsageError?.();
+    payload = undefined;
+  }
   const plan = chatgptPlanLabel(payload?.plan_type);
   const groups = payload
     ? [
@@ -286,23 +229,18 @@ const usageSnapshot = async (selected, options) => {
           chatgptCredit(payload.credits)
         ),
         ...(Array.isArray(payload.additional_rate_limits)
-          ? payload.additional_rate_limits
-              .filter(isRecord)
-              .filter(
-                (limit) =>
-                  isRecord(limit) &&
-                  typeof limit.limit_name === "string" &&
-                  limit.limit_name !== ""
-              )
-          : []
-        ).map((limit) => {
-          const label =
-            typeof limit.limit_name === "string" ? limit.limit_name : "";
-          return chatgptGroup(
-            limit.rate_limit,
-            limit.limit_name === "gpt-5.3-codex-spark" ? "Additional" : label
-          );
-        })
+          ? payload.additional_rate_limits.filter(isRecord).flatMap((limit) => {
+              const label = limit.limit_name;
+              return typeof label === "string" && label !== ""
+                ? [
+                    chatgptGroup(
+                      limit.rate_limit,
+                      label === "gpt-5.3-codex-spark" ? "Additional" : label
+                    )
+                  ]
+                : [];
+            })
+          : [])
       ].filter((group) => group !== undefined)
     : [];
   return groups.length ? { groups } : undefined;

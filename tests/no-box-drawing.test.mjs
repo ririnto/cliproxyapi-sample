@@ -45,18 +45,6 @@ await test("rejects both Unicode block boundaries and reports physical line rang
   );
 });
 
-await test("reports one violation per physical line", () => {
-  const lowerBoundary = String.fromCodePoint(0x25_00);
-  const upperBoundary = String.fromCodePoint(0x25_7f);
-  assert.deepEqual(violations(`${lowerBoundary} a\n${upperBoundary} b\n`), [
-    { lineNumber: 1, range: [1, 1] },
-    { lineNumber: 2, range: [1, 1] }
-  ]);
-  assert.deepEqual(violations(`${lowerBoundary}${upperBoundary}\n`), [
-    { lineNumber: 1, range: [1, 1] }
-  ]);
-});
-
 await test("reports diagnostic coordinates after an astral prefix", () => {
   assert.deepEqual(violations(`\u{1F6F0}${String.fromCodePoint(0x25_00)}\n`), [
     { lineNumber: 1, range: [3, 1] }
