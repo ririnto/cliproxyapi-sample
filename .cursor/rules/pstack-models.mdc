@@ -4,27 +4,19 @@ alwaysApply: true
 ---
 # Pstack model configuration
 
-## budget: small (medium)
+# defaults: 3
 
 | Pstack role | Task difficulty | Claude Code model and effort |
 | --- | --- | --- |
-| feature, refactoring | Routine | Sonnet(medium) |
-| bug-fix | Routine | Sonnet(medium) |
-| perf-issue | High | Sonnet(high) |
-| hillclimb | High | Sonnet(high) |
-| judgment and prose | Routine | Sonnet(medium) |
-| hardest tasks | High | Opus(high) |
-| how explorer | Low | Haiku(low) |
-| how explainer | Routine | Sonnet(medium) |
-| why investigators | High | Sonnet(high) |
-| why synthesizer | High | Sonnet(high) |
-| reflect tooling | Low | Haiku(low) |
-| reflect judgment, divergent, synthesizer | High | Sonnet(high) |
-| arena runners | Low or high | Haiku(low), Sonnet(high) |
-| arena cross-judge pool | Low or high | Haiku(low), Sonnet(high) |
-| swarm workers | Low | Haiku(low) |
-| architect runners | Low or high | Haiku(low), Sonnet(high) |
-| interrogate reviewers | Low or high | Haiku(low), Sonnet(high) |
+| feature, refactoring | Routine | Sonnet(medium-high) → Opus(medium-high) |
+| bug-fix | Routine | Sonnet(medium-high) → Opus(high-xhigh) |
+| perf-issue | High | Opus(high-xhigh) |
+| hillclimb | High | Opus(medium-high) → Opus(xhigh) |
+| judgment and prose | Routine | Haiku(low-medium) → Sonnet(medium-high) |
+| arena runners | Low or high | Haiku(medium-high), Opus(medium-high) |
+| arena cross-judge pool | Low or high | Haiku(high-xhigh), Opus(high-xhigh) |
+| swarm workers | Low | Haiku(low-medium) → Sonnet(medium-high) |
+| interrogate reviewers | Low or high | Sonnet(medium-high), Opus(high-xhigh) |
 
 ## Codex aliases
 
@@ -34,4 +26,4 @@ alwaysApply: true
 | Sonnet | terra |
 | Opus | sol |
 
-For native Codex tasks, resolve the alias to the currently available model ID and pass the model ID to the task tool.
+For native Codex tasks, resolve each alias at runtime to the latest compatible model in that family available to the task tool, and pass the resolved model ID and selected effort separately.
