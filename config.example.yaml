@@ -869,8 +869,10 @@ oauth:
     codex:
       - name: "gpt-6.2-astra"
         alias: "gpt-6-astra"
+        fork: true
       - name: "gpt-6.2-sol"
         alias: "gpt-6.1-sol"
+        fork: true
       - name: "gpt-6.2-sol"
         alias: "gpt-6-sol"
       - name: "gpt-6.2-sol"
