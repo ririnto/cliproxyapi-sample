@@ -16,11 +16,12 @@ Use the Node.js version declared in `package.json`.
 Run from the repository root:
 
 ```sh
-pnpm run check:usage-cache
+node --test --test-name-pattern='generated request sequences' .claude/statusline/usage-cache.test.mjs
 ```
 
-The [enumeration](../../../verification/usage-cache.mjs) tests the real cache.
-It checks every returned snapshot's owner across 585 sequences.
+The [cache test](../../statusline/usage-cache.test.mjs) checks 512 sequences.
+It checks the snapshot owner after each of the three requests.
+Checking each prefix also covers one- and two-request sequences.
 It explores up to three sequential requests over two identities.
 Fetches can succeed or fail.
 Requests advance time by one or six seconds.
@@ -34,13 +35,13 @@ The filesystem must behave normally.
 It excludes concurrency, other providers, tampering, and hash collisions.
 Other intervals and collector-specific identity selection are not checked.
 
-The source correspondence was reviewed on `main` on 2026-11-15.
+The source and credential comparison mutation were checked on 2026-11-19.
 Compare covered changes with the enumeration before trusting a later result.
 After a covered change, rerun the check.
 Confirm an isolated broken credential comparison still fails.
 Never weaken the owner assertion to make verification pass.
 Do not mutate production code during verification.
-Update the branch and review date only after completing those checks.
+Update the review date after completing those checks.
 
 On failure, reproduce the reported action sequence against the real cache.
 Distinguish an actual foreign snapshot from an invalid assumption or a script error.

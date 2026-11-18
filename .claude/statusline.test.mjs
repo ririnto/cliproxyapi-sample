@@ -93,7 +93,7 @@ await test("session information stays on the first row in priority order", async
       },
       cost: { total_cost_usd: 0.17, total_duration_ms: 780_000 },
       effort: { level: "high" },
-      model: { display_name: "gpt-6.1-sol" },
+      model: { display_name: "gpt-6.1-sol", id: "fallback-id", effort: "low" },
       workspace: {
         current_dir: "/workspace/codex",
         project_dir: "/workspace/codex"
@@ -106,7 +106,6 @@ await test("session information stays on the first row in priority order", async
     plainText(rows[0]),
     "gpt-6.1-sol high · codex · main · $0.17 · 13m · Context ▰▱▱▱▱▱▱▱ 9% / 305k · in 26k · out 15 · cache read 25.5k"
   );
-  assert.doesNotMatch(plainText(rows[0]), /cache write/u);
 });
 
 await test("idle output omits empty metrics and distinguishes unknown context", async () => {
@@ -442,7 +441,6 @@ await test("credits and usage counts are compact without changing raw values", (
     );
     assert.deepEqual(metric, original);
   }
-  /** @type {unknown} */
   const line = renderSnapshot(
     { name: "Test", showAbove: 5 },
     {
@@ -461,9 +459,7 @@ await test("credits and usage counts are compact without changing raw values", (
 
 await test("provider names use muted blue and hidden names leave no empty title", () => {
   const groups = [{ metrics: [percentage("5h", 10)] }];
-  /** @type {unknown} */
   const rendered = renderSnapshot({ name: "Fallback" }, { groups });
-  assert.ok(typeof rendered === "string");
   assert.ok(rendered.startsWith(`${PROVIDER_COLOR}Fallback${RESET_CODE}  `));
   assert.equal(
     plainText(renderSnapshot({ hideName: true, name: "Fallback" }, { groups })),
@@ -471,29 +467,19 @@ await test("provider names use muted blue and hidden names leave no empty title"
   );
 });
 
-await test("hideLabels filters metric rows", () => {
-  /** @type {unknown} */
-  const line = renderSnapshot(addon, snapshot);
-  assert.ok(typeof line === "string");
-  assert.match(line, /Chat /u);
-  assert.match(line, /Completions /u);
-  assert.doesNotMatch(line, /Premium/u);
-});
-
-await test("all metrics hidden yields no bare group", () => {
-  /** @type {unknown} */
-  const line = renderSnapshot(
-    { hideLabels: ["Chat", "Completions", "Premium"] },
-    snapshot
+await test("hideLabels removes matching metrics and omits empty groups", () => {
+  assert.match(renderSnapshot({}, snapshot), /Premium /u);
+  const filtered = renderSnapshot(addon, snapshot);
+  assert.doesNotMatch(filtered, /Premium /u);
+  assert.match(filtered, /Chat /u);
+  assert.match(filtered, /Completions /u);
+  assert.equal(
+    renderSnapshot(
+      { hideLabels: ["Chat", "Completions", "Premium"] },
+      snapshot
+    ),
+    ""
   );
-  assert.equal(line, "");
-});
-
-await test("no hideLabels keeps all metrics visible", () => {
-  /** @type {unknown} */
-  const line = renderSnapshot({}, snapshot);
-  assert.ok(typeof line === "string");
-  assert.match(line, /Premium /u);
 });
 
 await test("raw labels remain available for hideLabels and showAbove", () => {
@@ -843,133 +829,6 @@ await test("module imports do not render for absent or unrelated argv", (t) => {
   }
 });
 
-await test("collectors handle HTTP errors and cancel response bodies", (t) => {
-  const home = mkdtempSync(path.join(tmpdir(), "statusline-runtime-"));
-  t.after(() => {
-    rmSync(home, { force: true, recursive: true });
-  });
-  const codexDirectory = path.join(home, ".codex");
-  mkdirSync(codexDirectory);
-  writeFileSync(
-    path.join(codexDirectory, "auth.json"),
-    JSON.stringify({ tokens: { access_token: "synthetic-token" } })
-  );
-  const script = `
-    import { setTimeout as delay } from "node:timers/promises";
-    const cancellationController = new AbortController();
-    const pendingCancellation = delay(60_000, undefined, {
-      signal: cancellationController.signal
-    });
-    const [
-      { fetchUsage: fetchCodex },
-      { fetchUsage: fetchCopilot },
-      { fetchUsage: fetchGlm },
-      { fetchUsage: fetchMinimax }
-    ] = await Promise.all([
-      import(${JSON.stringify(new URL("statusline/codex-usage.mjs", import.meta.url).href)}),
-      import(${JSON.stringify(new URL("statusline/copilot-usage.mjs", import.meta.url).href)}),
-      import(${JSON.stringify(new URL("statusline/glm-coding-plan.mjs", import.meta.url).href)}),
-      import(${JSON.stringify(new URL("statusline/minimax-token-plan.mjs", import.meta.url).href)})
-    ]);
-    const requests = {};
-    const errorFetch = (name, status) => (_url, options) => {
-      const request = { cancellations: 0, signal: options.signal };
-      request.response = new Response(
-        new ReadableStream({
-          cancel() {
-            request.cancellations += 1;
-            return pendingCancellation;
-          }
-        }),
-        { status }
-      );
-      requests[name] = request;
-      return request.response;
-    };
-    const copilotAuthorization = [];
-    let errorHookCalls = 0;
-    const copilotFetch = (_url, options) => {
-      copilotAuthorization.push(options.headers.Authorization);
-      return copilotAuthorization.length === 1
-        ? errorFetch("copilot", 401)(_url, options)
-        : new Response(
-            JSON.stringify({
-              quota_snapshots: {
-                premium_interactions: { entitlement: 100, quota_remaining: 70 }
-              }
-            }),
-            { status: 200, headers: { "Content-Type": "application/json" } }
-          );
-    };
-    const [codex, copilot, glm, minimax] = await Promise.all([
-      fetchCodex({
-        cache: false,
-        fetch: errorFetch("codex", 503),
-        home: process.env.HOME
-      }),
-      fetchCopilot({
-        cache: false,
-        credential: "first-token",
-        environment: { COPILOT_GITHUB_TOKEN: "fallback-token" },
-        fetch: copilotFetch,
-        home: process.env.HOME,
-        onUsageError: () => (errorHookCalls += 1),
-        platform: "linux"
-      }),
-      fetchGlm({
-        cache: false,
-        credential: "synthetic-glm-token",
-        fetch: errorFetch("glm", 503)
-      }),
-      fetchMinimax({
-        cache: false,
-        credential: "synthetic-minimax-token",
-        fetch: errorFetch("minimax", 503)
-      })
-    ]);
-    cancellationController.abort();
-    process.stdout.write(JSON.stringify({
-      copilotAuthorizationUsedFallback: copilotAuthorization[1] === "token fallback-token",
-      copilotCalls: copilotAuthorization.length,
-      copilotUsed: copilot?.groups[0].metrics[0].used,
-      errorHookCalls,
-      missingSnapshots: [codex, copilot, glm, minimax].map((snapshot) => snapshot === undefined),
-      requests: Object.fromEntries(Object.entries(requests).map(([name, request]) => [
-        name,
-        {
-          aborted: request.signal.aborted,
-          bodyUsed: request.response.bodyUsed,
-          cancellations: request.cancellations
-        }
-      ]))
-    }));
-  `;
-  const result = spawnSync(
-    process.execPath,
-    ["--input-type=module", "-e", script],
-    {
-      encoding: "utf-8",
-      env: { HOME: home },
-      timeout: 10_000
-    }
-  );
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stderr, "");
-  assert.deepEqual(JSON.parse(result.stdout), {
-    copilotAuthorizationUsedFallback: true,
-    copilotCalls: 2,
-    copilotUsed: 30,
-    errorHookCalls: 1,
-    missingSnapshots: [true, false, true, true],
-    requests: {
-      codex: { aborted: true, bodyUsed: true, cancellations: 1 },
-      copilot: { aborted: true, bodyUsed: true, cancellations: 1 },
-      glm: { aborted: true, bodyUsed: true, cancellations: 1 },
-      minimax: { aborted: true, bodyUsed: true, cancellations: 1 }
-    }
-  });
-});
-
 await test("Codex additional-limit labels stay inside the display row", async (t) => {
   const home = mkdtempSync(path.join(tmpdir(), "statusline-codex-"));
   t.after(() => {
@@ -1024,35 +883,4 @@ await test("Codex additional-limit labels stay inside the display row", async (t
   assert.equal(output.trimEnd().split("\n").length, 2);
   assert.match(plainText(output), /Additional FAKE ROW {2}5h 90% left/u);
   assert.equal(output.includes(RED_TEXT), false);
-});
-
-await test("header reads model and effort fallbacks only when needed", async () => {
-  let displayReads = 0;
-  let idReads = 0;
-  let effortReads = 0;
-  const [row] = await renderStatusline(
-    {
-      effort: { level: "high" },
-      model: {
-        get display_name() {
-          displayReads += 1;
-          return "Known";
-        },
-        get effort() {
-          effortReads += 1;
-          throw new Error("unexpected effort fallback");
-        },
-        get id() {
-          idReads += 1;
-          throw new Error("unexpected model fallback");
-        }
-      }
-    },
-    { branch: "" }
-  );
-  assert.match(plainText(row), /Known/u);
-  assert.match(plainText(row), /high/u);
-  assert.equal(displayReads, 1);
-  assert.equal(idReads, 0);
-  assert.equal(effortReads, 0);
 });

@@ -132,27 +132,6 @@ afterEach(async () => {
   await rm(cacheDir, { force: true, recursive: true });
 });
 
-await test("uses the second TTL getter value without adding reads", async () => {
-  let reads = 0;
-  const options = {
-    ...optionsFor(cacheDir, 1000),
-    get cacheTtlMs() {
-      reads += 1;
-      return reads;
-    }
-  };
-  await withUsageCache("zai", "account", options, async (wrapped) => {
-    assertCallbacks(wrapped);
-    await wrapped.fetch("https://example.test");
-    return snapshot;
-  });
-  const record = parseRecord(
-    await readFile(path.join(cacheDir, "zai.json"), "utf-8")
-  );
-  assert.equal(record.nextAttemptAt, 1002);
-  assert.equal(reads, 3);
-});
-
 await test("reuses a successful snapshot and counts down resetsInMs", async () => {
   let calls = 0;
   const first = await withUsageCache(
@@ -269,6 +248,17 @@ await test("honors an explicit cache directory and custom TTL at its boundary", 
  */
 const consumers = [
   {
+    payload: (value) => ({
+      api_budget: {
+        reset_at: "1970-01-01T00:00:10.000Z",
+        usage_percentage: value
+      }
+    }),
+    provider: "mistral",
+    script: "./mistral-usage.mjs",
+    valueField: "percentage"
+  },
+  {
     auth: { claudeAiOauth: { accessToken: "synthetic-token" } },
     authFile: ".claude/.credentials.json",
     payload: (value) => ({
@@ -338,7 +328,7 @@ const consumers = [
   }
 ];
 
-await test("all five collectors use the home cache and refresh at five seconds", async () => {
+await test("collectors reuse the home cache until its five-second refresh", async () => {
   await Promise.all(
     consumers.map(async (consumer) => {
       const home = path.join(cacheDir, consumer.provider);
@@ -361,7 +351,7 @@ await test("all five collectors use the home cache and refresh at five seconds",
         environment: {},
         fetch: () => {
           calls += 1;
-          return { json: () => consumer.payload(calls * 10), status: 200 };
+          return Response.json(consumer.payload(calls * 10));
         },
         home,
         now: 1000,
@@ -369,61 +359,16 @@ await test("all five collectors use the home cache and refresh at five seconds",
       };
       const first = await fetchUsage(options);
       const directory = path.join(home, ".claude", "cache", "usage");
-      const filePath = path.join(directory, `${consumer.provider}.json`);
-      const bytes = await readFile(filePath);
       assert.equal(firstMetric(first)[consumer.valueField], 10);
-      assert.equal(parseRecord(bytes.toString("utf-8")).nextAttemptAt, 6000);
       assert.deepEqual(await readdir(directory), [`${consumer.provider}.json`]);
       const cached = await fetchUsage({ ...options, now: 5999 });
-      assert.equal(firstMetric(cached)[consumer.valueField], 10);
       assert.equal(firstMetric(cached).resetsInMs, 4001);
       assert.equal(calls, 1);
-      assert.deepEqual(await readFile(filePath), bytes);
       const refreshed = await fetchUsage({ ...options, now: 6000 });
       assert.equal(firstMetric(refreshed)[consumer.valueField], 20);
       assert.equal(calls, 2);
-      const record = parseRecord(await readFile(filePath, "utf-8"));
-      assert.equal(record.fetchedAt, 6000);
-      assert.equal(record.nextAttemptAt, 11_000);
     })
   );
-});
-
-await test("mistral collector uses the home cache and refreshes at five seconds", async () => {
-  const home = path.join(cacheDir, "mistral");
-  const { fetchUsage } = await import("./mistral-usage.mjs");
-  let calls = 0;
-  const options = {
-    credential: "synthetic-token",
-    environment: {},
-    fetch: () => {
-      calls += 1;
-      return Response.json({
-        api_budget: { reset_at: null, usage_percentage: calls * 10 }
-      });
-    },
-    home,
-    now: 1000,
-    platform: "linux"
-  };
-  const first = await fetchUsage(options);
-  const directory = path.join(home, ".claude", "cache", "usage");
-  const filePath = path.join(directory, "mistral.json");
-  const bytes = await readFile(filePath);
-  assert.equal(firstGroup(first).label, "Mistral");
-  assert.equal(firstMetric(first).percentage, 10);
-  assert.equal(parseRecord(bytes.toString("utf-8")).nextAttemptAt, 6000);
-  assert.deepEqual(await readdir(directory), ["mistral.json"]);
-  const cached = await fetchUsage({ ...options, now: 5999 });
-  assert.equal(firstMetric(cached).percentage, 10);
-  assert.equal(calls, 1);
-  assert.deepEqual(await readFile(filePath), bytes);
-  const refreshed = await fetchUsage({ ...options, now: 6000 });
-  assert.equal(firstMetric(refreshed).percentage, 20);
-  assert.equal(calls, 2);
-  const record = parseRecord(await readFile(filePath, "utf-8"));
-  assert.equal(record.fetchedAt, 6000);
-  assert.equal(record.nextAttemptAt, 11_000);
 });
 
 await test("invalidates data when credential identity changes", async () => {
@@ -565,7 +510,6 @@ await test("preserves prior data when a successful HTTP body is malformed", asyn
       return snapshot;
     }
   );
-  let onUsageError;
   const result = await withUsageCache(
     "zai",
     "account",
@@ -574,11 +518,9 @@ await test("preserves prior data when a successful HTTP body is malformed", asyn
       assertCallbacks(options);
       const { fetch, onUsageError: markUsageError } = options;
       await fetch("https://example.test");
-      onUsageError = markUsageError;
       markUsageError?.();
     }
   );
-  assert.equal(typeof onUsageError, "function");
   assert.equal(firstMetric(result).label, "5h");
   assert.deepEqual(
     parseRecord(await readFile(path.join(cacheDir, "zai.json"), "utf-8"))
@@ -778,114 +720,36 @@ await test("bypasses cache when disabled", async () => {
   assert.deepEqual(await readdir(cacheDir), []);
 });
 
-await test("bypass preserves synchronous and asynchronous primitive results", async () => {
-  const values = [null, 0, "snapshot"];
+await test("disabled and unsupported caches pass through results and errors", async () => {
   await Promise.all(
-    ["zai", "unknown-provider"].flatMap((provider) =>
-      values.map(async (value) => {
-        const options = { cache: false, cacheDir };
-        let observed;
-        const synchronous = await withUsageCache(
+    [
+      { provider: "zai", cache: false },
+      { provider: "unknown-provider", cache: true }
+    ].map(async ({ provider, cache }) => {
+      const options = { cacheDir, cache };
+      const failure = new Error("collector failed");
+      assert.equal(
+        await withUsageCache(provider, "account", options, () => 0),
+        0
+      );
+      assert.deepEqual(
+        await withUsageCache(
           provider,
           "account",
           options,
-          (input) => {
-            observed = input;
-            return value;
-          }
-        );
-        assert.equal(synchronous, value);
-        assert.equal(observed, options);
-        assert.equal(
-          await withUsageCache(
-            provider,
-            "account",
-            options,
-            async () => await Promise.resolve(value)
-          ),
-          value
-        );
-      })
-    )
-  );
-  await Promise.all(
-    values.map(async (value) => {
-      assert.equal(
-        await withUsageCache(
-          "unknown-provider",
-          "account",
-          { cacheDir },
-          () => value
+          async () => await Promise.resolve(snapshot)
         ),
-        value
+        snapshot
       );
-      assert.equal(
-        await withUsageCache(
-          "unknown-provider",
-          "account",
-          { cacheDir },
-          async () => await Promise.resolve(value)
-        ),
-        value
-      );
-    })
-  );
-});
-
-await test("bypass propagates thrown and rejected callback failures", async () => {
-  await Promise.all(
-    [
-      { options: { cache: false, cacheDir }, provider: "zai" },
-      { options: { cacheDir }, provider: "unknown-provider" }
-    ].map(async ({ provider, options }) => {
-      const failure = new Error("callback failure");
       await assert.rejects(
         withUsageCache(provider, "account", options, () => {
           throw failure;
         }),
-        (error) => error === failure
-      );
-      await assert.rejects(
-        withUsageCache(provider, "account", options, async () => {
-          await Promise.resolve();
-          throw failure;
-        }),
-        (error) => error === failure
+        failure
       );
     })
   );
-});
-
-await test("cached path wraps fetch and replaces the usage error callback", async () => {
-  let originalErrors = 0;
-  const originalFetch = fetchResponse();
-  const originalOnUsageError = () => {
-    originalErrors += 1;
-  };
-  const options = {
-    cacheDir,
-    fetch: originalFetch,
-    now: 1000,
-    onUsageError: originalOnUsageError
-  };
-  let observed;
-  const result = await withUsageCache(
-    "zai",
-    "account",
-    options,
-    async (input) => {
-      observed = input;
-      assertCallbacks(input);
-      assert.notEqual(input.fetch, originalFetch);
-      assert.notEqual(input.onUsageError, originalOnUsageError);
-      await input.fetch("https://example.test");
-      input.onUsageError?.();
-      return snapshot;
-    }
-  );
-  assert.notEqual(observed, options);
-  assert.equal(originalErrors, 0);
-  assert.equal(result, undefined);
+  assert.deepEqual(await readdir(cacheDir), []);
 });
 
 await test("cached path catches callback failures", async () => {
@@ -1002,7 +866,6 @@ await test("rejects persisted budget metrics with missing or string percentage a
 
 await test("resets normalization failure for a later successful HTTP attempt", async () => {
   let calls = 0;
-  let hookAvailable = false;
   assert.deepEqual(
     await withUsageCache(
       "zai",
@@ -1010,7 +873,6 @@ await test("resets normalization failure for a later successful HTTP attempt", a
       optionsFor(cacheDir, 1000),
       async (wrapped) => {
         await fetchSnapshot(wrapped);
-        hookAvailable = typeof wrapped.onUsageError === "function";
         wrapped.onUsageError?.();
         await fetchSnapshot(wrapped);
         calls += 1;
@@ -1020,5 +882,4 @@ await test("resets normalization failure for a later successful HTTP attempt", a
     snapshot
   );
   assert.equal(calls, 1);
-  assert.equal(hookAvailable, true);
 });

@@ -26,11 +26,10 @@ const record = (value) => (isRecord(value) ? value : {});
 const array = (value) => (Array.isArray(value) ? value : []);
 const truthy = Boolean;
 /**
- * @param {unknown} value - Candidate.
- * @param {() => unknown} alternative - Lazy fallback.
+ * @param {unknown} value - Preferred field.
+ * @param {() => unknown} fallback - Read the fallback field if needed.
  */
-const truthyOr = (value, alternative) =>
-  truthy(value) ? value : alternative();
+const truthyOr = (value, fallback) => (truthy(value) ? value : fallback());
 /**
  * @param {unknown} value - Path input.
  * @param {string} fallback - Default path.
@@ -42,15 +41,6 @@ const textOr = (value, fallback = "") =>
  * @returns {value is RecordValue & {id: string}} Task with an identifier.
  */
 const isTask = (value) => isRecord(value) && typeof value.id === "string";
-/** @param {unknown} value - Optional receiver.
- * @param {() => string} key - Lazy property name.
- * @returns {unknown} Optional field.
- */
-const optionalField = (value, key) =>
-  value === null || value === undefined
-    ? undefined
-    : Reflect.get(new Object(value), key());
-
 const RESET = "\u001B[0m";
 const DIM = "\u001B[38;2;132;144;156m";
 const BOLD = "\u001B[1m";
@@ -60,6 +50,12 @@ const BLUE = "\u001B[38;2;143;179;239m";
 const STEEL = "\u001B[38;2;166;190;211m";
 const PINK = "\u001B[38;2;233;144;169m";
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+const statusMarks = new Map([
+  ["completed", { color: GREEN, glyph: "✔" }],
+  ["failed", { color: PINK, glyph: "✗" }],
+  ["killed", { color: DIM, glyph: "⊘" }]
+]);
 
 /** @template T
  * @param {() => T} operation - Optional operation.
@@ -208,12 +204,8 @@ const taskLabel = (task, mark) => {
   const effortText =
     task.effort === undefined
       ? truthyOr(
-          optionalField(
-            optionalField(settings.modelSettings, () =>
-              displayText(task.model)
-            ),
-            () => "effortLevel"
-          ),
+          record(record(settings.modelSettings)[displayText(task.model)])
+            .effortLevel,
           () => truthyOr(settings.effortLevel, () => "")
         )
       : displayText(task.effort);
@@ -250,7 +242,7 @@ export const renderRows = (input, nowMs) => {
   const available = Number(truthyOr(input.columns, () => input.width));
   const columns =
     Number.isFinite(available) && available > 0 ? Math.floor(available) : 0;
-  return (Array.isArray(input.tasks) ? array(input.tasks) : [])
+  return array(input.tasks)
     .filter(isTask)
     .map((task) => {
       const elapsedMs = Math.max(
@@ -332,11 +324,7 @@ export const renderRows = (input, nowMs) => {
       const elapsed = elapsedText(elapsedMs);
       const left = taskLabel(
         task,
-        new Map([
-          ["completed", { color: GREEN, glyph: "✔" }],
-          ["failed", { color: PINK, glyph: "✗" }],
-          ["killed", { color: DIM, glyph: "⊘" }]
-        ]).get(String(task.status)) ?? {
+        statusMarks.get(String(task.status)) ?? {
           color: BLUE,
           glyph: SPINNER[Math.floor(elapsedMs / 1000) % SPINNER.length]
         }

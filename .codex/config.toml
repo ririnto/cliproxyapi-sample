@@ -3,6 +3,7 @@ approvals_reviewer = "auto_review"
 default_permissions = ":danger-full-access"
 model = "gpt-6.1-terra"
 model_catalog_json = "model_catalog.json"
+model_provider = "openai"
 model_reasoning_effort = "high"
 model_verbosity = "low"
 openai_base_url = "http://localhost:8317/v1"
@@ -71,6 +72,8 @@ url = "https://mcp.grep.app"
 [memories]
 consolidation_model = "gpt-6.1-terra"
 extract_model = "gpt-6-luna"
+
+[model_providers.openai]
 
 [notice]
 fast_default_opt_out = true

@@ -45,15 +45,17 @@ V1은 설정 형식이 다르므로 이 파일을 그대로 사용할 수 없다
 자세한 내용은 [OpenCode 권한 문서](https://opencode.ai/docs/permissions/)를 참조한다.
 
 `.codex/config.toml`은 Codex 클라이언트 설정이다.
-`approval_policy = "never"`는 승인 요청을 표시하지 않는다.
+`model_provider = "openai"`와 빈 `[model_providers.openai]` 테이블로 기본 공급자를 명시한다.
+`model_catalog_json`이 가리키는 `model_catalog.json`을 설정 파일과 같은 디렉터리에 복사하면
+Codex의 모델 선택기에서 카탈로그 모델을 볼 수 있다.
+`approval_policy = "on-request"`는 필요할 때 승인을 요청한다.
 `sandbox_mode = "danger-full-access"`는 Codex의 샌드박스를 비활성화한다.
 `approvals_reviewer = "auto_review"`는 승인 요청이 허용되는 정책에서 적격 요청을 검토한다.
-이 설정은 `never`에서 모든 작업을 승인하거나 샌드박스를 제공하지 않는다.
 프로젝트 설정은 신뢰된 프로젝트에 적용되며 관리 정책이나 실행 시 설정이 유효한 동작을 제한하거나 변경할 수 있다.
 자세한 내용은 [Codex 설정 참조](https://developers.openai.com/codex/config-reference/)를 확인한다.
 
 **주의:** 이 설정은 에이전트가 사용자 권한으로 파일을 읽거나 수정하고, 명령을 실행하고, 네트워크에 접근할 수 있게 한다.
-악의적인 프롬프트나 저장소 내용으로 비밀 정보 유출, 데이터 손실, 외부 서비스 변경이 발생할 수 있으며 실행 전 사람의 확인이 없다.
+악의적인 프롬프트나 저장소 내용으로 비밀 정보 유출, 데이터 손실, 외부 서비스 변경이 발생할 수 있다.
 신뢰할 수 있는 환경에서만 사용하고 필요한 경우 각 클라이언트의 권한과 샌드박스 설정을 강화한다.
 이 파일들은 클라이언트 권한 설정이며 `config.example.yaml`의 프록시 인증, 네트워크 또는 공급자 설정을 변경하지 않는다.
 
@@ -196,7 +198,7 @@ for module in ".claude/statusline/"*.mjs; do
 done
 ```
 
-런타임은 진입점과 `.claude/statusline/`의 일곱 실행 모듈이다.
+런타임은 진입점과 `.claude/statusline/`의 실행 모듈이다.
 테스트 파일과 `README.md`는 설치 대상이 아니다.
 사용량 캐시와 수집기 동작은 [statusline README](.claude/statusline/README.md)를 참고한다.
 
@@ -228,7 +230,8 @@ Use the Node.js and pnpm versions declared in `package.json`.
 Run `pnpm install --frozen-lockfile` from the repository root.
 Installation activates Husky's Git hooks.
 The hooks run `pnpm run pre-commit` and `pnpm run pre-push` respectively.
-Both scripts run Markdownlint, Ultracite and the offline regression tests.
+The commit hook checks formatting and lint.
+The push hook also checks types and runs the regression tests.
 The pnpm override selects a patched math parser dependency.
 Run `pnpm run fix` to apply Markdownlint and Ultracite fixes.
 Run `pnpm run pre-push` to repeat the complete local gate.

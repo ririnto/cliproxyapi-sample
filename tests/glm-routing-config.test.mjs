@@ -25,31 +25,31 @@ await test("Z.ai GLM config keeps qualified and bare IDs and Codex effort overri
   assert.equal(zai.get("prefix"), "zai");
   assert.equal(config.getIn(["routing", "force-model-prefix"]), false);
 
-  const expectedModels = ["glm-5.3", "glm-5.3-flash"];
-  assert.deepEqual(
-    mappings(zai.get("models")).map((model) => [
-      model.get("name"),
-      model.get("alias")
-    ]),
-    expectedModels.map((model) => [model, model])
-  );
-  const overrides = config.getIn(["requests", "payload", "override"]);
-  for (const [incoming, outgoing] of [
-    ["xhigh", "max"],
-    ["medium", "high"],
-    ["minimal", "low"]
-  ]) {
-    const rule = mappings(overrides).find(
-      (entry) => entry.getIn(["params", "reasoning.effort"]) === outgoing
+  const models = mappings(zai.get("models"));
+  const overrides = mappings(config.getIn(["requests", "payload", "override"]));
+  for (const id of ["glm-5.3", "glm-5.3-flash"]) {
+    assert.equal(
+      models.find((model) => model.get("alias") === id)?.get("name"),
+      id
     );
-    assert.ok(rule);
-    assert.deepEqual(
-      mappings(rule.get("models")).map((model) => [
-        model.get("name"),
-        model.get("protocol"),
-        model.getIn(["match", 0, "reasoning.effort"])
-      ]),
-      expectedModels.map((model) => [model, "codex", incoming])
-    );
+    for (const [input, output] of [
+      ["xhigh", "max"],
+      ["medium", "high"],
+      ["minimal", "low"]
+    ]) {
+      const matching = overrides.filter((rule) =>
+        mappings(rule.get("models")).some(
+          (model) =>
+            model.get("name") === id &&
+            model.get("protocol") === "codex" &&
+            model.getIn(["match", 0, "reasoning.effort"]) === input
+        )
+      );
+      assert.deepEqual(
+        matching.map((rule) => rule.getIn(["params", "reasoning.effort"])),
+        [output],
+        `${id} ${input}`
+      );
+    }
   }
 });

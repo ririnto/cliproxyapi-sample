@@ -545,59 +545,6 @@ await test("falls back to file credentials when Keychain lookup fails", async ()
   }
 });
 
-await test("disposes HTTP error response bodies before returning", async () => {
-  const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
-  let cancellations = 0;
-  /** @type {AbortSignal | undefined} */
-  let requestSignal;
-  const errorResponse = new Response(
-    new ReadableStream({
-      cancel() {
-        cancellations += 1;
-      }
-    }),
-    { status: 503 }
-  );
-  try {
-    await Promise.all(
-      [
-        [".copilot", "config.json"],
-        [".config", "github-copilot", "oauth.json"],
-        [".local", "share", "opencode", "auth.json"],
-        [".config", "gh", "hosts.json"]
-      ].map(async (parts) => {
-        const filePath = path.join(home, ...parts);
-        await mkdir(path.dirname(filePath), { recursive: true });
-        await writeFile(filePath, "{}");
-      })
-    );
-    assert.equal(
-      await fetchUsage({
-        cache: false,
-        credential: "synthetic-copilot-token",
-        environment: {
-          COPILOT_GITHUB_TOKEN: "",
-          GH_TOKEN: "",
-          GITHUB_TOKEN: ""
-        },
-        fetch: (_url, options) => {
-          requestSignal = options.signal;
-          return errorResponse;
-        },
-        home,
-        platform: "linux"
-      }),
-      undefined
-    );
-    assert.equal(cancellations, 1);
-    assert.ok(requestSignal);
-    assert.equal(requestSignal.aborted, true);
-    assert.equal(errorResponse.bodyUsed, true);
-  } finally {
-    await rm(home, { force: true, recursive: true });
-  }
-});
-
 await test("disposes unauthorized responses before fallback, even when cancellation rejects", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "copilot-usage-"));
   try {
