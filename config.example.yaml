@@ -902,13 +902,9 @@ oauth:
         max-context-length: 272000
       - name: "gpt-6-astra"
         max-context-length: 272000
-      - name: "gpt-6-chat-thinking"
-        max-context-length: 272000
       - name: "gpt-6.1-terra"
         max-context-length: 272000
       - name: "gpt-6-sol"
-        max-context-length: 272000
-      - name: "gpt-reserve"
         max-context-length: 272000
       - name: "gpt-6-luna"
         max-context-length: 272000
