@@ -768,6 +768,7 @@ client:
 api-keys:
   codex:
     - name: zai
+      prefix: zai
       base-url: https://api.z.ai/api/v1
       models:
         - name: glm-5.3
