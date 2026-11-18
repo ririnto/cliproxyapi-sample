@@ -18,6 +18,9 @@ GLM의 `display-name`, `is-compat: true`, context 한도를 유지한다.
 Codex provider에는 `support-prompt-cache-key`를 지정하지 않는다.
 `input-modalities`, `output-modalities`도 지정하지 않는다.
 GPT 모델을 사용하려면 Codex OAuth로 로그인한다.
+이전 Astra·Sol 이름은 GPT-6.2 모델로 연결된다.
+Terra와 Luna는 현재 이름과 이전 이름을 모두 지원하므로 기본 모델과 서브에이전트 설정을 그대로 사용할 수 있다.
+OAuth 계정 파일에 `"prefix": "chatgpt"`를 지정하면 같은 모델을 `chatgpt/` 접두사로도 호출할 수 있다.
 
 ```bash
 brew install cliproxyapi
@@ -232,14 +235,18 @@ Installation activates Husky's Git hooks.
 The hooks run `pnpm run pre-commit` and `pnpm run pre-push` respectively.
 The commit hook checks formatting and lint.
 The push hook also checks types and runs the regression tests.
+The routing test starts `cliproxyapi` from PATH.
+Set `CLIPROXYAPI_TEST_BINARY` to the executable path if it has another name.
+CI uses CLIProxyAPI 8.0.77.
 The pnpm override selects a patched math parser dependency.
 Run `pnpm run fix` to apply Markdownlint and Ultracite fixes.
 Run `pnpm run pre-push` to repeat the complete local gate.
 The Checks workflow uses the same gate on Node.js 24.22.3.
 It also validates Docker Compose without starting services.
 Tests use isolated temporary directories and local fixtures.
-They do not require provider credentials or service requests.
-Provider fixtures verify local normalization and failure handling.
+A synthetic OAuth credential exercises the served model catalog.
+A local Responses server records the model and reasoning effort of GLM requests.
+Statusline fixtures verify normalization and failure handling.
 They do not establish live service compatibility.
 
 ### Change lifecycle
