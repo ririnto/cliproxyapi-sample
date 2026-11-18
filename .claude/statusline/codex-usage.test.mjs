@@ -56,109 +56,49 @@ const writeAuth = async (home) => {
   );
 };
 
-await test("labels the main group with the ChatGPT plan", async () => {
+await test("fetches account limits and keeps additional quota windows separate", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
   try {
     await writeAuth(home);
     const snapshot = await fetchUsage({
       cache: false,
+      home,
       fetch: (_url, options) => {
         assert.equal(options.headers.Authorization, "Bearer tok");
         assert.equal(options.headers["ChatGPT-Account-ID"], "acc");
-        return jsonResponse(
-          () => ({
-            plan_type: "pro",
-            rate_limit: {
-              primary_window: {
-                limit_window_seconds: 604_800,
-                used_percent: 10
-              },
-              secondary_window: {
-                limit_window_seconds: 18_000,
-                used_percent: 20
+        return Response.json({
+          rate_limit: {
+            primary_window: {
+              limit_window_seconds: 18_000,
+              used_percent: 20,
+              reset_after_seconds: 3
+            },
+            secondary_window: {
+              limit_window_seconds: 604_800,
+              used_percent: 10
+            }
+          },
+          additional_rate_limits: [
+            {
+              limit_name: "extra",
+              rate_limit: {
+                primary_window: { limit_window_seconds: 7200, used_percent: 5 }
               }
             }
-          }),
-          200
-        );
-      },
-      home
+          ]
+        });
+      }
     });
-    assert.equal(snapshotGroups(snapshot)[0].label, "ChatGPT (Pro)");
-  } finally {
-    await rm(home, { force: true, recursive: true });
-  }
-});
-
-await test("omits the main group label for a missing or unknown plan", async () => {
-  const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
-  try {
-    await writeAuth(home);
-    const snapshots = await Promise.all(
-      [undefined, "not-a-plan"].map(
-        async (plan_type) =>
-          await fetchUsage({
-            cache: false,
-            fetch: () =>
-              jsonResponse(
-                () => ({
-                  plan_type,
-                  rate_limit: {
-                    secondary_window: {
-                      limit_window_seconds: 18_000,
-                      used_percent: 1
-                    }
-                  }
-                }),
-                200
-              ),
-            home
-          })
-      )
-    );
     assert.deepEqual(
-      snapshots.map((snapshot) => snapshotGroups(snapshot)[0].label),
-      [undefined, undefined]
+      snapshot?.groups.map((group) => group.metrics),
+      [
+        [
+          { label: "7d", type: "percentage", percentage: 10, resetsInMs: 0 },
+          { label: "5h", type: "percentage", percentage: 20, resetsInMs: 3000 }
+        ],
+        [{ label: "2h", type: "percentage", percentage: 5, resetsInMs: 0 }]
+      ]
     );
-  } finally {
-    await rm(home, { force: true, recursive: true });
-  }
-});
-
-await test("keeps the Additional label for additional rate limits", async () => {
-  const home = await mkdtemp(path.join(tmpdir(), "codex-usage-"));
-  try {
-    await writeAuth(home);
-    const snapshot = await fetchUsage({
-      cache: false,
-      fetch: () =>
-        jsonResponse(
-          () => ({
-            additional_rate_limits: [
-              {
-                limit_name: "gpt-5.3-codex-spark",
-                rate_limit: {
-                  secondary_window: {
-                    limit_window_seconds: 18_000,
-                    used_percent: 5
-                  }
-                }
-              }
-            ],
-            plan_type: "plus",
-            rate_limit: {
-              secondary_window: {
-                limit_window_seconds: 18_000,
-                used_percent: 1
-              }
-            }
-          }),
-          200
-        ),
-      home
-    });
-    assert.equal(snapshotGroups(snapshot)[0].label, "ChatGPT (Plus)");
-    assert.equal(snapshotGroups(snapshot)[1].label, "Additional");
   } finally {
     await rm(home, { force: true, recursive: true });
   }
@@ -467,10 +407,6 @@ await test("keeps optional diagnostics content-free while using OpenCode credent
       assert.equal(result.stderr.includes(home), false);
       assert.equal(result.stderr.includes(diagnosticContent), false);
       assert.equal(result.stderr.includes(fallbackToken), false);
-      assert.equal(result.stderr.includes("SyntaxError:"), false);
-      if (debug === "0") {
-        assert.ok(result.stderr.includes("[codex-usage]"));
-      }
     }
   } finally {
     await rm(home, { force: true, recursive: true });

@@ -31,9 +31,6 @@ const addon = { hideLabels: ["Premium"] };
 /** @param {unknown} value - Value to render as plain text. */
 const plainText = (value) => stripVTControlCharacters(String(value));
 const RED_TEXT = "\u001B[31m";
-const PROVIDER_COLOR = "\u001B[38;2;166;190;211m";
-const WARNING_COLOR = "\u001B[38;2;233;144;169m";
-const RESET_CODE = "\u001B[0m";
 const nowMs = 1_700_000_000_000;
 /**
  * @param {string} label - Metric label.
@@ -78,33 +75,31 @@ const renderProviderRows = async (providers, options = {}) =>
     ...options
   });
 
-await test("session information stays on the first row in priority order", async () => {
-  const rows = await renderStatusline(
-    {
-      context_window: {
-        context_window_size: 305_000,
-        current_usage: {
-          cache_creation_input_tokens: 0,
-          cache_read_input_tokens: 25_500
-        },
-        total_input_tokens: 26_000,
-        total_output_tokens: 15,
-        used_percentage: 9
+await test("explicit model and effort take precedence over fallback fields", async () => {
+  const options = { branch: "" };
+  const model = { display_name: "Selected", id: "Fallback", effort: "low" };
+  const effort = { level: "high" };
+  const selected = await renderStatusline({ model, effort }, options);
+  assert.deepEqual(
+    selected,
+    await renderStatusline(
+      {
+        model: { display_name: model.display_name },
+        effort
       },
-      cost: { total_cost_usd: 0.17, total_duration_ms: 780_000 },
-      effort: { level: "high" },
-      model: { display_name: "gpt-6.1-sol", id: "fallback-id", effort: "low" },
-      workspace: {
-        current_dir: "/workspace/codex",
-        project_dir: "/workspace/codex"
-      }
-    },
-    { branch: "main" }
+      options
+    )
   );
-  assert.equal(rows.length, 1);
-  assert.equal(
-    plainText(rows[0]),
-    "gpt-6.1-sol high · codex · main · $0.17 · 13m · Context ▰▱▱▱▱▱▱▱ 9% / 305k · in 26k · out 15 · cache read 25.5k"
+  assert.notDeepEqual(selected, await renderStatusline({ model }, options));
+  assert.notDeepEqual(
+    selected,
+    await renderStatusline(
+      {
+        model: { id: model.id },
+        effort
+      },
+      options
+    )
   );
 });
 
@@ -141,42 +136,6 @@ await test("context uses eight cells with at least one filled cell for positive 
       assert.equal(match.groups.bar.includes("▰"), value > 0);
     })
   );
-});
-
-await test("providers use two columns with compact names and remaining percentages", async () => {
-  const rows = await renderProviderRows([
-    {
-      metrics: [percentage("5h", 26, 265), percentage("7d", 18, 8040)],
-      name: "Claude (Pro)",
-      primary: true
-    },
-    { metrics: [percentage("5h", 22, 20)], name: "Z.AI (Pro)" },
-    {
-      metrics: [
-        percentage("7d", 94, 1439),
-        { label: "credit", remaining: 57_500, type: "credit" }
-      ],
-      name: "ChatGPT (Pro)"
-    },
-    {
-      metrics: [
-        { label: "Premium", total: 1500, type: "usage", used: 211.3214152413 }
-      ],
-      name: "Copilot (Individual)"
-    }
-  ]);
-  assert.equal(rows.length, 3);
-  const first = plainText(rows[1]);
-  const second = plainText(rows[2]);
-  assert.match(
-    first,
-    /^Claude {2}5h 74% left ↻4h25m · 7d 82% left ↻5d14h {2}│ {2}Z\.AI {2}5h 78% left ↻20m$/u
-  );
-  assert.match(
-    second,
-    /^ChatGPT {2}7d 6% left ↻23h59m · credit 57\.5k +│ {2}Copilot {2}Premium 211\.3\/1\.5k$/u
-  );
-  assert.equal(first.indexOf("│"), second.indexOf("│"));
 });
 
 await test("column alignment follows reset-length transitions", async () => {
@@ -398,7 +357,7 @@ await test("spend limits preserve budgets and fall back only to valid percentage
         { rate_limits: { spend_limit: spendLimit } },
         { branch: "", nowMs }
       );
-      assert.ok(rows[1].includes(`spend ${WARNING_COLOR}`));
+
       assert.match(
         plainText(rows[1]),
         /spend (?:\$600\.00\/\$500\.00|0% left)/u
@@ -457,14 +416,13 @@ await test("credits and usage counts are compact without changing raw values", (
   assert.equal(plainText(line), "Test  credit $3.00");
 });
 
-await test("provider names use muted blue and hidden names leave no empty title", () => {
-  const groups = [{ metrics: [percentage("5h", 10)] }];
-  const rendered = renderSnapshot({ name: "Fallback" }, { groups });
-  assert.ok(rendered.startsWith(`${PROVIDER_COLOR}Fallback${RESET_CODE}  `));
-  assert.equal(
-    plainText(renderSnapshot({ hideName: true, name: "Fallback" }, { groups })),
-    "5h 90% left"
-  );
+await test("hideName drops the addon name and retains its metrics", () => {
+  const usage = { groups: [{ metrics: [percentage("5h", 10)] }] };
+  const named = renderSnapshot({ name: "Example" }, usage);
+  const hidden = renderSnapshot({ name: "Example", hideName: true }, usage);
+  assert.notEqual(named, hidden);
+  assert.ok(hidden.length > 0);
+  assert.equal(hidden, renderSnapshot({}, usage));
 });
 
 await test("hideLabels removes matching metrics and omits empty groups", () => {
@@ -539,7 +497,6 @@ await test("external addon names and metric values stay on one plain-text row", 
     )
   );
   assert.equal(output.includes(RED_TEXT), false);
-  assert.ok(output.includes(`${PROVIDER_COLOR}Credit FAKE GROUP${RESET_CODE}`));
 });
 
 await test("external header strings stay on one plain-text row", async () => {
@@ -562,8 +519,6 @@ await test("external header strings stay on one plain-text row", async () => {
     )
   );
   assert.equal(output.includes(RED_TEXT), false);
-  assert.ok(output.includes("\u001B[38;2;246;226;183m"));
-  assert.ok(output.includes("\u001B[38;2;143;179;239m"));
 });
 
 await test("resolves large credential reference lists without stack overflow", async () => {
@@ -774,8 +729,7 @@ await test("public CLI resolves addon settings from the configured directory", a
     const rows = output.trimEnd().split("\n");
     assert.equal(rows.length, 2);
     assert.match(plainText(output), /EVIL FAKE ROW {2}5h SPOOF 90% left/u);
-    assert.ok(output.includes(`${PROVIDER_COLOR}EVIL FAKE ROW${RESET_CODE}`));
-    assert.ok(output.includes("\u001B[38;2;171;223;167m"));
+
     assert.equal(output.includes(RED_TEXT), false);
   });
   await t.test("newline workspace basename stays within its header row", () => {

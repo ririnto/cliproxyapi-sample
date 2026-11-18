@@ -237,7 +237,7 @@ The commit hook checks formatting and lint.
 The push hook also checks types and runs the regression tests.
 The routing test starts `cliproxyapi` from PATH.
 Set `CLIPROXYAPI_TEST_BINARY` to the executable path if it has another name.
-CI uses CLIProxyAPI 8.0.77.
+CI downloads the latest CLIProxyAPI release for Linux amd64.
 The pnpm override selects a patched math parser dependency.
 Run `pnpm run fix` to apply Markdownlint and Ultracite fixes.
 Run `pnpm run pre-push` to repeat the complete local gate.
