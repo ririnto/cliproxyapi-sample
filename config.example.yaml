@@ -867,9 +867,15 @@ oauth:
   #       alias: "sample-latest"
   model-alias:
     codex:
-      - name: "gpt-6.1-sol"
+      - name: "gpt-6.2-astra"
+        alias: "gpt-6-astra"
+        fork: true
+      - name: "gpt-6.2-sol"
+        alias: "gpt-6.1-sol"
+        fork: true
+      - name: "gpt-6.2-sol"
         alias: "gpt-6-sol"
-      - name: "gpt-6.1-sol"
+      - name: "gpt-6.2-sol"
         alias: "gpt-5.6-sol"
       - name: "gpt-6.1-terra"
         alias: "gpt-5.6-terra"
@@ -887,6 +893,10 @@ oauth:
   #       max-context-length: 1048576
   settings:
     codex:
+      - name: "gpt-6.2-astra"
+        max-context-length: 272000
+      - name: "gpt-6.2-sol"
+        max-context-length: 272000
       - name: "gpt-6.1-sol"
         max-context-length: 272000
       - name: "gpt-6-astra"
