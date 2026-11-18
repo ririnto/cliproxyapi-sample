@@ -1,10 +1,7 @@
 # Usage cache
 
-The Claude statusline and OpenCode usage plugin share the provider collectors
-in this directory.
+The Claude Code statusline uses the provider collectors in this directory.
 The default cache lifetime is five seconds.
-OpenCode also allows an automatic refresh attempt after five seconds on
-session idle.
 
 Provider snapshots use `~/.claude/cache/usage/<provider>.json` by default.
 The path follows the user's home directory, regardless of the working
@@ -18,15 +15,17 @@ Provider `Retry-After` cooldowns can delay the next request beyond five
 seconds.
 Failed requests can retain a snapshot for up to five minutes under the
 existing stale-data policy.
-The OpenCode refresh command bypasses its idle refresh gate while preserving
-the collector's cache and cooldown behavior.
 
-Changing the default does not move or delete files from
-`~/.claude/statusline/.cache/`.
-An explicit `cacheDir` can still select that directory.
-Existing records retain their saved retry times until the next request.
-Installed copies need a separately owned source update and reload to activate
-these defaults.
+Set `STATUSLINE_DEBUG=1` in the statusline command's environment.
+If a response body rejects cancellation, the collector logs its status to stderr.
+Credential fallback still receives the HTTP status.
+
+The host uses `CLAUDE_CONFIG_DIR` for scripts and settings.
+If the project has a `statusLineAddon` array, credential file references resolve
+from the project's `.claude` directory.
+Otherwise, it resolves them from the selected settings directory.
+Relative addon script paths resolve from the installed `statusline.mjs`.
+Absolute paths and home-relative paths are also supported.
 
 ## Usage cache states
 
@@ -103,9 +102,7 @@ Trailing zeroes are removed.
 Reset times use compact forms such as `23h59m` or `5d14h`.
 Trailing `Pro` and `Individual` plan suffixes are omitted from provider names.
 
-These display changes do not change collector data or credentials.
-Cache behavior is unchanged.
-Use the repository's installation procedure to copy the updated `statusline.mjs`.
+To update an installed copy, repeat the [statusline installation](../../README.md#claude-code-상태줄-설치).
 
 ## Subagent rows
 
