@@ -40,7 +40,11 @@ export const requestJson = async (
           delay(3000, undefined, { signal: controller.signal })
         ]);
       } catch {
-        // A closed body can reject cancellation. Preserve the HTTP status for fallback.
+        if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
+          console.error(
+            `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
+          );
+        }
       }
       controller.abort();
       return { status: response.status };
