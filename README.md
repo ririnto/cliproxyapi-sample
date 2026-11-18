@@ -109,15 +109,25 @@ Claude Code 2.1.302는 인식되지 않는 커스텀 모델 ID의 용량을 순�
 [gemini-thinking]:
   https://ai.google.dev/gemini-api/docs/thinking
 
-### Agent guidance ownership
+### Install user instructions
 
-[Shared engineering guidance](.agents/engineering.md) contains common rules.
-The `.codex/AGENTS.md` and `.claude/AGENTS.md` templates do not import that guidance.
-Check each host's instruction discovery rules before relying on automatic loading.
-Place user-level instruction files under one parent:
+The Claude Code and Codex templates contain the same user instructions.
+[Shared engineering guidance](.agents/engineering.md) is a separate reference.
+For a fresh installation, run these commands from the repository root.
+If a destination exists, review its contents and any symlink target first.
+Merge local instructions you want to keep before replacing an existing file.
 
-- `.agents/engineering.md`
-- `.codex/AGENTS.md`
+```sh
+claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+codex_dir="${CODEX_HOME:-$HOME/.codex}"
+mkdir -p "$claude_dir" "$codex_dir" "$HOME/.cursor/rules"
+cp -i .claude/AGENTS.md "$claude_dir/CLAUDE.md"
+cp -i .codex/AGENTS.md "$codex_dir/AGENTS.md"
+cp -i .cursor/rules/pstack-models.mdc "$HOME/.cursor/rules/pstack-models.mdc"
+```
+
+Start a new session to load the installed instructions.
+An existing `AGENTS.override.md` in the Codex home takes precedence.
 
 Instruction reads do not import config or activate plugins.
 The Sample preserves conservative capability declarations.

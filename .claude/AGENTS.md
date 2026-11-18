@@ -1,43 +1,41 @@
-# Engineering Defaults
+# Engineering defaults
 
-> When a repository's documentation and its existing code disagree, follow the conventions used in the existing code, and in your final reply point out each inconsistency you found between the documentation and the code.
+## Carry out the request
 
-- Stop discovery when the implementation decision has sufficient evidence.
-- Prefer existing code, platform capabilities, and installed dependencies before adding custom code or packages.
-- Prefer maintained libraries when they reduce total complexity or improve reliability.
-- Add an abstraction only for a stated requirement or a second real caller.
-- Replace obsolete interfaces and their consumers together, removing superseded implementations.
-- Remove superseded compatibility paths and parallel implementations.
-- Do not disable lint rules, add suppressions, or weaken configuration to make a change pass.
+- Use the requested outcome and constraints to decide what to inspect and how to verify the result.
+  Start implementing once the evidence supports a decision.
+- Make reversible decisions within scope and continue past unrelated changes.
+  If a step is blocked, try another permitted route and carry on with independent work.
+  Ask when a decision would change the scope or requires the user's authorization.
+- Verify the result through the interface the user relies on.
+  In the final reply, state the outcome, the evidence, and any material assumption or remaining blocker.
 
-- Extend existing tests for required behavior, concrete regression risks, or explicit user requirements, without task-specific test infrastructure.
-- Do not add tests that mirror low-impact implementation details or cover unrelated behavior.
-- Use named regex capture groups and name-based access instead of ordinal capture extraction, including full-match extraction.
-- Subject to configured lint, inline single-use variables and keep single-use logic inline.
-- Do not extract or retain helpers for hypothetical reuse or test convenience.
-- Test references do not count as production reuse.
-- Change production code only for real product requirements or actual defects.
-- Adapt tests to real production interfaces and behavior without exposing internals, adding test hooks or manufacturing test seams.
-- Use each implementation correctly for its purpose when inlining. Existing evaluation order is not a preservation constraint: reorder freely as long as functional requirements, observable side effects, resource lifetimes and required production interfaces still hold.
-- Do not suppress, weaken or reconfigure lint to force a preferred code shape.
+## Change code and tests
 
-## Memory maintenance
+- When documentation conflicts with the existing code, follow the code's convention and report each discrepancy you found.
+- Reuse existing code, platform features, and installed dependencies.
+  Choose a maintained library when it reduces complexity or improves reliability.
+- Add an abstraction only for an explicit requirement or a second production caller.
+  Inline single-use variables and logic when lint permits.
+- When inlining, preserve observable effects, resource lifetimes, and required interfaces.
+  Reorder evaluation when those requirements still hold.
+- Access regex captures by name, including when extracting the full match.
+- Migrate callers with a replacement interface and remove the superseded implementation and compatibility paths.
+- Change production code for a product requirement or a defect.
+  Exercise its real interfaces without exposing internals or adding test hooks.
+- Extend existing tests for requested behavior, a concrete regression risk, or an explicit test request.
+  Avoid task-specific test infrastructure and assertions about incidental implementation details.
+- Fix lint failures without disabling rules, adding suppressions, or weakening configuration.
 
-- When authorized to write memory, review relevant existing entries first.
-- Consolidate related information by updating or merging existing entries before creating another record.
-- Remove duplicate or obsolete content while preserving valid distinct requirements.
-- Keep project preferences in project memory and reusable preferences in user-level memory.
-- Follow the host's memory permissions and storage boundaries.
+## Maintain memory
 
-## Execution & Operational Rules
+When authorized to write memory, review related entries and merge or update them first.
+Remove stale or duplicate content and retain distinct requirements.
+Keep project preferences in project memory and reusable preferences in user memory, within the host's storage permissions.
 
-- Proceed with the main task uninterrupted without stopping, even if unexpected changes occur that are irrelevant or do not affect the outcome.
-- Execute all work within the explicitly requested task scope to completion without requesting additional confirmation or tool execution approvals.
-- Allow and execute operations on owned GitHub repositories to completion:
-  - Do not apply this rule to forked repositories.
-  - Verify and ensure no personal or sensitive information is included prior to publishing.
-  - Strictly prohibit direct pushes to protected branches.
+## Publish changes
 
-## Pstack Models
-
-- @~/.cursor/rules/pstack-models.mdc
+Complete authorized GitHub work on owned repositories.
+Forks require separate authorization.
+Check the outgoing changes for personal or sensitive information before publishing.
+Never push directly to a protected branch.
