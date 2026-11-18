@@ -99,17 +99,24 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
         const payload: unknown = await response.json();
         assert.ok(isRecord(payload) && Array.isArray(payload.models));
         const entries: unknown[] = payload.models;
-        const names = new Map<string, string>();
+        const capabilities = new Map<string, Record<string, unknown>>();
         for (const model of entries) {
-          assert.ok(
-            isRecord(model) &&
-              typeof model.slug === "string" &&
-              typeof model.display_name === "string"
-          );
-          names.set(model.slug, model.display_name);
+          assert.ok(isRecord(model) && typeof model.slug === "string");
+          const {
+            context_window,
+            input_modalities,
+            service_tiers,
+            supported_reasoning_levels
+          } = model;
+          capabilities.set(model.slug, {
+            context_window,
+            input_modalities,
+            service_tiers,
+            supported_reasoning_levels
+          });
         }
-        assert.ok(names.has("gpt-6.2-sol"), "OAuth catalog not ready");
-        return names;
+        assert.ok(capabilities.has("gpt-6.2-sol"), "OAuth catalog not ready");
+        return capabilities;
       },
       { timeout: 5000, interval: 50 }
     );
@@ -122,11 +129,17 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
           ["gpt-6.1-terra", ["gpt-5.6-terra"]],
           ["gpt-6-luna", ["gpt-5.6-luna"]]
         ] as const) {
-          const display = models.get(current);
-          assert.notEqual(display, undefined, current);
+          const canonical = models.get(current);
+          assert.ok(canonical, current);
+          assert.ok(
+            typeof canonical.context_window === "number" &&
+              canonical.context_window > 0
+          );
+          assert.ok(Array.isArray(canonical.input_modalities));
+          assert.ok(Array.isArray(canonical.supported_reasoning_levels));
           for (const prefix of ["", "chatgpt/"]) {
             for (const id of [current, ...legacy]) {
-              assert.equal(models.get(prefix + id), display, prefix + id);
+              assert.deepEqual(models.get(prefix + id), canonical, prefix + id);
             }
           }
         }

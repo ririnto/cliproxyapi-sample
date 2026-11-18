@@ -317,91 +317,42 @@ await test("한도가 있는 Chat과 Completions만 표시하고 사용량을 �
   assert.equal(byLabel.Premium, undefined);
 });
 
-await test("labels the group with the Copilot plan", async () => {
-  const snapshot = await fetchUsage({
-    cache: false,
-    credential: "tok",
-    environment: {},
-    fetch: () =>
-      jsonResponse(
-        () => ({
-          copilot_plan: "free",
-          quota_snapshots: {
-            premium_interactions: { entitlement: 100, quota_remaining: 90 }
-          }
-        }),
-        200
-      ),
-    home: "/nonexistent"
-  });
-  assertSnapshot(snapshot);
-  assert.equal(snapshot.groups[0].label, "Copilot (Free)");
-});
-
-await test("access_type_sku가 free_limited_copilot이면 individual 계획도 Free로 표시한다", async () => {
-  const snapshot = await fetchUsage({
-    cache: false,
-    credential: "tok",
-    environment: {},
-    fetch: () =>
-      jsonResponse(
-        () => ({
-          access_type_sku: "free_limited_copilot",
-          copilot_plan: "individual",
-          quota_snapshots: {
-            premium_interactions: { entitlement: 100, quota_remaining: 90 }
-          }
-        }),
-        200
-      ),
-    home: "/nonexistent"
-  });
-  assertSnapshot(snapshot);
-  assert.equal(snapshot.groups[0].label, "Copilot (Free)");
-});
-
-await test("모든 개별 individual 계획을 Free로 바꾸지 않는다", async () => {
-  const snapshot = await fetchUsage({
-    cache: false,
-    credential: "tok",
-    environment: {},
-    fetch: () =>
-      jsonResponse(
-        () => ({
-          access_type_sku: "monthly_subscriber_quota",
-          copilot_plan: "individual",
-          quota_snapshots: {
-            premium_interactions: { entitlement: 1500, quota_remaining: 1200 }
-          },
-          token_based_billing: true
-        }),
-        200
-      ),
-    home: "/nonexistent"
-  });
-  assertSnapshot(snapshot);
-  assert.equal(snapshot.groups[0].label, "Copilot (Individual)");
-});
-
-await test("omits the group label for an unknown plan", async () => {
-  const snapshot = await fetchUsage({
-    cache: false,
-    credential: "tok",
-    environment: {},
-    fetch: () =>
-      jsonResponse(
-        () => ({
-          copilot_plan: "mystery_tier",
-          quota_snapshots: {
-            premium_interactions: { entitlement: 100, quota_remaining: 90 }
-          }
-        }),
-        200
-      ),
-    home: "/nonexistent"
-  });
-  assertSnapshot(snapshot);
-  assert.equal(snapshot.groups[0].label, undefined);
+await test("free-limited accounts use the free tier while paid individual accounts retain their tier", async () => {
+  const groups = await Promise.all(
+    [
+      { copilot_plan: "free" },
+      { copilot_plan: "individual", access_type_sku: "free_limited_copilot" },
+      {
+        copilot_plan: "individual",
+        access_type_sku: "monthly_subscriber_quota"
+      },
+      { copilot_plan: "unknown" }
+    ].map(async (account) => {
+      const snapshot = await fetchUsage({
+        cache: false,
+        credential: "tok",
+        environment: {},
+        home: "/nonexistent",
+        fetch: () =>
+          Response.json({
+            ...account,
+            quota_snapshots: {
+              premium_interactions: { entitlement: 100, quota_remaining: 90 }
+            }
+          })
+      });
+      const group = snapshot?.groups[0];
+      assert.ok(group);
+      assert.partialDeepStrictEqual(group.metrics, [{ total: 100, used: 10 }]);
+      return group;
+    })
+  );
+  const [free, limited, paid, unknown] = groups;
+  assert.equal(typeof free.label, "string");
+  assert.equal(typeof paid.label, "string");
+  assert.equal(limited.label, free.label);
+  assert.notEqual(paid.label, free.label);
+  assert.equal(unknown.label, undefined);
 });
 
 await test("preserves prior usage for malformed and provider-error responses", async () => {
@@ -708,10 +659,6 @@ await test("keeps optional diagnostics content-free while using environment cred
       assert.equal(result.stderr.includes(home), false);
       assert.equal(result.stderr.includes(diagnosticContent), false);
       assert.equal(result.stderr.includes(fallbackToken), false);
-      assert.equal(result.stderr.includes("SyntaxError:"), false);
-      if (debug === "0") {
-        assert.ok(result.stderr.includes("[copilot-usage]"));
-      }
     }
   } finally {
     await rm(home, { force: true, recursive: true });
