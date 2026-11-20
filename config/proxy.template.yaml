@@ -296,9 +296,7 @@ requests:
           - name: openai/gpt-*
             protocol: codex
         params:
-          - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"gAAAA*")#'
-          - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"rsn_*")#'
-          - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"smry_*")#'
+          - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"gAAAA*" && encrypted_content!%"rsn_*" && encrypted_content!%"smry_*")#'
 
 # Client-facing compatibility settings apply to both OAuth and API-key routes.
 client:
