@@ -1,0 +1,169 @@
+import assert from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
+
+import { stringify } from "yaml";
+
+import { modelRoutes } from "../config/model-routes.mts";
+
+interface CatalogModel {
+  readonly contextWindow: number;
+  readonly reasoningLevels: unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readCatalog(contents: string) {
+  const catalog: unknown = JSON.parse(contents);
+  assert.ok(
+    isRecord(catalog) && Array.isArray(catalog.models),
+    "Expected a models array in config/codex-models.json"
+  );
+  const entries: unknown[] = catalog.models;
+  const models = new Map<string, CatalogModel>();
+  for (const entry of entries) {
+    assert.ok(
+      isRecord(entry) &&
+        typeof entry.slug === "string" &&
+        entry.slug.length > 0,
+      "Expected a nonempty catalog model slug"
+    );
+    const { slug, context_window, supported_reasoning_levels } = entry;
+    assert.ok(!models.has(slug), `Duplicate catalog model: ${slug}`);
+    assert.ok(
+      typeof context_window === "number" &&
+        Number.isSafeInteger(context_window) &&
+        context_window > 0,
+      `Invalid context window for ${slug}`
+    );
+    models.set(slug, {
+      contextWindow: context_window,
+      reasoningLevels: supported_reasoning_levels
+    });
+  }
+  return models;
+}
+
+function requireModel(models: ReadonlyMap<string, CatalogModel>, slug: string) {
+  const model = models.get(slug);
+  assert.ok(model, `Unknown catalog model: ${slug}`);
+  return model;
+}
+
+function assertUnique(values: readonly string[], label: string) {
+  assert.equal(new Set(values).size, values.length, `Duplicate ${label}`);
+}
+
+function renderConfig(
+  template: string,
+  catalog: ReadonlyMap<string, CatalogModel>
+) {
+  const { codex, zai } = modelRoutes;
+  assertUnique(
+    codex.aliases.map(({ alias }) => alias),
+    "Codex alias"
+  );
+  for (const { name, alias } of codex.aliases) {
+    requireModel(catalog, name);
+    requireModel(catalog, alias);
+    assert.notEqual(name, alias, `Alias points to itself: ${alias}`);
+  }
+  assertUnique(codex.contextOverrides, "Codex context override");
+  assertUnique(
+    zai.models.map(({ slug }) => slug),
+    "Z.ai model"
+  );
+  const levels = zai.effortRemaps.flatMap(({ requested, forwarded }) => [
+    forwarded,
+    requested
+  ]);
+  assertUnique(levels, "Z.ai reasoning effort");
+  const zaiModels = zai.models.map(({ slug, displayName }) => {
+    const { contextWindow, reasoningLevels } = requireModel(catalog, slug);
+    assert.ok(
+      Array.isArray(reasoningLevels),
+      `Missing reasoning levels for ${slug}`
+    );
+    const supported: unknown[] = reasoningLevels;
+    for (const { forwarded } of zai.effortRemaps) {
+      assert.ok(
+        supported.some((level) => isRecord(level) && level.effort === forwarded),
+        `Unsupported reasoning effort for ${slug}: ${forwarded}`
+      );
+    }
+    return {
+      name: slug,
+      alias: slug,
+      "display-name": displayName,
+      "max-context-length": contextWindow,
+      "is-compat": true,
+      thinking: { levels: [...levels] }
+    };
+  });
+
+  const zaiOverrides = zai.effortRemaps.map(({ requested, forwarded }) => ({
+    models: zaiModels.map(({ name }) => ({
+      name,
+      protocol: "codex",
+      match: [{ "reasoning.effort": requested }]
+    })),
+    params: { "reasoning.effort": forwarded }
+  }));
+  const codexContext = codex.contextOverrides.map((name) => ({
+    name,
+    "max-context-length": requireModel(catalog, name).contextWindow
+  }));
+
+  const sections = [
+    { indent: 6, marker: "zai-overrides", entries: zaiOverrides, quote: false },
+    { indent: 8, marker: "zai-models", entries: zaiModels, quote: false },
+    { indent: 6, marker: "codex-aliases", entries: codex.aliases, quote: true },
+    { indent: 6, marker: "codex-context", entries: codexContext, quote: true }
+  ];
+  let result = template;
+  for (const { indent, marker, entries, quote } of sections) {
+    const padding = " ".repeat(indent);
+    const placeholder = `\n${padding}# @${marker}\n`;
+    assert.equal(result.split(placeholder).length, 2, `Expected one @${marker}`);
+    const rendered = stringify(entries, {
+      defaultKeyType: "PLAIN",
+      defaultStringType: quote ? "QUOTE_DOUBLE" : "PLAIN",
+      lineWidth: 0
+    }).trimEnd();
+    result = result.replaceAll(
+      placeholder,
+      () => `\n${rendered.replaceAll(/^/gm, padding)}\n`
+    );
+  }
+  return result;
+}
+
+const check = process.argv[2] === "--check";
+assert.ok(
+  process.argv.length === 2 || (check && process.argv.length === 3),
+  "Usage: node scripts/generate-config.mts [--check]"
+);
+const [catalog, template] = await Promise.all([
+  readFile("config/codex-models.json", "utf8"),
+  readFile("config/proxy.template.yaml", "utf8")
+]);
+const outputs = [
+  {
+    path: "config.example.yaml",
+    contents: `# Generated by pnpm run generate. Edit the sources in config/.\n${renderConfig(template, readCatalog(catalog))}`
+  },
+  { path: ".codex/model_catalog.json", contents: catalog }
+];
+await Promise.all(
+  outputs.map(async ({ path, contents }) => {
+    if (check) {
+      assert.ok(
+        (await readFile(path, "utf8")) === contents,
+        `${path} is stale. Run pnpm run generate.`
+      );
+    } else {
+      await writeFile(path, contents);
+    }
+  })
+);

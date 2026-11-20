@@ -179,6 +179,11 @@ done
 
 ## 개발 검증
 
+[Codex 모델 메타데이터](config/codex-models.json), [모델 라우팅](config/model-routes.mts),
+[프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤 `pnpm run generate`를 실행한다.
+생성된 `config.example.yaml`과 `.codex/model_catalog.json`을 함께 커밋한다.
+`pnpm run check:generated`로 생성물의 차이를 확인한다.
+
 기여 시 [공통 개발 지침](.agents/engineering.md)을 참고한다.
 [package.json](package.json)에 지정된 Node.js와 pnpm을 사용한다.
 라우팅 테스트는 PATH의 `cliproxyapi`를 실행한다.
