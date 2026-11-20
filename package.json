@@ -3,6 +3,7 @@
   "type": "module",
   "scripts": {
     "check": "run-p check:*",
+    "check:generated": "node scripts/generate-config.mts --check",
     "check:markdownlint-cli2": "markdownlint-cli2",
     "check:test": "node --test \"tests/*.test.{mjs,mts}\" \".claude/**/*.test.mjs\"",
     "check:types": "tsc --noEmit",
@@ -10,6 +11,7 @@
     "fix": "run-p fix:*",
     "fix:markdownlint-cli2": "markdownlint-cli2 --fix",
     "fix:ultracite": "ultracite fix",
+    "generate": "node scripts/generate-config.mts",
     "pre-commit": "run-p check:markdownlint-cli2 check:ultracite",
     "pre-push": "pnpm run check",
     "prepare": "husky"
