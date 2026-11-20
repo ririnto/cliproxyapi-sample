@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import {
   cp,
   mkdir,
@@ -9,11 +10,9 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { text } from "node:stream/consumers";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
 
 await test("generates configs and rejects drift or invalid input", async () => {
   await using directory = await mkdtempDisposable(
@@ -27,24 +26,35 @@ await test("generates configs and rejects drift or invalid input", async () => {
   const generator = fileURLToPath(
     new URL("../scripts/generate-config.mts", import.meta.url)
   );
-  const run = (...args: string[]) =>
-    execFileAsync(process.execPath, [generator, ...args], { cwd });
+  const run = async (expectedStatus: number, ...args: string[]) => {
+    const child = spawn(process.execPath, [generator, ...args], {
+      cwd,
+      stdio: ["ignore", "ignore", "pipe"]
+    });
+    const [stderr, result] = await Promise.all([
+      text(child.stderr),
+      once(child, "close")
+    ]);
+    const [status]: unknown[] = result;
+    assert.equal(status, expectedStatus, stderr);
+    return stderr;
+  };
   const proxyConfig = path.join(cwd, "config.example.yaml");
   const clientCatalog = path.join(cwd, ".codex/model_catalog.json");
-  const outputs = [proxyConfig, clientCatalog];
-  const snapshot = () => Promise.all(outputs.map((file) => readFile(file)));
+  const snapshot = async () =>
+    await Promise.all([readFile(proxyConfig), readFile(clientCatalog)]);
 
-  await run();
+  await run(0);
   const first = await snapshot();
-  await run("--check");
-  await run();
+  await run(0, "--check");
+  await run(0);
   assert.deepEqual(await snapshot(), first);
 
   const stale = Buffer.from("stale\n");
   const checkDrift = async (file: string) => {
     const current = await readFile(file);
     await writeFile(file, stale);
-    await assert.rejects(run("--check"), { code: 1, stderr: /is stale/ });
+    assert.match(await run(1, "--check"), /is stale/u);
     assert.deepEqual(await readFile(file), stale);
     await writeFile(file, current);
   };
@@ -60,7 +70,10 @@ await test("generates configs and rejects drift or invalid input", async () => {
       ]
     })
   );
-  await Promise.all(outputs.map((file) => writeFile(file, stale)));
-  await assert.rejects(run(), { code: 1, stderr: /Duplicate catalog model/ });
+  await Promise.all([
+    writeFile(proxyConfig, stale),
+    writeFile(clientCatalog, stale)
+  ]);
+  assert.match(await run(1), /Duplicate catalog model/u);
   assert.deepEqual(await snapshot(), [stale, stale]);
 });
