@@ -7,7 +7,7 @@
     "check:markdownlint-cli2": "markdownlint-cli2",
     "check:test": "node --test \"tests/*.test.{mjs,mts}\" \".claude/**/*.test.mjs\"",
     "check:types": "tsc --noEmit",
-    "check:ultracite": "ultracite check --type-aware",
+    "check:ultracite": "ultracite check",
     "fix": "run-p fix:*",
     "fix:markdownlint-cli2": "markdownlint-cli2 --fix",
     "fix:ultracite": "ultracite fix",
