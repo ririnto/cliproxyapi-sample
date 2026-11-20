@@ -31,12 +31,11 @@ await test("generates configs and rejects drift or invalid input", async () => {
       cwd,
       stdio: ["ignore", "ignore", "pipe"]
     });
-    const [stderr, result] = await Promise.all([
+    const [stderr] = await Promise.all([
       text(child.stderr),
       once(child, "close")
     ]);
-    const [status]: unknown[] = result;
-    assert.equal(status, expectedStatus, stderr);
+    assert.equal(child.exitCode, expectedStatus, stderr);
     return stderr;
   };
   const proxyConfig = path.join(cwd, "config.example.yaml");
