@@ -152,9 +152,13 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
         for (const model of ["glm-5.3", "glm-5.3-flash"]) {
           for (const prefix of ["", "zai/"]) {
             for (const [input, expected] of [
-              ["low", "low"],
+              ["low", "high"],
               ["medium", "high"],
-              ["xhigh", "max"]
+              ["high", "max"],
+
+              ["xhigh", "max"],
+              ["max", "max"],
+              ["ultra", "max"]
             ]) {
               cases.push({
                 model,

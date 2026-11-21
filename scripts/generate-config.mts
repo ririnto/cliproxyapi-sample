@@ -8,6 +8,7 @@ import { modelRoutes } from "../config/model-routes.mts";
 interface CatalogModel {
   readonly contextWindow: number;
   readonly reasoningLevels: unknown;
+  readonly visibility: unknown;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -36,7 +37,8 @@ const readCatalog = (contents: string) => {
     );
     models.set(slug, {
       contextWindow: context_window,
-      reasoningLevels: supported_reasoning_levels
+      reasoningLevels: supported_reasoning_levels,
+      visibility: entry.visibility
     });
   }
   return models;
@@ -55,77 +57,146 @@ const assertUnique = (values: readonly string[], label: string) => {
   assert.equal(new Set(values).size, values.length, `Duplicate ${label}`);
 };
 
+const codexVersion = (slug: string) => {
+  const version =
+    /^gpt-(?<major>\d+)(?:\.(?<minor>\d+))?-(?<tier>[a-z]+)$/u.exec(
+      slug
+    )?.groups;
+  return version?.tier === undefined
+    ? undefined
+    : {
+        family: version.tier,
+        major: Number(version.major),
+        minor: Number(version.minor ?? 0)
+      };
+};
+
+const effortOrder = ["ultra", "max", "xhigh", "high", "medium", "low"];
+
 const renderConfig = (
   template: string,
   catalog: ReadonlyMap<string, CatalogModel>
 ) => {
   const { codex, zai } = modelRoutes;
-  assertUnique(
-    codex.aliases.map(({ alias }) => alias),
-    "Codex alias"
+  const legacyAliases = new Set(codex.aliases.map(({ alias }) => alias));
+  assert.equal(
+    legacyAliases.size,
+    codex.aliases.length,
+    "Duplicate Codex alias"
   );
-  for (const { name, alias } of codex.aliases) {
-    requireModel(catalog, name);
-    requireModel(catalog, alias);
-    assert.notEqual(name, alias, `Alias points to itself: ${alias}`);
+  const latest = new Map<
+    string,
+    { slug: string; major: number; minor: number }
+  >();
+  for (const [slug, { visibility }] of catalog) {
+    const version = codexVersion(slug);
+    if (version && visibility === "list" && !legacyAliases.has(slug)) {
+      const { family, major, minor } = version;
+      const previous = latest.get(family);
+      if (
+        !previous ||
+        major > previous.major ||
+        (major === previous.major && minor > previous.minor)
+      ) {
+        latest.set(family, { slug, major, minor });
+      }
+    }
   }
-  assertUnique(codex.contextOverrides, "Codex context override");
+  const aliases = codex.aliases.map(({ alias, fork }) => {
+    requireModel(catalog, alias);
+    const version = codexVersion(alias);
+    const target = version && latest.get(version.family);
+    assert.ok(target, `No visible successor for Codex alias: ${alias}`);
+    assert.ok(
+      target.major > version.major ||
+        (target.major === version.major && target.minor > version.minor),
+      `Codex alias would not advance: ${alias}`
+    );
+    return { name: target.slug, alias, ...(fork === true ? { fork } : {}) };
+  });
   assertUnique(
     zai.models.map(({ slug }) => slug),
     "Z.ai model"
   );
-  const levels = zai.effortRemaps.flatMap(({ requested, forwarded }) => [
-    forwarded,
-    requested
-  ]);
-  assertUnique(levels, "Z.ai reasoning effort");
-  const zaiModels = zai.models.map(({ slug, displayName }) => {
+  const zaiRoutes = zai.models.map(({ slug, displayName }) => {
     const { contextWindow, reasoningLevels } = requireModel(catalog, slug);
     assert.ok(
       Array.isArray(reasoningLevels),
       `Missing reasoning levels for ${slug}`
     );
     const catalogLevels: unknown[] = reasoningLevels;
-    const supported = catalogLevels.map((level) => {
-      assert.ok(
-        isRecord(level) && typeof level.effort === "string" && level.effort,
-        `Invalid reasoning level for ${slug}`
-      );
-      return level.effort;
-    });
-    for (const { forwarded } of zai.effortRemaps) {
-      assert.ok(
-        supported.includes(forwarded),
-        `Unsupported reasoning effort for ${slug}: ${forwarded}`
-      );
-    }
+    const supported = new Set(
+      catalogLevels.map((level) => {
+        assert.ok(
+          isRecord(level) &&
+            typeof level.effort === "string" &&
+            level.effort.length > 0,
+          `Invalid reasoning level for ${slug}`
+        );
+        return level.effort;
+      })
+    );
+    const highest = effortOrder.find((effort) => supported.has(effort));
+    assert.ok(highest !== undefined, `No usable reasoning effort for ${slug}`);
     return {
-      name: slug,
-      alias: slug,
-      "display-name": displayName,
-      "max-context-length": contextWindow,
-      "is-compat": true,
-      thinking: { levels: [...new Set([...levels, ...supported])] }
+      model: {
+        name: slug,
+        alias: slug,
+        "display-name": displayName,
+        "max-context-length": contextWindow,
+        "is-compat": true,
+        thinking: { levels: [...effortOrder] }
+      },
+      supported,
+      highest
     };
   });
-
-  const zaiOverrides = zai.effortRemaps.map(({ requested, forwarded }) => ({
-    models: zaiModels.map(({ name }) => ({
-      name,
-      protocol: "codex",
-      match: [{ "reasoning.effort": requested }]
-    })),
-    params: { "reasoning.effort": forwarded }
-  }));
-  const codexContext = codex.contextOverrides.map((name) => ({
+  // The proxy applies overrides in order. Match higher efforts before promotion.
+  const zaiOverrides = effortOrder.flatMap((requested, index) => {
+    const byTarget = new Map<string, string[]>();
+    for (const { model, supported, highest } of zaiRoutes) {
+      const forwarded =
+        effortOrder
+          .slice(0, index)
+          .findLast((effort) => supported.has(effort)) ?? highest;
+      if (requested !== forwarded) {
+        const models = byTarget.get(forwarded);
+        if (models) {
+          models.push(model.name);
+        } else {
+          byTarget.set(forwarded, [model.name]);
+        }
+      }
+    }
+    return [...byTarget].map(([forwarded, models]) => ({
+      models: models.map((name) => ({
+        name,
+        protocol: "codex",
+        match: [{ "reasoning.effort": requested }]
+      })),
+      params: { "reasoning.effort": forwarded }
+    }));
+  });
+  const contextNames = new Set(
+    aliases.flatMap(({ name, alias }) => [name, alias])
+  );
+  const codexContext = [
+    ...[...catalog.keys()].filter((name) => contextNames.has(name)),
+    ...codex.standaloneContextOverrides
+  ].map((name) => ({
     name,
     "max-context-length": requireModel(catalog, name).contextWindow
   }));
 
   const sections = [
     { indent: 6, marker: "zai-overrides", entries: zaiOverrides, quote: false },
-    { indent: 8, marker: "zai-models", entries: zaiModels, quote: false },
-    { indent: 6, marker: "codex-aliases", entries: codex.aliases, quote: true },
+    {
+      indent: 8,
+      marker: "zai-models",
+      entries: zaiRoutes.map(({ model }) => model),
+      quote: false
+    },
+    { indent: 6, marker: "codex-aliases", entries: aliases, quote: true },
     { indent: 6, marker: "codex-context", entries: codexContext, quote: true }
   ];
   let result = template;

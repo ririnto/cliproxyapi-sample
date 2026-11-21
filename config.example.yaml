@@ -296,6 +296,17 @@ requests:
           - name: glm-5.3
             protocol: codex
             match:
+              - reasoning.effort: ultra
+          - name: glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: ultra
+        params:
+          reasoning.effort: max
+      - models:
+          - name: glm-5.3
+            protocol: codex
+            match:
               - reasoning.effort: xhigh
           - name: glm-5.3-flash
             protocol: codex
@@ -307,11 +318,33 @@ requests:
           - name: glm-5.3
             protocol: codex
             match:
+              - reasoning.effort: high
+          - name: glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: high
+        params:
+          reasoning.effort: max
+      - models:
+          - name: glm-5.3
+            protocol: codex
+            match:
               - reasoning.effort: medium
           - name: glm-5.3-flash
             protocol: codex
             match:
               - reasoning.effort: medium
+        params:
+          reasoning.effort: high
+      - models:
+          - name: glm-5.3
+            protocol: codex
+            match:
+              - reasoning.effort: low
+          - name: glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: low
         params:
           reasoning.effort: high
     filter:
@@ -777,6 +810,7 @@ api-keys:
           is-compat: true
           thinking:
             levels:
+              - ultra
               - max
               - xhigh
               - high
@@ -789,6 +823,7 @@ api-keys:
           is-compat: true
           thinking:
             levels:
+              - ultra
               - max
               - xhigh
               - high
@@ -893,13 +928,13 @@ oauth:
   #       max-context-length: 1048576
   settings:
     codex:
-      - name: "gpt-6.2-astra"
-        max-context-length: 272000
       - name: "gpt-6.2-sol"
         max-context-length: 272000
-      - name: "gpt-6.1-sol"
+      - name: "gpt-6.2-astra"
         max-context-length: 272000
       - name: "gpt-6-astra"
+        max-context-length: 272000
+      - name: "gpt-6.1-sol"
         max-context-length: 272000
       - name: "gpt-6.1-terra"
         max-context-length: 272000
