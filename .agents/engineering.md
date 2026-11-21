@@ -44,8 +44,12 @@ Do not disable lint rules, add suppressions, or weaken checks to pass a change.
 
 Write the intended claim before measuring.
 Lead with the verdict: faster, slower, no measurable difference, or inconclusive.
-Report the number with its unit, run count, range, and the limiter that explains
-it.
+Include the following with the measured number:
+
+- Unit
+- Run count
+- Range
+- The limiter that explains the result
 Use production-representative settings and data, and check results against
 physical limits.
 Count failures and verify that outputs are correct.

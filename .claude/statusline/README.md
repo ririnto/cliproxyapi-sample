@@ -75,8 +75,14 @@ Run them with `pnpm run check:test`.
 
 ## Claude display
 
-The first row starts with the model, effort, project, and Git branch.
-Session cost, elapsed time, context usage, and token counts follow.
+The first row shows these fields in order:
+
+- Model and effort
+- Project and Git branch
+- Session cost
+- Elapsed time
+- Context usage
+- Token counts
 Zero cost, duration, and token counts are omitted.
 The context bar has eight cells.
 Positive usage fills at least one cell.
@@ -112,7 +118,13 @@ The command returns one JSON row per task.
 Claude Code 2.1.323 marks this setting deprecated and ignores the command.
 Updating this script does not customize the built-in rows in that version.
 
-The left side shows status, agent name, model, effort, and description.
+The left side shows these fields in order:
+
+- Status
+- Agent name
+- Model
+- Effort
+- Description
 Long text is clipped on grapheme boundaries to reserve the right side for the
 alternate worktree directory, token count, and elapsed time.
 The rightmost field ends at the reported terminal width.
