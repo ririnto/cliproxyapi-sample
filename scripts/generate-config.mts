@@ -85,12 +85,17 @@ const renderConfig = (
       Array.isArray(reasoningLevels),
       `Missing reasoning levels for ${slug}`
     );
-    const supported: unknown[] = reasoningLevels;
+    const catalogLevels: unknown[] = reasoningLevels;
+    const supported = catalogLevels.map((level) => {
+      assert.ok(
+        isRecord(level) && typeof level.effort === "string" && level.effort,
+        `Invalid reasoning level for ${slug}`
+      );
+      return level.effort;
+    });
     for (const { forwarded } of zai.effortRemaps) {
       assert.ok(
-        supported.some(
-          (level) => isRecord(level) && level.effort === forwarded
-        ),
+        supported.includes(forwarded),
         `Unsupported reasoning effort for ${slug}: ${forwarded}`
       );
     }
@@ -100,7 +105,7 @@ const renderConfig = (
       "display-name": displayName,
       "max-context-length": contextWindow,
       "is-compat": true,
-      thinking: { levels: [...levels] }
+      thinking: { levels: [...new Set([...levels, ...supported])] }
     };
   });
 
