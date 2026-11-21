@@ -303,17 +303,6 @@ requests:
               - reasoning.effort: medium
         params:
           reasoning.effort: high
-      - models:
-          - name: glm-5.3
-            protocol: codex
-            match:
-              - reasoning.effort: minimal
-          - name: glm-5.3-flash
-            protocol: codex
-            match:
-              - reasoning.effort: minimal
-        params:
-          reasoning.effort: low
     filter:
       - models:
           - name: github_copilot/gpt-*
@@ -782,7 +771,6 @@ api-keys:
               - high
               - medium
               - low
-              - minimal
         - name: glm-5.3-flash
           alias: glm-5.3-flash
           display-name: GLM 5.3 Flash
@@ -795,7 +783,6 @@ api-keys:
               - high
               - medium
               - low
-              - minimal
       keys:
         - api-key: __ZAI_API_KEY__
 

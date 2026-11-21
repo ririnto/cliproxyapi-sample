@@ -33,8 +33,7 @@ export const modelRoutes = {
     ],
     effortRemaps: [
       { requested: "xhigh", forwarded: "max" },
-      { requested: "medium", forwarded: "high" },
-      { requested: "minimal", forwarded: "low" }
+      { requested: "medium", forwarded: "high" }
     ]
   }
 };
