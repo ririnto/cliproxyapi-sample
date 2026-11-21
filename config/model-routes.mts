@@ -1,16 +1,11 @@
 /**
- * Stable Codex aliases and provider routes for the sample.
+ * Codex model lanes and provider routes for the sample.
  */
 export const modelRoutes = {
   codex: {
-    aliases: [
-      { alias: "gpt-6-astra", fork: true },
-      { alias: "gpt-6.1-sol", fork: true },
-      { alias: "gpt-6-sol" },
-      { alias: "gpt-5.6-sol" },
-      { alias: "gpt-5.6-terra", fork: true },
-      { alias: "gpt-5.6-luna", fork: true }
-    ],
+    lanes: ["astra", "sol", "terra", "luna"],
+    nonForkAliases: ["gpt-6-sol", "gpt-5.6-sol"],
+    hiddenModels: ["gpt-5.5"],
     standaloneContextOverrides: ["codex-auto-review", "gpt-5.5"]
   },
   zai: {

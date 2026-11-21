@@ -155,10 +155,8 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
               ["low", "high"],
               ["medium", "high"],
               ["high", "max"],
-
               ["xhigh", "max"],
-              ["max", "max"],
-              ["ultra", "max"]
+              ["max", "max"]
             ]) {
               cases.push({
                 model,
@@ -193,28 +191,30 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
       }
     );
     await t.test(
-      "GLM rejects unsupported minimal effort before forwarding",
+      "GLM rejects unsupported minimal and ultra efforts before forwarding",
       async () => {
         const forwardedCount = requests.size;
         await Promise.all(
-          ["glm-5.3", "glm-5.3-flash", "zai/glm-5.3", "zai/glm-5.3-flash"].map(
-            async (model) => {
+          ["glm-5.3", "glm-5.3-flash", "zai/glm-5.3", "zai/glm-5.3-flash"]
+            .flatMap((model) =>
+              ["minimal", "ultra"].map((effort) => ({ model, effort }))
+            )
+            .map(async ({ model, effort }) => {
               const response = await fetch(`${url}/responses`, {
                 method: "POST",
                 headers: { "content-type": "application/json" },
                 signal: AbortSignal.timeout(5000),
                 body: JSON.stringify({
                   model,
-                  reasoning: { effort: "minimal" },
+                  reasoning: { effort },
                   input: "Synthetic input"
                 })
               });
-              assert.equal(response.status, 400, model);
+              assert.equal(response.status, 400, `${model}: ${effort}`);
               assert.partialDeepStrictEqual(await response.json(), {
                 error: { type: "invalid_request_error" }
               });
-            }
-          )
+            })
         );
         assert.equal(requests.size, forwardedCount);
       }

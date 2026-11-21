@@ -3,9 +3,6 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
-import { withUsageCache } from "./usage-cache.mjs";
-import { requestJson } from "./usage-http.mjs";
-
 const GITHUB_COM = "https://github.com";
 const COPILOT_API = "https://api.github.com";
 
@@ -442,10 +439,11 @@ const quotaMetrics = (payload, reset, index = 0) => {
 /**
  * @param {{host:string,scheme:string,token:string}[]} candidates - Ordered credentials.
  * @param {import("./types.ts").UsageOptions} options - Lookup options.
+ * @param {import("./types.ts").UsageRuntime["requestJson"]} requestJson Host HTTP transport.
  * @param {number} [index] - Candidate index.
  * @returns {Promise<import("./types.ts").Snapshot|undefined|null>} Available usage.
  */
-const fetchCandidate = async (candidates, options, index = 0) => {
+const fetchCandidate = async (candidates, options, requestJson, index = 0) => {
   const candidate = candidates.at(index);
   if (candidate !== undefined) {
     const { status, payload } = await requestJson(
@@ -462,7 +460,7 @@ const fetchCandidate = async (candidates, options, index = 0) => {
     );
     if (status === 401 || status === 403) {
       options.onUsageError?.();
-      return await fetchCandidate(candidates, options, index + 1);
+      return await fetchCandidate(candidates, options, requestJson, index + 1);
     }
     const successful =
       status !== undefined &&
@@ -483,11 +481,10 @@ const fetchCandidate = async (candidates, options, index = 0) => {
 };
 
 /**
- * Fetch and normalize Copilot usage with credential fallback discovery.
- * @param {import("./types.ts").UsageOptions} [options] Input value.
- * @returns {Promise<import("./types.ts").Snapshot|undefined>} Result.
+ * @param {import("./types.ts").UsageOptions} options Lookup options.
+ * @param {import("./types.ts").UsageRuntime} runtime Host-provided usage helpers.
  */
-export const fetchUsage = async (options = {}) => {
+export const fetchUsage = async (options, { withUsageCache, requestJson }) => {
   const candidates = await copilotCandidates(
     options,
     typeof options.credential === "string" ? options.credential : ""
@@ -515,7 +512,8 @@ export const fetchUsage = async (options = {}) => {
         ]),
         options,
         async (cachedOptions) =>
-          (await fetchCandidate(usable, cachedOptions)) ?? undefined
+          (await fetchCandidate(usable, cachedOptions, requestJson)) ??
+          undefined
       )
     : undefined;
 };

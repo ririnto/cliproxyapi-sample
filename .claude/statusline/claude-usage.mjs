@@ -3,8 +3,6 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
-import { withUsageCache } from "./usage-cache.mjs";
-
 /**
  * @param {unknown} value - Numeric input.
  * @returns {value is number} Finite number.
@@ -336,10 +334,10 @@ const fetchSnapshot = async (oauth, options, now) => {
 };
 
 /**
- * 현재 API key와 별개로 native OAuth 인증을 읽어 Claude 사용량과 예산을 캐시한다.
- * @param {import("./types.ts").UsageOptions} [options] - Lookup options.
+ * @param {import("./types.ts").UsageOptions} options Lookup options.
+ * @param {Pick<import("./types.ts").UsageRuntime, "withUsageCache">} runtime Host-provided usage helpers.
  */
-export const fetchUsage = async (options = {}) => {
+export const fetchUsage = async (options, { withUsageCache }) => {
   const now = nowValue(options.now);
   const oauth = await nativeOauth(options, now);
   return oauth

@@ -11,26 +11,31 @@
   "effortLevel": "high",
   "enableWorkflows": true,
   "enabledPlugins": {
+    "agent-browser-plugin@sinon": true,
+    "agent-desktop-plugin@sinon": true,
     "astryx@astryx": true,
     "claude-security@claude-plugins-official": true,
+    "clear-writing@sinon": true,
     "code-simplifier@claude-plugins-official": true,
+    "codegraph-plugin@sinon": true,
     "context7@claude-plugins-official": true,
+    "ddgs-plugin@sinon": true,
     "discernment-nudge@anthropic-agent-skills": true,
-    "feature-dev@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true,
     "github@claude-plugins-official": true,
     "gopls-lsp@claude-plugins-official": true,
+    "grafana-core@grafana-skills": true,
     "i-have-adhd@i-have-adhd": true,
     "kotest-skills@kotest": true,
     "kotlin-lsp@claude-plugins-official": true,
     "modern-web-guidance@googlechrome": true,
-    "playwright@claude-plugins-official": false,
     "plugin-dev@claude-plugins-official": true,
     "pstack@cursor-plugins": true,
     "rea@rea": true,
+    "stop-slop@sinon": true,
     "superpowers@superpowers-marketplace": true,
     "swift-lsp@claude-plugins-official": false,
-    "typescript-lsp@claude-plugins-official": true
+    "workgraph@sinon": true
   },
   "env": {
     "ANTHROPIC_API_KEY": "sk-dummy",
@@ -40,7 +45,7 @@
     "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "GLM-5.3",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES": "effort,max_effort,thinking",
     "ANTHROPIC_DEFAULT_FABLE_MODEL": "gpt-6.2-astra",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION": "Frontier intelligence for the most demanding work.",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION": "Our most capable model for complex coding and professional work.",
     "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "GPT-6.2-Astra",
     "ANTHROPIC_DEFAULT_FABLE_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "gpt-6-luna",
@@ -48,16 +53,16 @@
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "GPT-6-Luna",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "gpt-6.2-sol",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "Latest workhorse model for coding and everyday work.",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION": "Fast, go-to model for coding and everyday work.",
     "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "GPT-6.2-Sol",
     "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "gpt-6.1-terra",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION": "GPT-6.1 Terra Codex model.",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION": "Efficient model that excels at visual understanding and computer use.",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "GPT-6.1-Terra",
     "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES": "effort,xhigh_effort,max_effort,thinking",
     "API_FORCE_IDLE_TIMEOUT": "0",
     "API_TIMEOUT_MS": "1800000",
-    "BASH_DEFAULT_TIMEOUT_MS": "240000",
+    "BASH_DEFAULT_TIMEOUT_MS": "270000",
     "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1",
     "CLAUDE_CODE_DISABLE_AGENT_PROGRESS_SUMMARIES": "1",
     "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING": "1",
@@ -68,22 +73,27 @@
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "305000",
     "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "270000",
     "CLAUDE_CODE_REMOTE_SEND_KEEPALIVES": "1",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "haiku",
     "CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS": "4",
-    "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS": "1800000",
-    "CLAUDE_STREAM_IDLE_TIMEOUT_MS": "1800000",
+    "CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS": "270000",
+    "CLAUDE_STREAM_IDLE_TIMEOUT_MS": "270000",
     "DISABLE_FEEDBACK_COMMAND": "1",
-    "ENABLE_TOOL_SEARCH": "true"
+    "ENABLE_TOOL_SEARCH": "true",
+    "NODE_USE_SYSTEM_CA": "1"
   },
   "extraKnownMarketplaces": {
     "anthropic-agent-skills": {
       "autoUpdate": true,
       "source": {
+        "ref": "main",
         "repo": "anthropics/skills",
         "source": "github"
       }
     },
     "astryx": {
+      "autoUpdate": true,
       "source": {
+        "ref": "main",
         "repo": "meta/astryx",
         "source": "github"
       }
@@ -91,6 +101,7 @@
     "claude-plugins-official": {
       "autoUpdate": true,
       "source": {
+        "ref": "main",
         "repo": "anthropics/claude-plugins-official",
         "source": "github"
       }
@@ -98,40 +109,65 @@
     "cursor-plugins": {
       "autoUpdate": true,
       "source": {
+        "ref": "main",
         "repo": "cursor/plugins",
         "source": "github"
       }
     },
     "googlechrome": {
+      "autoUpdate": true,
       "source": {
+        "ref": "main",
         "repo": "GoogleChrome/modern-web-guidance",
+        "source": "github"
+      }
+    },
+    "grafana-skills": {
+      "autoUpdate": true,
+      "source": {
+        "ref": "main",
+        "repo": "grafana/skills",
         "source": "github"
       }
     },
     "i-have-adhd": {
       "autoUpdate": true,
       "source": {
+        "ref": "main",
         "repo": "ayghri/i-have-adhd",
         "source": "github"
       }
     },
     "kotest": {
+      "autoUpdate": true,
       "source": {
+        "ref": "master",
         "repo": "kotest/kotest",
         "source": "github"
       }
     },
     "rea": {
+      "autoUpdate": true,
       "source": {
+        "ref": "main",
         "repo": "morluto/rea",
+        "source": "github"
+      }
+    },
+    "sinon": {
+      "autoUpdate": true,
+      "source": {
+        "ref": "main",
+        "repo": "ririnto/sinon",
         "source": "github"
       }
     },
     "superpowers-marketplace": {
       "autoUpdate": true,
       "source": {
-        "source": "github",
-        "repo": "obra/superpowers-marketplace"
+        "ref": "main",
+        "repo": "obra/superpowers-marketplace",
+        "source": "github"
       }
     }
   },
@@ -139,6 +175,7 @@
   "feedbackSurveyRate": 0,
   "includeGitInstructions": false,
   "language": "Korean",
+  "model": "opus",
   "modelPricing": {
     "overrides": {
       "gemini-3.8-flash": {
@@ -187,7 +224,7 @@
   },
   "modelSettings": {
     "claude-fable-5-2": {
-      "autoCompactWindow": 272000,
+      "autoCompactWindow": 305000,
       "effortLevel": "high",
       "maxEffortLevel": "xhigh"
     },
@@ -197,12 +234,12 @@
       "maxEffortLevel": "high"
     },
     "claude-opus-5-5": {
-      "autoCompactWindow": 272000,
+      "autoCompactWindow": 305000,
       "effortLevel": "medium",
       "maxEffortLevel": "high"
     },
     "claude-sonnet-5-5": {
-      "autoCompactWindow": 272000,
+      "autoCompactWindow": 305000,
       "effortLevel": "medium",
       "maxEffortLevel": "high"
     },
@@ -247,8 +284,8 @@
     "deny": [
       "Agent(claude)",
       "AskUserQuestion",
-      "EnterPlanMode",
-      "Bash(sleep*)"
+      "Bash(sleep*)",
+      "EnterPlanMode"
     ]
   },
   "pluginConfigs": {
@@ -276,52 +313,15 @@
     "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.mjs\"",
     "type": "command"
   },
-  "statusLineAddon": [
-    {
-      "name": "Claude",
-      "primary": true,
-      "provider": "claude",
-      "script": "statusline/claude-usage.mjs",
-      "showAbove": 0.001
-    },
-    {
-      "credential": "{env:ZHIPU_API_KEY}",
-      "hideName": true,
-      "name": "GLM Coding Plan",
-      "script": "statusline/glm-coding-plan.mjs",
-      "showAbove": 0.001
-    },
-    {
-      "name": "Chatgpt",
-      "script": "statusline/codex-usage.mjs",
-      "showAbove": 0.001
-    },
-    {
-      "credential": "{env:MISTRAL_API_KEY}",
-      "name": "Mistral",
-      "script": "statusline/mistral-usage.mjs",
-      "showAbove": 0.001
-    },
-    {
-      "name": "Copilot",
-      "script": "statusline/copilot-usage.mjs",
-      "showAbove": 0.001
-    },
-    {
-      "credential": "{env:MINIMAX_API_KEY}",
-      "name": "MiniMax Token Plan",
-      "script": "statusline/minimax-token-plan.mjs",
-      "showAbove": 0.001
-    }
-  ],
   "subagentStatusLine": {
-    "command": "node \"$CLAUDE_PROJECT_DIR/.claude/subagent-statusline.mjs\"",
+    "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/subagent-statusline.mjs\"",
     "type": "command"
   },
   "teammateMode": "auto",
   "theme": "auto",
   "totalTokensReminder": "countdown",
   "tui": "fullscreen",
+  "ultracode": true,
   "verbose": true,
   "viewMode": "focus",
   "worktree": {

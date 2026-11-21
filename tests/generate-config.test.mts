@@ -70,41 +70,47 @@ await test("generates configs and rejects drift or invalid input", async () => {
   assert.ok(Array.isArray(catalog.models));
   const catalogModels: unknown[] = catalog.models;
   const successors = [
-    { slug: "gpt-6.10-sol", context_window: 23_000, visibility: "list" },
+    { slug: "gpt-6.10-sol", context_window: 400_000, visibility: "list" },
     { slug: "gpt-6.9-sol", context_window: 24_000, visibility: "list" },
     { slug: "gpt-99-sol", context_window: 25_000, visibility: "hide" },
     { slug: "gpt-99-astra-preview", context_window: 26_000, visibility: "list" }
   ];
-  await writeFile(
-    catalogFile,
-    JSON.stringify({ models: [...catalogModels, ...successors] })
-  );
+  const sourceCatalog = JSON.stringify({
+    models: [...catalogModels, ...successors]
+  });
+  await writeFile(catalogFile, sourceCatalog);
   await run(0);
+  assert.equal(await readFile(catalogFile, "utf-8"), sourceCatalog);
   const proxy = parseDocument(await readFile(proxyConfig, "utf-8"));
   const aliases = proxy.getIn(["oauth", "model-alias", "codex"]);
   assert.ok(isSeq(aliases));
   assert.deepEqual(aliases.toJSON(), [
     { name: "gpt-6.2-astra", alias: "gpt-6-astra", fork: true },
-    { name: "gpt-6.10-sol", alias: "gpt-6.1-sol", fork: true },
-    { name: "gpt-6.10-sol", alias: "gpt-6-sol" },
     { name: "gpt-6.10-sol", alias: "gpt-5.6-sol" },
+    { name: "gpt-6.10-sol", alias: "gpt-6-sol" },
+    { name: "gpt-6.10-sol", alias: "gpt-6.1-sol", fork: true },
+    { name: "gpt-6.10-sol", alias: "gpt-6.2-sol", fork: true },
+    { name: "gpt-6.10-sol", alias: "gpt-6.9-sol", fork: true },
     { name: "gpt-6.1-terra", alias: "gpt-5.6-terra", fork: true },
     { name: "gpt-6-luna", alias: "gpt-5.6-luna", fork: true }
   ]);
   const context = proxy.getIn(["oauth", "settings", "codex"]);
   assert.ok(isSeq(context));
-  assert.ok(
-    context
-      .toJSON()
-      .some(
-        (model: unknown) =>
-          typeof model === "object" &&
-          model !== null &&
-          "name" in model &&
-          model.name === "gpt-6.10-sol" &&
-          "max-context-length" in model &&
-          model["max-context-length"] === 23_000
-      )
+  assert.partialDeepStrictEqual(context.toJSON(), [
+    { name: "gpt-6.2-astra", "max-context-length": 272_000 },
+    { name: "gpt-6.10-sol", "max-context-length": 305_000 }
+  ]);
+  assert.partialDeepStrictEqual(
+    JSON.parse(await readFile(clientCatalog, "utf-8")),
+    {
+      models: [
+        {
+          slug: "gpt-6.2-sol",
+          supported_reasoning_levels: [{ effort: "ultra" }]
+        },
+        { slug: "gpt-6.10-sol", context_window: 305_000 }
+      ]
+    }
   );
   await writeFile(
     catalogFile,

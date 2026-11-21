@@ -2,9 +2,6 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
-import { withUsageCache } from "./usage-cache.mjs";
-import { requestJson } from "./usage-http.mjs";
-
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
 /**
@@ -201,8 +198,9 @@ const chatgptPlanLabel = (planType) => {
 /**
  * @param {{ token: string, accountId: string }} selected Auth.
  * @param {import("./types.ts").UsageOptions} options Options.
+ * @param {import("./types.ts").UsageRuntime["requestJson"]} requestJson Host HTTP transport.
  */
-const usageSnapshot = async (selected, options) => {
+const usageSnapshot = async (selected, options, requestJson) => {
   let { payload } = await requestJson(
     USAGE_URL,
     {
@@ -221,37 +219,80 @@ const usageSnapshot = async (selected, options) => {
     payload = undefined;
   }
   const plan = chatgptPlanLabel(payload?.plan_type);
-  const groups = payload
-    ? [
-        chatgptGroup(
-          payload.rate_limit,
-          plan === "" ? "" : `ChatGPT (${plan})`,
-          chatgptCredit(payload.credits)
-        ),
-        ...(Array.isArray(payload.additional_rate_limits)
-          ? payload.additional_rate_limits.filter(isRecord).flatMap((limit) => {
-              const label = limit.limit_name;
-              return typeof label === "string" && label !== ""
-                ? [
-                    chatgptGroup(
-                      limit.rate_limit,
-                      label === "gpt-5.3-codex-spark" ? "Additional" : label
-                    )
-                  ]
-                : [];
-            })
-          : [])
-      ].filter((group) => group !== undefined)
-    : [];
+  const primaryGroup = payload
+    ? chatgptGroup(
+        payload.rate_limit,
+        plan === "" ? "" : `ChatGPT (${plan})`,
+        chatgptCredit(payload.credits)
+      )
+    : undefined;
+  /** @type {import("./types.ts").Snapshot["groups"]} */
+  const groups = [];
+  if (primaryGroup !== undefined) {
+    groups.push(
+      primaryGroup.metrics.some((metric) => metric.type === "percentage")
+        ? { ...primaryGroup, deduplicateWithNativeQuota: true }
+        : primaryGroup
+    );
+  }
+  if (Array.isArray(payload?.additional_rate_limits)) {
+    groups.push(
+      ...payload.additional_rate_limits.filter(isRecord).flatMap((limit) => {
+        const { limit_name: label, rate_limit: rateLimit } = limit;
+        if (typeof label === "string" && label !== "") {
+          const group = chatgptGroup(
+            rateLimit,
+            label === "gpt-5.3-codex-spark" ? "Additional" : label
+          );
+          return group === undefined ? [] : [group];
+        }
+        return [];
+      })
+    );
+  }
   return groups.length ? { groups } : undefined;
 };
 
 /**
- * Fetch and normalize ChatGPT Codex usage with local auth fallback.
- * @param {import("./types.ts").UsageOptions} [options] Input value.
- * @returns {Promise<import("./types.ts").Snapshot|undefined>} Result.
+ * @param {import("./types.ts").Snapshot | undefined} snapshot Cached or freshly fetched usage.
+ * @returns {import("./types.ts").Snapshot | undefined} Snapshot with legacy quota metadata restored.
  */
-export const fetchUsage = async (options = {}) => {
+const preserveNativeQuotaDeduplication = (snapshot) => {
+  if (snapshot === undefined) {
+    return snapshot;
+  }
+  const groups = snapshot.groups.map((group) => {
+    if (
+      group.deduplicateWithNativeQuota !== undefined ||
+      !Array.isArray(group.metrics) ||
+      !group.metrics.some(
+        (metric) =>
+          metric.type === "percentage" &&
+          isFiniteNumber(metric.resetsInMs) &&
+          metric.resetsInMs > 0
+      )
+    ) {
+      return group;
+    }
+    const { label } = group;
+    const primaryQuotaGroup =
+      label === undefined ||
+      label === "" ||
+      label === "ChatGPT" ||
+      (typeof label === "string" && label.startsWith("ChatGPT ("));
+    return primaryQuotaGroup
+      ? { ...group, deduplicateWithNativeQuota: true }
+      : group;
+  });
+  return { ...snapshot, groups };
+};
+
+/**
+ * @param {import("./types.ts").UsageOptions} options Lookup options.
+ * @param {import("./types.ts").UsageRuntime} runtime Host-provided usage helpers.
+ * @returns {Promise<import("./types.ts").Snapshot | undefined>} Usage snapshot.
+ */
+export const fetchUsage = async (options, { withUsageCache, requestJson }) => {
   const auth = await chatgptAuth(options);
   const explicit =
     typeof options.credential === "string" && options.credential !== ""
@@ -261,11 +302,14 @@ export const fetchUsage = async (options = {}) => {
     ? { accountId: auth.accountId, token: explicit }
     : (auth.codex ?? auth.openCode);
   return selected !== undefined && selected.token !== ""
-    ? await withUsageCache(
-        "chatgpt",
-        { accountId: selected.accountId, token: selected.token },
-        options,
-        async (fetchOptions) => await usageSnapshot(selected, fetchOptions)
+    ? preserveNativeQuotaDeduplication(
+        await withUsageCache(
+          "chatgpt",
+          { accountId: selected.accountId, token: selected.token },
+          options,
+          async (fetchOptions) =>
+            await usageSnapshot(selected, fetchOptions, requestJson)
+        )
       )
     : undefined;
 };

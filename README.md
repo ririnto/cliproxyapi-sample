@@ -94,7 +94,7 @@ GLM 요청은 Z.ai의 Responses API로 전달한다.
 
 ## Codex 모델 선택기 연결
 
-[Codex 설정](.codex/config.toml)은 로컬 프록시를 사용하며 기본 모델은 `gpt-6.1-terra`다.
+[Codex 설정](.codex/config.toml)은 로컬 프록시를 사용하며 기본 모델은 `gpt-6.2-sol`이다.
 사용자 설정으로 적용하려면 먼저 카탈로그를 복사한다.
 
 ```sh
@@ -116,7 +116,7 @@ openai_base_url = "http://localhost:8317/v1"
 ```
 
 빈 테이블에는 추가 설정이 필요 없다.
-새 Codex 세션에서 `/model`을 열어 `gpt-6.1-terra`와 `glm-5.3`이 표시되는지 확인한다.
+새 Codex 세션에서 `/model`을 열어 `gpt-6.2-sol`과 `glm-5.3`이 표시되는지 확인한다.
 
 전체 파일을 적용하면 `approval_policy = "on-request"`와
 `sandbox_mode = "danger-full-access"`도 적용된다.
@@ -146,46 +146,60 @@ Codex 사용자 디렉터리에 비어 있지 않은 `AGENTS.override.md`가 있
 
 ## Claude Code 상태줄 설치
 
-Node.js가 필요하다.
-저장소 루트에서 다음 명령으로 상태줄과 사용량 수집기를 복사한다.
-
 ```sh
 dest="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 mkdir -p "$dest/statusline"
-cp .claude/statusline.mjs "$dest/statusline.mjs"
-for module in .claude/statusline/*.mjs; do
-  case "$module" in
-    *.test.mjs) continue ;;
-  esac
-  cp "$module" "$dest/statusline/"
-done
+cp .claude/statusline.mjs .claude/subagent-statusline.mjs "$dest/"
+cp .claude/statusline/*.mjs .claude/statusline/providers.json "$dest/statusline/"
 ```
 
-같은 디렉터리의 `settings.json`에 아래 항목을 병합하고 새 세션을 연다.
-첫 줄에는 현재 모델이 표시된다.
+다음 항목을 사용자 [`settings.json`](.claude/settings.json)에 병합한다.
 
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.mjs\""
-  }
-}
+- `statusLine`
+- `subagentStatusLine`
+
+Claude Code를 재시작한다.
+
+## Codex CLI 상태줄 설치
+
+```sh
+codex_dir="${CODEX_HOME:-$HOME/.codex}"
+mkdir -p "$codex_dir/statusline"
+cp -i .codex/statusline.mjs "$codex_dir/statusline.mjs"
+cp -i .codex/statusline/*.mjs .codex/statusline/providers.json "$codex_dir/statusline/"
 ```
 
-공급자별 사용량을 보려면 [프로젝트 설정](.claude/settings.json)의
-`statusLineAddon`도 병합하고 해당 공급자의 자격 증명을 설정한다.
-모델 선택자와 가격 설정은 [Claude Code 모델 설정](.claude/CONFIG_OPTIONS.md),
-캐시와 표시 방식은 [상태줄 안내](.claude/statusline/README.md)를 참고한다.
+저장소의 `.codex/statusline`은 `.claude/statusline`을 가리키는 심볼릭 링크다.
+설치 명령은 공급자 파일을 Codex 설정 디렉터리에 복사하므로 Claude Code를 설치하지 않아도 된다.
+
+다음 설정은 프로젝트가 아닌 사용자 [`config.toml`](.codex/config.toml)에 병합한다.
+`CODEX_HOME`이 지정되어 있지 않으면 `$HOME/.codex`를 사용한다.
+
+```toml
+[features]
+tui_extensions_statusline = true
+
+[mcp_servers.statusline]
+command = "sh"
+args = ["-c", 'exec node "${CODEX_HOME:-$HOME/.codex}/statusline.mjs"']
+env_vars = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "MINIMAX_API_KEY", "MISTRAL_API_KEY", "ZHIPU_API_KEY"]
+
+[tui.status_line_provider]
+server = "statusline"
+tool = "statusline"
+```
+
+Codex CLI를 재시작한다.
 
 ## 개발 검증
 
-[Codex 모델 메타데이터](config/codex-models.json), [모델 라우팅](config/model-routes.mts),
-[프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤 `pnpm run generate`를 실행한다.
-생성된 `config.example.yaml`과 `.codex/model_catalog.json`을 함께 커밋한다.
-`pnpm run check:generated`로 생성물의 차이를 확인한다.
-카탈로그에 같은 등급의 새 모델을 공개하고 다시 생성하면 기존 별칭의 대상이 바뀐다.
-별칭을 새 모델 버전으로 직접 수정할 필요는 없다.
+`pnpm run generate`는 [공식 Codex 카탈로그](https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json)를 새로 받아 메타데이터 스냅샷을 갱신한다.
+기존 GLM 모델과 카탈로그에서 사라진 모델을 유지하고 별칭 및 프록시 설정도 다시 생성한다.
+`config/codex-models.json`, `config.example.yaml`, `.codex/model_catalog.json`을 함께 커밋한다.
+`pnpm run check:generated`는 네트워크 없이 생성물의 차이를 확인한다.
+[모델 라우팅](config/model-routes.mts)이나 [프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤에도 `pnpm run generate`를 실행한다.
+카탈로그에 새 숫자 버전 모델을 공개하고 다시 생성하면 각 등급에서 가장 높은 공개 모델이
+직접 경로가 되고, 알려진 이전 숫자 버전은 자동으로 그 모델을 가리키는 별칭이 된다.
 
 기여 시 [공통 개발 지침](.agents/engineering.md)을 참고한다.
 [package.json](package.json)에 지정된 Node.js와 pnpm을 사용한다.

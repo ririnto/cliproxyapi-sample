@@ -1,8 +1,5 @@
 import type { StdioOptions } from "node:child_process";
 
-/**
- * Provider payloads are untrusted until their fields have been narrowed.
- */
 export type JsonRecord = Record<string, unknown>;
 
 export type Metric =
@@ -30,7 +27,11 @@ export type Metric =
       resetsInMs?: number;
     };
 export interface Snapshot {
-  groups: { label?: string; metrics: Metric[] }[];
+  groups: {
+    label?: string;
+    metrics: Metric[];
+    deduplicateWithNativeQuota?: boolean;
+  }[];
 }
 export interface FetchOptions {
   headers: Record<string, string>;
@@ -58,4 +59,19 @@ export interface UsageOptions {
     args: string[],
     options: { encoding: BufferEncoding; timeout: number; stdio?: StdioOptions }
   ) => string;
+}
+
+export interface UsageRuntime {
+  withUsageCache: <T>(
+    provider: string,
+    credentialIdentity: unknown,
+    options: UsageOptions,
+    fetchSnapshot: (options: UsageOptions) => T | Promise<T>
+  ) => Promise<T | Snapshot | undefined>;
+  requestJson: (
+    url: string,
+    headers: Record<string, string>,
+    fetchFunction: Fetch,
+    onUsageError: (() => void) | undefined
+  ) => Promise<{ payload?: JsonRecord; status: number | undefined }>;
 }

@@ -1,6 +1,3 @@
-import { withUsageCache } from "./usage-cache.mjs";
-import { requestJson } from "./usage-http.mjs";
-
 const USAGE_URL = "https://api.z.ai/api/monitor/usage/quota/limit";
 
 /**
@@ -81,8 +78,9 @@ const TIER_LABELS = {
 /**
  * @param {string} credential API token.
  * @param {import("./types.ts").UsageOptions} options Request options.
+ * @param {import("./types.ts").UsageRuntime["requestJson"]} requestJson Host HTTP transport.
  */
-const fetchUsageData = async (credential, options) => {
+const fetchUsageData = async (credential, options, requestJson) => {
   const { payload } = await requestJson(
     USAGE_URL,
     {
@@ -128,11 +126,10 @@ const fetchUsageData = async (credential, options) => {
 };
 
 /**
- * Fetch and normalize Z.AI coding plan usage.
- * @param {import("./types.ts").UsageOptions} [options] Input value.
- * @returns {Promise<import("./types.ts").Snapshot|undefined>} Result.
+ * @param {import("./types.ts").UsageOptions} options Lookup options.
+ * @param {import("./types.ts").UsageRuntime} runtime Host-provided usage helpers.
  */
-export const fetchUsage = async (options = {}) => {
+export const fetchUsage = async (options, { withUsageCache, requestJson }) => {
   const credential =
     typeof options.credential === "string" ? options.credential : "";
   return credential
@@ -140,7 +137,8 @@ export const fetchUsage = async (options = {}) => {
         "zai",
         credential,
         options,
-        async (cachedOptions) => await fetchUsageData(credential, cachedOptions)
+        async (cachedOptions) =>
+          await fetchUsageData(credential, cachedOptions, requestJson)
       )
     : undefined;
 };

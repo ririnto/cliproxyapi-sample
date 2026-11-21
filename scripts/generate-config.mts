@@ -11,17 +11,28 @@ interface CatalogModel {
   readonly visibility: unknown;
 }
 
+interface CatalogEntry extends Record<string, unknown> {
+  readonly slug: string;
+  context_window: number;
+}
+
+const maxContextWindow = 305_000;
+const officialCatalogUrl =
+  "https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json";
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const readCatalog = (contents: string) => {
+const readCatalog = (contents: string, source: string) => {
   const catalog: unknown = JSON.parse(contents);
   assert.ok(
     isRecord(catalog) && Array.isArray(catalog.models),
-    "Expected a models array in config/codex-models.json"
+    `Expected a models array in ${source}`
   );
   const entries: unknown[] = catalog.models;
   const models = new Map<string, CatalogModel>();
+  const catalogEntries: CatalogEntry[] = [];
+  let capped = false;
   for (const entry of entries) {
     assert.ok(
       isRecord(entry) && typeof entry.slug === "string" && entry.slug,
@@ -35,13 +46,66 @@ const readCatalog = (contents: string) => {
         context_window > 0,
       `Invalid context window for ${slug}`
     );
+    const contextWindow = Math.min(context_window, maxContextWindow);
+    if (contextWindow < context_window) {
+      capped = true;
+    }
+    catalogEntries.push({ ...entry, slug, context_window: contextWindow });
     models.set(slug, {
-      contextWindow: context_window,
+      contextWindow,
       reasoningLevels: supported_reasoning_levels,
       visibility: entry.visibility
     });
   }
-  return models;
+  return {
+    clientCatalog: capped
+      ? `${JSON.stringify({ ...catalog, models: catalogEntries }, null, 2)}\n`
+      : contents,
+    catalog,
+    entries: catalogEntries,
+    models
+  };
+};
+
+const fetchOfficialCatalog = async () => {
+  const response = await fetch(officialCatalogUrl, {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(20_000)
+  });
+  assert.ok(
+    response.ok,
+    `Could not refresh official Codex catalog: HTTP ${response.status}`
+  );
+  return await response.text();
+};
+
+const mergeCatalog = (officialContents: string, localContents: string) => {
+  const official = readCatalog(officialContents, officialCatalogUrl);
+  const local = readCatalog(localContents, "config/codex-models.json");
+  const merged = new Map(official.entries.map((entry) => [entry.slug, entry]));
+  for (const entry of local.entries) {
+    if (!merged.has(entry.slug)) {
+      merged.set(entry.slug, entry);
+    }
+  }
+  const hiddenModels = new Set(modelRoutes.codex.hiddenModels);
+  const entries = [...merged.values()];
+  for (const entry of local.entries) {
+    if (!official.models.has(entry.slug) && isCodexLaneSlug(entry.slug)) {
+      entry.visibility = "hide";
+    }
+  }
+  for (const { alias } of deriveCodexAliases(
+    entries.map(({ slug, visibility }) => ({ slug, visibility }))
+  )) {
+    hiddenModels.add(alias);
+  }
+  for (const entry of entries) {
+    if (hiddenModels.has(entry.slug)) {
+      entry.visibility = "hide";
+    }
+  }
+  return `${JSON.stringify({ ...official.catalog, models: entries }, null, 2)}\n`;
 };
 
 const requireModel = (
@@ -71,49 +135,84 @@ const codexVersion = (slug: string) => {
       };
 };
 
-const effortOrder = ["ultra", "max", "xhigh", "high", "medium", "low"];
+const isCodexLaneSlug = (slug: string) => {
+  const version = codexVersion(slug);
+  return (
+    version !== undefined && modelRoutes.codex.lanes.includes(version.family)
+  );
+};
+
+const deriveCodexAliases = (
+  models: Iterable<{ slug: string; visibility: unknown }>
+) => {
+  const known = [...models].flatMap(({ slug, visibility }) => {
+    const version = codexVersion(slug);
+    return version && modelRoutes.codex.lanes.includes(version.family)
+      ? [{ slug, version, visibility }]
+      : [];
+  });
+  const latest = new Map<
+    string,
+    { slug: string; major: number; minor: number }
+  >();
+  for (const { slug, version, visibility } of known) {
+    if (visibility !== "list") {
+      continue;
+    }
+    const previous = latest.get(version.family);
+    if (
+      !previous ||
+      version.major > previous.major ||
+      (version.major === previous.major && version.minor > previous.minor)
+    ) {
+      latest.set(version.family, {
+        slug,
+        major: version.major,
+        minor: version.minor
+      });
+    }
+  }
+  const nonForkAliases = new Set(modelRoutes.codex.nonForkAliases);
+  return modelRoutes.codex.lanes.flatMap((family) => {
+    const target = latest.get(family);
+    assert.ok(target, `No visible Codex model for lane: ${family}`);
+    return known
+      .filter(
+        ({ version }) =>
+          version.family === family &&
+          (version.major < target.major ||
+            (version.major === target.major && version.minor < target.minor))
+      )
+      .toSorted(
+        (left, right) =>
+          left.version.major - right.version.major ||
+          left.version.minor - right.version.minor
+      )
+      .map(({ slug }) => ({
+        name: target.slug,
+        alias: slug,
+        ...(nonForkAliases.has(slug) ? {} : { fork: true })
+      }));
+  });
+};
+
+const effortOrder = ["max", "xhigh", "high", "medium", "low"];
 
 const renderConfig = (
   template: string,
   catalog: ReadonlyMap<string, CatalogModel>
 ) => {
   const { codex, zai } = modelRoutes;
-  const legacyAliases = new Set(codex.aliases.map(({ alias }) => alias));
-  assert.equal(
-    legacyAliases.size,
-    codex.aliases.length,
-    "Duplicate Codex alias"
+  const aliases = deriveCodexAliases(
+    [...catalog].map(([slug, { visibility }]) => ({ slug, visibility }))
   );
-  const latest = new Map<
-    string,
-    { slug: string; major: number; minor: number }
-  >();
-  for (const [slug, { visibility }] of catalog) {
-    const version = codexVersion(slug);
-    if (version && visibility === "list" && !legacyAliases.has(slug)) {
-      const { family, major, minor } = version;
-      const previous = latest.get(family);
-      if (
-        !previous ||
-        major > previous.major ||
-        (major === previous.major && minor > previous.minor)
-      ) {
-        latest.set(family, { slug, major, minor });
-      }
-    }
-  }
-  const aliases = codex.aliases.map(({ alias, fork }) => {
+  assertUnique(
+    aliases.map(({ alias }) => alias),
+    "Codex alias"
+  );
+  for (const { alias } of aliases) {
     requireModel(catalog, alias);
-    const version = codexVersion(alias);
-    const target = version && latest.get(version.family);
-    assert.ok(target, `No visible successor for Codex alias: ${alias}`);
-    assert.ok(
-      target.major > version.major ||
-        (target.major === version.major && target.minor > version.minor),
-      `Codex alias would not advance: ${alias}`
-    );
-    return { name: target.slug, alias, ...(fork === true ? { fork } : {}) };
-  });
+  }
   assertUnique(
     zai.models.map(({ slug }) => slug),
     "Z.ai model"
@@ -177,15 +276,20 @@ const renderConfig = (
       params: { "reasoning.effort": forwarded }
     }));
   });
-  const contextNames = new Set(
-    aliases.flatMap(({ name, alias }) => [name, alias])
-  );
+  const contextTargets = new Map<string, string>();
+  for (const { name, alias } of aliases) {
+    contextTargets.set(name, name);
+    contextTargets.set(alias, name);
+  }
   const codexContext = [
-    ...[...catalog.keys()].filter((name) => contextNames.has(name)),
+    ...[...catalog.keys()].filter((name) => contextTargets.has(name)),
     ...codex.standaloneContextOverrides
   ].map((name) => ({
     name,
-    "max-context-length": requireModel(catalog, name).contextWindow
+    "max-context-length": requireModel(
+      catalog,
+      contextTargets.get(name) ?? name
+    ).contextWindow
   }));
 
   const sections = [
@@ -219,22 +323,40 @@ const renderConfig = (
   return result;
 };
 
-const check = process.argv[2] === "--check";
+const args = process.argv.slice(2);
 assert.ok(
-  process.argv.length === 2 || (check && process.argv.length === 3),
-  "Usage: node scripts/generate-config.mts [--check]"
+  args.length === 0 ||
+    (args.length === 1 && (args[0] === "--check" || args[0] === "--refresh")),
+  "Usage: node scripts/generate-config.mts [--check|--refresh]"
 );
-const [catalog, template] = await Promise.all([
+const check = args[0] === "--check";
+const refresh = args[0] === "--refresh";
+const [localCatalog, template] = await Promise.all([
   readFile("config/codex-models.json", "utf-8"),
   readFile("config/proxy.template.yaml", "utf-8")
 ]);
-const config = renderConfig(template, readCatalog(catalog));
+const catalogContents = refresh
+  ? mergeCatalog(await fetchOfficialCatalog(), localCatalog)
+  : localCatalog;
+const parsedCatalog = readCatalog(
+  catalogContents,
+  refresh ? officialCatalogUrl : "config/codex-models.json"
+);
+const config = renderConfig(template, parsedCatalog.models);
 const outputs = [
+  ...(refresh
+    ? [
+        {
+          path: "config/codex-models.json",
+          contents: parsedCatalog.clientCatalog
+        }
+      ]
+    : []),
   {
     path: "config.example.yaml",
     contents: `# Generated by pnpm run generate. Edit the sources in config/.\n${config}`
   },
-  { path: ".codex/model_catalog.json", contents: catalog }
+  { path: ".codex/model_catalog.json", contents: parsedCatalog.clientCatalog }
 ];
 await Promise.all(
   outputs.map(async ({ path, contents }) => {

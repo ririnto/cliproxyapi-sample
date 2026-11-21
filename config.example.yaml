@@ -285,17 +285,6 @@ requests:
           - name: glm-5.3
             protocol: codex
             match:
-              - reasoning.effort: ultra
-          - name: glm-5.3-flash
-            protocol: codex
-            match:
-              - reasoning.effort: ultra
-        params:
-          reasoning.effort: max
-      - models:
-          - name: glm-5.3
-            protocol: codex
-            match:
               - reasoning.effort: xhigh
           - name: glm-5.3-flash
             protocol: codex
@@ -795,11 +784,10 @@ api-keys:
         - name: glm-5.3
           alias: glm-5.3
           display-name: GLM 5.3
-          max-context-length: 272000
+          max-context-length: 305000
           is-compat: true
           thinking:
             levels:
-              - ultra
               - max
               - xhigh
               - high
@@ -808,11 +796,10 @@ api-keys:
         - name: glm-5.3-flash
           alias: glm-5.3-flash
           display-name: GLM 5.3 Flash
-          max-context-length: 272000
+          max-context-length: 305000
           is-compat: true
           thinking:
             levels:
-              - ultra
               - max
               - xhigh
               - high
@@ -893,12 +880,12 @@ oauth:
         alias: "gpt-6-astra"
         fork: true
       - name: "gpt-6.2-sol"
-        alias: "gpt-6.1-sol"
-        fork: true
+        alias: "gpt-5.6-sol"
       - name: "gpt-6.2-sol"
         alias: "gpt-6-sol"
       - name: "gpt-6.2-sol"
-        alias: "gpt-5.6-sol"
+        alias: "gpt-6.1-sol"
+        fork: true
       - name: "gpt-6.1-terra"
         alias: "gpt-5.6-terra"
         fork: true
@@ -918,23 +905,23 @@ oauth:
   settings:
     codex:
       - name: "gpt-6.2-sol"
-        max-context-length: 272000
+        max-context-length: 305000
       - name: "gpt-6.2-astra"
         max-context-length: 272000
       - name: "gpt-6-astra"
         max-context-length: 272000
       - name: "gpt-6.1-sol"
-        max-context-length: 272000
+        max-context-length: 305000
       - name: "gpt-6.1-terra"
-        max-context-length: 272000
+        max-context-length: 305000
       - name: "gpt-6-sol"
-        max-context-length: 272000
+        max-context-length: 305000
       - name: "gpt-6-luna"
         max-context-length: 272000
       - name: "gpt-5.6-sol"
-        max-context-length: 272000
+        max-context-length: 305000
       - name: "gpt-5.6-terra"
-        max-context-length: 272000
+        max-context-length: 305000
       - name: "gpt-5.6-luna"
         max-context-length: 272000
       - name: "codex-auto-review"
@@ -943,11 +930,11 @@ oauth:
         max-context-length: 272000
     claude:
       - name: "claude-fable-5-2"
-        max-context-length: 272000
+        max-context-length: 305000
       - name: "claude-opus-5-5"
-        max-context-length: 272000
+        max-context-length: 305000
       - name: "claude-sonnet-5-5"
-        max-context-length: 272000
+        max-context-length: 305000
       - name: "claude-haiku-5-5"
         max-context-length: 128000
 
