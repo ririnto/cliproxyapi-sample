@@ -1,15 +1,15 @@
+#:schema https://developers.openai.com/codex/config-schema.json
 approval_policy = "on-request"
 approvals_reviewer = "auto_review"
 default_permissions = ":danger-full-access"
-model = "gpt-6.1-terra"
+model = "gpt-6.2-sol"
 model_catalog_json = "model_catalog.json"
 model_provider = "openai"
 model_reasoning_effort = "high"
-model_verbosity = "low"
 openai_base_url = "http://localhost:8317/v1"
-personality = "none"
+project_doc_fallback_filenames = ["CLAUDE.md", "GEMINI.md"]
 sandbox_mode = "danger-full-access"
-service_tier = "default"
+show_raw_agent_reasoning = true
 
 [agents]
 default_subagent_model = "gpt-6-luna"
@@ -21,9 +21,12 @@ default_tools_approval_mode = "approve"
 
 [features]
 fast_mode = false
+image_generation = false
 local_thread_store_compression = true
+login_shell_package_path = true
 memories = true
 prevent_idle_sleep = true
+tui_extensions_statusline = true
 
 [features.code_mode]
 default_exec_yield_time_ms = 270000
@@ -39,26 +42,42 @@ min_wait_timeout_ms = 120000
 tool_namespace = "agents"
 
 [marketplaces.cursor-plugins]
+ref = "main"
 source = "https://github.com/cursor/plugins.git"
 source_type = "git"
 
 [marketplaces.googlechrome]
+ref = "main"
 source = "https://github.com/GoogleChrome/modern-web-guidance.git"
 source_type = "git"
 
+[marketplaces.grafana-skills]
+ref = "main"
+source = "https://github.com/grafana/skills.git"
+source_type = "git"
+
 [marketplaces.i-have-adhd]
+ref = "main"
 source = "https://github.com/ayghri/i-have-adhd.git"
 source_type = "git"
 
 [marketplaces.kotest]
+ref = "master"
 source = "https://github.com/kotest/kotest.git"
 source_type = "git"
 
 [marketplaces.rea]
+ref = "main"
 source = "https://github.com/morluto/rea.git"
 source_type = "git"
 
+[marketplaces.sinon]
+ref = "main"
+source = "https://github.com/ririnto/sinon.git"
+source_type = "git"
+
 [marketplaces.superpowers-marketplace]
+ref = "main"
 source = "https://github.com/obra/superpowers-marketplace.git"
 source_type = "git"
 
@@ -71,6 +90,7 @@ url = "https://mcp.grep.app"
 
 [memories]
 consolidation_model = "gpt-6.1-terra"
+disable_on_external_context = true
 extract_model = "gpt-6-luna"
 
 [model_providers.openai]
@@ -79,6 +99,24 @@ extract_model = "gpt-6-luna"
 fast_default_opt_out = true
 hide_full_access_warning = true
 hide_rate_limit_model_nudge = true
+
+[plugins."agent-browser-plugin@sinon"]
+enabled = true
+
+[plugins."agent-desktop-plugin@sinon"]
+enabled = true
+
+[plugins."clear-writing@sinon"]
+enabled = true
+
+[plugins."codegraph-plugin@sinon"]
+enabled = true
+
+[plugins."ddgs-plugin@sinon"]
+enabled = true
+
+[plugins."grafana-core@grafana-skills"]
+enabled = true
 
 [plugins."i-have-adhd@i-have-adhd"]
 enabled = true
@@ -95,6 +133,12 @@ enabled = true
 [plugins."rea@rea"]
 enabled = true
 
+[plugins."stop-slop@sinon"]
+enabled = true
+
+[plugins."workgraph@sinon"]
+enabled = true
+
 [plugins."superpowers@superpowers-marketplace"]
 enabled = true
 
@@ -108,6 +152,7 @@ enabled = true
 enabled = true
 
 [tui]
+resume_cwd = "session"
 status_line = [
   "model-with-reasoning",
   "project-name",

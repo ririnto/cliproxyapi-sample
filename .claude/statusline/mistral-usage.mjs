@@ -1,7 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
 
-import { withUsageCache } from "./usage-cache.mjs";
-
 const BUDGET_URL = "https://api.mistral.ai/v1/billing/budget";
 
 /**
@@ -138,11 +136,11 @@ const fetchUsageUncached = async (options = {}) => {
 };
 
 /**
- * 자격 증명별 영구 캐시를 사용해 Mistral 사용량을 조회합니다.
- * @param {import("./types.ts").UsageOptions} [options] 입력 옵션입니다.
- * @returns {Promise<import("./types.ts").Snapshot|undefined> | undefined} 사용량 스냅샷입니다.
+ * @param {import("./types.ts").UsageOptions} options Lookup options.
+ * @param {Pick<import("./types.ts").UsageRuntime, "withUsageCache">} runtime Host-provided usage helpers.
+ * @returns {Promise<import("./types.ts").Snapshot | undefined> | undefined} Usage when a credential is available.
  */
-export const fetchUsage = (options = {}) => {
+export const fetchUsage = (options, { withUsageCache }) => {
   const credential =
     typeof options.credential === "string" ? options.credential : "";
   return credential

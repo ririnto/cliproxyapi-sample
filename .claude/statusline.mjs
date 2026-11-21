@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { setTimeout as delayMs } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 
@@ -12,10 +14,7 @@ import { stripVTControlCharacters } from "node:util";
  * @typedef {Record<string, unknown>} RecordValue
  */
 /**
- * @typedef {{home?: string, baseDir?: string, environment?: Record<string, string | undefined>}} ReferenceOptions
- */
-/**
- * @typedef {{addons?: unknown, branch?: string, cwd?: string, nowMs?: number, nativeUsage?: boolean | null, settingsDir?: string, importModule?: (url: URL) => unknown}} RenderOptions
+ * @typedef {{addons?: unknown, branch?: string, cwd?: string, nowMs?: number, nativeUsage?: boolean | null, importModule?: (url: URL) => unknown}} RenderOptions
  */
 /**
  * @param {unknown} value - Untrusted input.
@@ -85,115 +84,6 @@ const metricPercentage = (metric) => {
   }
   return metric?.percentage ?? 0;
 };
-
-/**
- * @param {string} name - name input.
- * @param {ReferenceOptions["environment"]} environment - environment input.
- */
-const environmentValue = (name, environment) =>
-  environment !== undefined && Object.hasOwn(environment, name)
-    ? (environment[name] ?? "")
-    : (process.env[name] ?? "");
-
-/**
- * @param {string} value - value input.
- * @param {ReferenceOptions["environment"]} environment - environment input.
- */
-const replaceEnvironmentReferences = (value, environment) =>
-  value.replaceAll(/\{env:(?<name>[^{}]+)\}/gu, (placeholder) =>
-    environmentValue(placeholder.slice(5, -1), environment)
-  );
-
-/**
- * @param {{index:number,text:string,path:string}} reference - File reference.
- * @param {string} home - home input.
- * @param {string} baseDir - baseDir input.
- */
-const referenceText = async (reference, home, baseDir) => {
-  const referencePath = reference.path;
-  if (!referencePath) {
-    return reference.text;
-  }
-  const pathValue = referencePath.startsWith("~/")
-    ? path.join(home, referencePath.slice(2))
-    : referencePath;
-  const filePath = path.isAbsolute(pathValue)
-    ? pathValue
-    : path.resolve(baseDir, pathValue);
-  try {
-    const text = await readFile(filePath, "utf-8");
-    return text.trim();
-  } catch {
-    return reference.text;
-  }
-};
-
-/**
- * @param {string} value - value input.
- * @param {{index:number,text:string,path:string}[]} references - File references.
- * @param {string[]} texts - texts input.
- */
-const spliceReferences = (value, references, texts) => {
-  const last = references.at(-1);
-  if (last === undefined) {
-    return value;
-  }
-  return (
-    references
-      .map(
-        (reference, index) =>
-          value.slice(
-            index
-              ? references[index - 1].index + references[index - 1].text.length
-              : 0,
-            reference.index
-          ) + texts[index]
-      )
-      .join("") + value.slice(last.index + last.text.length)
-  );
-};
-
-/**
- * @param {string} value - value input.
- * @param {ReferenceOptions} options - options input.
- */
-const replaceFileReferences = async (value, options) => {
-  const home = options.home ?? homedir();
-  const baseDir = options.baseDir ?? process.cwd();
-  const references = [
-    ...value.matchAll(
-      /(?<fileReference>\{file:(?<fileReferencePath>[^{}]*)\})/gu
-    )
-  ].map(({ groups, index }) => ({
-    index,
-    path: groups?.fileReferencePath ?? "",
-    text: groups?.fileReference ?? ""
-  }));
-  if (!references.length) {
-    return value;
-  }
-  return spliceReferences(
-    value,
-    references,
-    await Promise.all(
-      references.map(
-        async (reference) => await referenceText(reference, home, baseDir)
-      )
-    )
-  );
-};
-
-/**
- * @param {unknown} value - value input.
- * @param {ReferenceOptions} options - options input.
- */
-const resolveCredentialReference = async (value, options = {}) =>
-  typeof value === "string"
-    ? await replaceFileReferences(
-        replaceEnvironmentReferences(value, options.environment),
-        options
-      )
-    : value;
 
 /**
  * @param {number} number - number input.
@@ -534,6 +424,333 @@ const scriptPath = (script) => {
 };
 
 /**
+ * @param {unknown} value Untrusted metric.
+ * @returns {value is import("./statusline/types.ts").Metric} A normalized metric.
+ */
+const isMetric = (value) => {
+  if (
+    !isRecord(value) ||
+    typeof value.label !== "string" ||
+    (value.resetsInMs !== undefined && !isFiniteNumber(value.resetsInMs)) ||
+    (value.currency !== undefined && typeof value.currency !== "string")
+  ) {
+    return false;
+  }
+  switch (value.type) {
+    case "percentage": {
+      return isFiniteNumber(value.percentage);
+    }
+    case "usage": {
+      return isFiniteNumber(value.used) && isFiniteNumber(value.total);
+    }
+    case "budget": {
+      return (
+        isFiniteNumber(value.used) &&
+        isFiniteNumber(value.total) &&
+        isFiniteNumber(value.percentage)
+      );
+    }
+    case "credit": {
+      return isFiniteNumber(value.remaining);
+    }
+    default: {
+      return false;
+    }
+  }
+};
+/**
+ * @param {unknown} value Persisted snapshot.
+ * @returns {value is import("./statusline/types.ts").Snapshot} A normalized snapshot.
+ */
+const isSnapshot = (value) =>
+  isRecord(value) &&
+  Array.isArray(value.groups) &&
+  value.groups.every(
+    (group) =>
+      isRecord(group) &&
+      (group.label === undefined || typeof group.label === "string") &&
+      (group.deduplicateWithNativeQuota === undefined ||
+        typeof group.deduplicateWithNativeQuota === "boolean") &&
+      Array.isArray(group.metrics) &&
+      group.metrics.every(isMetric)
+  );
+
+/**
+ * @typedef {object} CacheRecord
+ * @property {string} credentialHash Credential identity digest.
+ * @property {number} fetchedAt Snapshot fetch timestamp.
+ * @property {number} nextAttemptAt Earliest retry timestamp.
+ * @property {import("./statusline/types.ts").Snapshot} [snapshot] Validated usage snapshot.
+ */
+
+const MAX_STALE_MS = 5 * 60_000;
+/**
+ * Default lifetime shared by persisted usage snapshots and consumer refreshes.
+ */
+const DEFAULT_USAGE_CACHE_TTL_MS = 5000;
+
+/**
+ * @param {unknown} value Current timestamp.
+ */
+const nowValue = (value) => {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  return isFiniteNumber(value) ? value : Date.now();
+};
+
+/**
+ * @param {number | undefined} status HTTP status.
+ * @param {boolean} usageError Payload failure.
+ */
+const isSuccessfulResponse = (status, usageError) =>
+  !usageError && isFiniteNumber(status) && status >= 200 && status < 300;
+
+/**
+ * @param {unknown} value Persisted data.
+ * @param {string} credentialHash Expected identity.
+ * @returns {value is CacheRecord} Valid cache entry.
+ */
+const validRecord = (value, credentialHash) =>
+  isRecord(value) &&
+  value.credentialHash === credentialHash &&
+  isFiniteNumber(value.fetchedAt) &&
+  isFiniteNumber(value.nextAttemptAt) &&
+  (value.snapshot === undefined || isSnapshot(value.snapshot));
+
+/**
+ * @param {import("./statusline/types.ts").Snapshot | undefined} snapshot Cached data.
+ * @param {number} elapsed Elapsed milliseconds.
+ */
+const adjustedSnapshot = (snapshot, elapsed) => {
+  if (!snapshot || !Array.isArray(snapshot.groups)) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    groups: snapshot.groups.map((group) => ({
+      ...group,
+      metrics: Array.isArray(group.metrics)
+        ? group.metrics.map((metric) =>
+            "resetsInMs" in metric && isFiniteNumber(metric.resetsInMs)
+              ? {
+                  ...metric,
+                  resetsInMs: Math.max(0, metric.resetsInMs - elapsed)
+                }
+              : metric
+          )
+        : group.metrics
+    }))
+  };
+};
+
+/**
+ * @param {string | null | undefined} value Retry header.
+ * @param {number} now Current time.
+ */
+const retryDelay = (value, now) => {
+  if (value === undefined || value === null || value === "") {
+    return 0;
+  }
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - now) : 0;
+};
+
+/**
+ * @param {string} filePath Cache path.
+ * @param {string} credentialHash Expected identity.
+ */
+const readCache = async (filePath, credentialHash) => {
+  /**
+   * @type {unknown}
+   */
+  let entry;
+  try {
+    entry = JSON.parse(await readFile(filePath, "utf-8"));
+  } catch {
+    entry = undefined;
+  }
+  return validRecord(entry, credentialHash) ? entry : undefined;
+};
+
+/**
+ * @param {string} directory Cache directory.
+ * @param {string} filePath Cache path.
+ * @param {Omit<CacheRecord, "snapshot"> & {snapshot?: unknown}} entry Entry to serialize.
+ * Persisted snapshots are validated when read.
+ */
+const writeCache = async (directory, filePath, entry) => {
+  let temporaryPath;
+  try {
+    await mkdir(directory, { mode: 0o700, recursive: true });
+    temporaryPath = path.join(directory, `.${randomUUID()}.tmp`);
+    await writeFile(temporaryPath, JSON.stringify(entry), { mode: 0o600 });
+    await rename(temporaryPath, filePath);
+  } catch {
+    if (temporaryPath !== undefined && temporaryPath !== "") {
+      try {
+        await rm(temporaryPath, { force: true });
+      } catch {
+        if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
+          console.error(
+            "[statusline-usage] 임시 캐시 파일 정리에 실패했습니다."
+          );
+        }
+      }
+    }
+    if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
+      console.error("[statusline-usage] 사용량 캐시 저장에 실패했습니다.");
+    }
+  }
+};
+
+/** @type {import("./statusline/types.ts").UsageRuntime["withUsageCache"]} */
+const withUsageCache = async (
+  provider,
+  credentialIdentity,
+  options,
+  fetchSnapshot
+) => {
+  if (options.cache === false || !/^[a-z0-9_-]+$/u.test(provider)) {
+    return await fetchSnapshot(options);
+  }
+  const now = nowValue(options.now);
+  const { cacheTtlMs } = options;
+  const ttl = isFiniteNumber(cacheTtlMs)
+    ? Math.max(0, cacheTtlMs)
+    : DEFAULT_USAGE_CACHE_TTL_MS;
+  const directory =
+    options.cacheDir ??
+    path.join(options.home ?? homedir(), ".claude", "cache", "usage");
+  const filePath = path.join(directory, `${provider}.json`);
+  const credentialHash = createHash("sha256")
+    .update(JSON.stringify([provider, credentialIdentity]))
+    .digest("hex");
+  const cached = await readCache(filePath, credentialHash);
+  if (cached && now < cached.nextAttemptAt) {
+    const age = Math.max(0, now - cached.fetchedAt);
+    if (
+      cached.snapshot !== undefined &&
+      age > MAX_STALE_MS &&
+      cached.nextAttemptAt - cached.fetchedAt > ttl
+    ) {
+      cached.snapshot = undefined;
+      await writeCache(directory, filePath, cached);
+    }
+    return adjustedSnapshot(cached.snapshot, age);
+  }
+  /**
+   * @type {number | undefined}
+   */
+  let status;
+  let delay = 0;
+  let usageError = false;
+  const originalFetch = options.fetch ?? globalThis.fetch;
+  /**
+   * @type {import("./statusline/types.ts").UsageOptions}
+   */
+  const wrappedOptions = {
+    ...options,
+    fetch: async (...args) => {
+      status = undefined;
+      delay = 0;
+      usageError = false;
+      const response = await originalFetch(...args);
+      status = Number.isFinite(response?.status) ? response.status : undefined;
+      delay = retryDelay(response?.headers?.get?.("retry-after"), now);
+      return response;
+    },
+    onUsageError: () => {
+      usageError = true;
+    }
+  };
+  let snapshot;
+  try {
+    snapshot = await fetchSnapshot(wrappedOptions);
+  } catch {
+    status = undefined;
+  }
+  const nextAttemptAt = now + Math.max(ttl, delay);
+  if (isSuccessfulResponse(status, usageError)) {
+    await writeCache(directory, filePath, {
+      credentialHash,
+      fetchedAt: now,
+      nextAttemptAt,
+      snapshot
+    });
+    return snapshot;
+  }
+  const fetchedAt = cached?.fetchedAt ?? now;
+  const age = Math.max(0, now - fetchedAt);
+  const fallback = age <= MAX_STALE_MS ? cached?.snapshot : undefined;
+  await writeCache(directory, filePath, {
+    credentialHash,
+    fetchedAt,
+    nextAttemptAt,
+    snapshot: fallback
+  });
+  return adjustedSnapshot(fallback, age);
+};
+
+/** @type {import("./statusline/types.ts").UsageRuntime["requestJson"]} */
+const requestJson = async (url, headers, fetchFunction, onUsageError) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 3000);
+  try {
+    const response = await fetchFunction(url, {
+      headers,
+      method: "GET",
+      signal: controller.signal
+    });
+    if (!Number.isFinite(response.status)) {
+      return { status: undefined };
+    }
+    if (response.status < 200 || response.status >= 300) {
+      try {
+        await Promise.race([
+          response.body?.cancel(),
+          delayMs(3000, undefined, { signal: controller.signal })
+        ]);
+      } catch {
+        if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
+          console.error(
+            `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
+          );
+        }
+      }
+      controller.abort();
+      return { status: response.status };
+    }
+    try {
+      /**
+       * @type {unknown}
+       */
+      const payload = await response.json();
+      if (!isRecord(payload)) {
+        onUsageError?.();
+        return { status: response.status };
+      }
+      return { payload, status: response.status };
+    } catch {
+      onUsageError?.();
+      return { status: response.status };
+    }
+  } catch {
+    return { status: undefined };
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+export const usageRuntime = { withUsageCache, requestJson };
+
+/**
  * @param {{script:string}} addon - addon input.
  * @param {RenderOptions} options - options input.
  */
@@ -559,7 +776,7 @@ const importAddonModule = async (addon, options) => {
    * @param {RecordValue} input - Provider request.
    * @returns {unknown} Provider result.
    */
-  return (input) => Reflect.apply(fetchUsage, module, [input]);
+  return (input) => Reflect.apply(fetchUsage, module, [input, usageRuntime]);
 };
 
 /**
@@ -567,15 +784,11 @@ const importAddonModule = async (addon, options) => {
  * @param {RenderOptions} options - options input.
  */
 const renderAddonResults = async (addons, options = {}) => {
-  const settingsDir = textOr(
-    options.settingsDir,
-    path.join(homedir(), ".claude")
-  );
   const results = await Promise.all(
     addonSettings(addons)
       .filter(
         (addon) =>
-          !(options.nativeUsage === true && addon.provider === "claude")
+          !(options.nativeUsage === true && addon.skipWhenNativeUsage === true)
       )
       .map(async (addon) => {
         try {
@@ -585,12 +798,8 @@ const renderAddonResults = async (addons, options = {}) => {
            */
           const snapshot = module
             ? await module({
-                baseDir: settingsDir,
-                credential: Object.hasOwn(addon, "credential")
-                  ? await resolveCredentialReference(addon.credential, {
-                      baseDir: settingsDir
-                    })
-                  : ""
+                credential:
+                  typeof addon.credential === "string" ? addon.credential : ""
               })
             : undefined;
           const line = renderSnapshot(addon, snapshot);
@@ -601,15 +810,6 @@ const renderAddonResults = async (addons, options = {}) => {
       })
   );
   return results.filter((result) => result !== null);
-};
-
-/**
- * @param {unknown} addons - addons input.
- * @param {RenderOptions} options - options input.
- */
-export const renderAddons = async (addons, options = {}) => {
-  const results = await renderAddonResults(addons, options);
-  return results.map((result) => result.line);
 };
 
 /**
@@ -771,19 +971,47 @@ export const renderStatusline = async (input, options = {}) => {
   ];
 };
 
-/**
- * @param {string} filePath - filePath input.
- */
-const readSettings = async (filePath) => {
+const readProviderAddons = async () => {
+  /**
+   * @type {unknown}
+   */
+  let registry;
   try {
-    /**
-     * @type {unknown}
-     */
-    const parsed = JSON.parse(await readFile(filePath, "utf-8"));
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
+    registry = JSON.parse(
+      await readFile(
+        new URL("statusline/providers.json", import.meta.url),
+        "utf-8"
+      )
+    );
+  } catch (error) {
+    if (truthy(process.env.STATUSLINE_DEBUG)) {
+      console.error("[statusline] provider registry unavailable", error);
+    }
+    return [];
   }
+  return array(registry).flatMap((entry) => {
+    const provider = record(entry);
+    const { name, module, credentialEnv } = provider;
+    if (
+      typeof name !== "string" ||
+      typeof module !== "string" ||
+      path.basename(module) !== module ||
+      !module.endsWith(".mjs")
+    ) {
+      return [];
+    }
+    return [
+      {
+        ...provider,
+        credential:
+          typeof credentialEnv === "string"
+            ? (process.env[credentialEnv] ?? "")
+            : "",
+        script: `./statusline/${module}`,
+        showAbove: provider.showAbove ?? 0.001
+      }
+    ];
+  });
 };
 
 export const main = async () => {
@@ -793,33 +1021,14 @@ export const main = async () => {
      */
     const parsed = JSON.parse(readFileSync(0, "utf-8"));
     const input = record(parsed);
-    const globalSettingsDir = textOr(
-      process.env.CLAUDE_CONFIG_DIR,
-      path.join(homedir(), ".claude")
-    );
-    const projectDir = record(input.workspace).project_dir;
-    const projectSettings =
-      typeof projectDir === "string"
-        ? await readSettings(path.join(projectDir, ".claude", "settings.json"))
-        : null;
-    const useProject =
-      projectSettings !== null &&
-      Array.isArray(projectSettings.statusLineAddon);
     const rows = await renderStatusline(input, {
-      addons:
-        (useProject
-          ? projectSettings
-          : await readSettings(path.join(globalSettingsDir, "settings.json"))
-        )?.statusLineAddon ?? [],
-      cwd: textOr(record(input.workspace).current_dir, process.cwd()),
-      settingsDir: useProject
-        ? path.join(String(projectDir), ".claude")
-        : globalSettingsDir
+      addons: await readProviderAddons(),
+      cwd: textOr(record(input.workspace).current_dir, process.cwd())
     });
     process.stdout.write(`${rows.join("\n")}\n`);
   } catch (error) {
     if (truthy(process.env.STATUSLINE_DEBUG)) {
-      console.error("[statusline] unavailable input or settings", error);
+      console.error("[statusline] unavailable input or providers", error);
     }
   }
 };

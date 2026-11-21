@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import test from "node:test";
 
-import { requestJson } from "./usage-http.mjs";
+import { usageRuntime } from "../../.claude/statusline.mjs";
+
+const { requestJson } = usageRuntime;
 
 await test("returns the HTTP status and aborts a stalled error body", async (t) => {
   const stream = new EventTarget();

@@ -1,29 +1,25 @@
 ---
-description: Pstack model configuration for Claude Code with Codex aliases
+description: pstack per-role model choices (overrides skill defaults)
 alwaysApply: true
 ---
-# Pstack model configuration
-
+# pstack model configuration. One row per role. Delete a row to fall back to the skill default.
+# `inherit-parent` or `auto` as a value: the role runs on the parent chat model (omit Task `model` and spawn `generalPurpose`). Alias entries in a panel list still count toward its fan-out.
 # defaults: 3
+# budget: large (xhigh)
 
-| Pstack role | Task difficulty | Claude Code model and effort |
+Choose one column before dispatch.
+Use `normal` by default and `harder` when the work involves an unknown cause, interacting components, or a difficult design decision.
+A blank `harder` cell uses `normal`.
+Resolve each GPT family alias to the latest available model in that family supporting the listed effort.
+
+| role | normal | harder |
 | --- | --- | --- |
-| feature, refactoring | Routine | Sonnet(medium-high) → Opus(medium-high) |
-| bug-fix | Routine | Sonnet(medium-high) → Opus(high-xhigh) |
-| perf-issue | High | Opus(high-xhigh) |
-| hillclimb | High | Opus(medium-high) → Opus(xhigh) |
-| judgment and prose | Routine | Haiku(low-medium) → Sonnet(medium-high) |
-| arena runners | Low or high | Haiku(medium-high), Opus(medium-high) |
-| arena cross-judge pool | Low or high | Haiku(high-xhigh), Opus(high-xhigh) |
-| swarm workers | Low | Haiku(low-medium) → Sonnet(medium-high) |
-| interrogate reviewers | Low or high | Sonnet(medium-high), Opus(high-xhigh) |
-
-## Codex aliases
-
-| Claude Code model | Codex alias |
-| --- | --- |
-| Haiku | luna |
-| Sonnet | terra |
-| Opus | sol |
-
-For native Codex tasks, resolve each alias at runtime to the latest compatible model in that family available to the task tool, and pass the resolved model ID and selected effort separately.
+| feature, refactoring | luna-xhigh | sol-medium |
+| bug-fix | luna-xhigh | terra-high |
+| perf-issue | luna-xhigh | sol-medium |
+| hillclimb | luna-xhigh | |
+| judgment and prose | luna-xhigh | terra-medium |
+| arena runners | luna-xhigh, terra-medium | luna-xhigh, sol-medium |
+| arena cross-judge pool | sol-medium | |
+| swarm workers | luna-xhigh | |
+| interrogate reviewers | luna-xhigh, terra-medium | terra-medium, sol-medium |

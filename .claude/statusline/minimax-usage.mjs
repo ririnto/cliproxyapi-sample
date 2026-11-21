@@ -1,6 +1,3 @@
-import { withUsageCache } from "./usage-cache.mjs";
-import { requestJson } from "./usage-http.mjs";
-
 const USAGE_URL =
   "https://api.minimax.io/v1/api/openplatform/coding_plan/remains";
 
@@ -95,10 +92,11 @@ const usageSnapshot = (model) => {
 
 /**
  * Fetch and normalize MiniMax coding plan usage.
- * @param {import("./types.ts").UsageOptions} [options] Input value.
+ * @param {import("./types.ts").UsageOptions} options Input value.
  * @returns {Promise<import("./types.ts").Snapshot|undefined>} Result.
+ * @param {import("./types.ts").UsageRuntime["requestJson"]} requestJson Host HTTP transport.
  */
-const fetchUsageUncached = async (options = {}) => {
+const fetchUsageUncached = async (options, requestJson) => {
   const credential =
     typeof options.credential === "string" ? options.credential : "";
   const { payload } = credential
@@ -132,14 +130,19 @@ const fetchUsageUncached = async (options = {}) => {
 };
 
 /**
- * 자격 증명별 영구 캐시를 사용해 MiniMax 사용량을 조회합니다.
- * @param {import("./types.ts").UsageOptions} [options] 입력 옵션입니다.
- * @returns {Promise<import("./types.ts").Snapshot|undefined>} 사용량 스냅샷입니다.
+ * @param {import("./types.ts").UsageOptions} options Lookup options.
+ * @param {import("./types.ts").UsageRuntime} runtime Host-provided usage helpers.
  */
-export const fetchUsage = async (options = {}) => {
+export const fetchUsage = async (options, { withUsageCache, requestJson }) => {
   const credential =
     typeof options.credential === "string" ? options.credential : "";
   return credential
-    ? await withUsageCache("minimax", credential, options, fetchUsageUncached)
+    ? await withUsageCache(
+        "minimax",
+        credential,
+        options,
+        async (cachedOptions) =>
+          await fetchUsageUncached(cachedOptions, requestJson)
+      )
     : undefined;
 };
