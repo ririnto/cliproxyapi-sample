@@ -137,13 +137,9 @@ routing:
   # Non-positive weights exclude the credential while this strategy is active.
   # For OAuth/file credentials, add a top-level numeric "weight" field to the auth JSON.
   # Enable universal session-sticky routing for all clients.
-  # Routing uses these session identifiers in order:
-  # 1. Explicit session headers from Claude Code, Codex, OpenCode, or pi.
-  # 2. prompt_cache_key.
-  # 3. Responses conversation IDs.
-  # 4. Legacy body IDs.
-  # 5. Execution or derived session identity.
-  # 6. The existing first-message hash fallback.
+  # Explicit Claude Code, Codex, OpenCode, and pi session headers are preferred,
+  # followed by prompt_cache_key, Responses conversation IDs, legacy body IDs,
+  # execution or derived session identity, and the existing first-message hash fallback.
   # Automatic failover is always enabled when bound auth becomes unavailable.
   # An established binding outranks credential priority: once a session is bound, that
   # credential is kept even if a higher-priority credential recovers. Credential priority
@@ -170,14 +166,7 @@ routing:
     # inherit this global value, and explicit 0 only admits round 0. New CPA nodes
     # send retry_round=0 for the initial round and increment it for additional rounds;
     # legacy dispatch methods omit the field and keep old semantics.
-    # Additional rounds apply to failures with these HTTP status codes:
-    # - 403
-    # - 408
-    # - 429
-    # - 500
-    # - 502
-    # - 503
-    # - 504
+    # Additional rounds apply to HTTP 403, 408, 429, 500, 502, 503, and 504 failures.
     # Individual credential/provider overrides take precedence; 0 disables additional
     # rounds, while an omitted or negative override inherits this global setting.
     request-retry: 3
@@ -983,15 +972,8 @@ oauth:
       # (for formats that render handshake/heartbeats, headers commit immediately on release; for
       # formats like Chat Completions and Gemini that render nothing until the first text token, headers
       # commit when that first token arrives).
-      # With any of the following values, buffering is limited only by the 48-frame and 1MB byte budget:
-      # - Unset
-      # - "0"
-      # - "0s"
-      # - "none"
-      # - "unlimited"
-      # - "disabled"
-      # - "off"
-      # - "never"
+      # When unset or set to "0", "0s", "none", "unlimited", "disabled", "off", or "never", no time ceiling
+      # is applied, and buffering relies purely on the 48-frame and 1MB byte budget.
       # Default: "0" (unlimited)
       stream-bootstrap-timeout: "0"
       # When true, enable opt-in compatibility for orphan Codex delegation outputs.
