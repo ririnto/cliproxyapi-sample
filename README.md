@@ -83,12 +83,13 @@ GPT가 보이지 않으면 서비스를 실행한 환경에서 Codex 로그인�
 Z.ai 키는 프록시가 Z.ai에 접속할 때 사용한다.
 
 GLM 요청은 Z.ai의 Responses API로 전달한다.
+요청한 reasoning effort보다 높은 지원 수준 중 가장 가까운 값을 사용한다.
+더 높은 수준이 없으면 지원 최댓값을 사용한다.
+`minimal` 요청은 상위 서비스에 전달하지 않고 거절한다.
 
 | 요청 | 프록시 동작 |
 | --- | --- |
-| GLM의 reasoning effort | `minimal → low`, `medium → high`, `xhigh → max` |
-| 이전 Astra·Sol 모델 ID | Astra는 `gpt-6.2-astra`, Sol은 `gpt-6.2-sol`로 연결한다. |
-| Terra·Luna 모델 ID | 현재 이름과 이전 이름을 모두 공개한다. |
+| 이전 GPT 모델 ID | 같은 계열에서 카탈로그에 공개된 최신 Astra, Sol, Terra 또는 Luna 모델로 연결한다. |
 | `chatgpt/` 접두사 | OAuth 계정 파일에 `"prefix": "chatgpt"`를 지정하면 접두사로도 요청할 수 있다. |
 
 ## Codex 모델 선택기 연결
@@ -183,6 +184,8 @@ done
 [프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤 `pnpm run generate`를 실행한다.
 생성된 `config.example.yaml`과 `.codex/model_catalog.json`을 함께 커밋한다.
 `pnpm run check:generated`로 생성물의 차이를 확인한다.
+카탈로그에 같은 등급의 새 모델을 공개하고 다시 생성하면 기존 별칭의 대상이 바뀐다.
+별칭을 새 모델 버전으로 직접 수정할 필요는 없다.
 
 기여 시 [공통 개발 지침](.agents/engineering.md)을 참고한다.
 [package.json](package.json)에 지정된 Node.js와 pnpm을 사용한다.
