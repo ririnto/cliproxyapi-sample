@@ -200,6 +200,9 @@ catalogs:
     oxlint-tsgolint:
       specifier: ^7.0.2006
       version: 7.0.2007
+    smol-toml:
+      specifier: ^1.9.1
+      version: 1.9.1
     typescript:
       specifier: ^7.0.2
       version: 7.0.2
@@ -241,6 +244,9 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 7.0.2007
+      smol-toml:
+        specifier: 'catalog:'
+        version: 1.9.1
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
