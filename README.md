@@ -193,13 +193,18 @@ Codex CLI를 재시작한다.
 
 ## 개발 검증
 
-`pnpm run generate`는 [공식 Codex 카탈로그](https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json)를 새로 받아 메타데이터 스냅샷을 갱신한다.
+`pnpm run generate`는 카탈로그와 pstack 에이전트 설정을 병렬로 갱신한다.
+
+`pnpm run generate:config`는 [공식 Codex 카탈로그](https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json)를 새로 받아 메타데이터 스냅샷을 갱신한다.
 기존 GLM 모델과 카탈로그에서 사라진 모델을 유지하고 별칭 및 프록시 설정도 다시 생성한다.
 `config/codex-models.json`, `config.example.yaml`, `.codex/model_catalog.json`을 함께 커밋한다.
 `pnpm run check:generated`는 네트워크 없이 생성물의 차이를 확인한다.
-[모델 라우팅](config/model-routes.mts)이나 [프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤에도 `pnpm run generate`를 실행한다.
+[모델 라우팅](config/model-routes.mts)이나 [프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤에도 `pnpm run generate:config`를 실행한다.
 카탈로그에 새 숫자 버전 모델을 공개하고 다시 생성하면 각 등급에서 가장 높은 공개 모델이
 직접 경로가 되고, 알려진 이전 숫자 버전은 자동으로 그 모델을 가리키는 별칭이 된다.
+
+`pnpm run generate:agents`는 [upstream pstack 에이전트](https://github.com/cursor/plugins/tree/main/pstack/agents)의 Markdown을 가져와 `.codex/agents/`의 `poteto-agent.toml`과 `comment-sicko.toml`을 갱신한다.
+갱신한 TOML을 사용자 설정으로 적용하려면 `${CODEX_HOME:-$HOME/.codex}/agents/`에 복사한다.
 
 기여 시 [공통 개발 지침](.agents/engineering.md)을 참고한다.
 [package.json](package.json)에 지정된 Node.js와 pnpm을 사용한다.

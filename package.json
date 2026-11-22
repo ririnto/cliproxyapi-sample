@@ -2,7 +2,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "run-s --continue-on-error check:*",
+    "check": "run-p --continue-on-error check:*",
     "check:generated": "node scripts/generate-config.mts --check",
     "check:markdownlint-cli2": "markdownlint-cli2",
     "check:test": "node --test \"tests/**/*.test.{mjs,mts}\"",
@@ -11,7 +11,11 @@
     "fix": "run-p fix:*",
     "fix:markdownlint-cli2": "markdownlint-cli2 --fix",
     "fix:ultracite": "node scripts/ultracite.mjs fix",
-    "generate": "node scripts/generate-config.mts --refresh && ultracite fix config/codex-models.json .codex/model_catalog.json",
+    "generate": "run-p generate:*",
+    "generate:agents": "node scripts/generate-agents.mts",
+    "generate:config": "run-s generate:config:refresh generate:config:format",
+    "generate:config:format": "ultracite fix config/codex-models.json .codex/model_catalog.json",
+    "generate:config:refresh": "node scripts/generate-config.mts --refresh",
     "pre-commit": "run-p check:markdownlint-cli2 check:ultracite",
     "pre-push": "pnpm run check",
     "prepare": "husky"
@@ -26,6 +30,7 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "smol-toml": "catalog:",
     "typescript": "catalog:",
     "ultracite": "catalog:",
     "yaml": "catalog:"
