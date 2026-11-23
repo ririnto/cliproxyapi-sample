@@ -1,4 +1,5 @@
 catalog:
+  "@11ty/gray-matter": ^3.0.0
   "@tsconfig/node-lts": ^24.0.1
   "@types/node": ^24.19.2
   husky: ^9.1.7
