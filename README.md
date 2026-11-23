@@ -113,9 +113,13 @@ model_catalog_json = "model_catalog.json"
 openai_base_url = "http://localhost:8317/v1"
 
 [model_providers.openai]
+
+[shell_environment_policy.set]
+NODE_USE_SYSTEM_CA = "1"
 ```
 
-빈 테이블에는 추가 설정이 필요 없다.
+`model_providers.openai` 테이블은 비워 둔다.
+`shell_environment_policy.set`의 `NODE_USE_SYSTEM_CA`는 Codex가 실행한 셸 명령에서 Node.js가 시스템 CA 인증서를 사용하도록 설정한다.
 새 Codex 세션에서 `/model`을 열어 `gpt-6.2-sol`과 `glm-5.3`이 표시되는지 확인한다.
 
 전체 파일을 적용하면 `approval_policy = "on-request"`와
@@ -184,11 +188,16 @@ command = "sh"
 args = ["-c", 'exec node "${CODEX_HOME:-$HOME/.codex}/statusline.mjs"']
 env_vars = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "MINIMAX_API_KEY", "MISTRAL_API_KEY", "ZHIPU_API_KEY"]
 
+[mcp_servers.statusline.env]
+NODE_USE_SYSTEM_CA = "1"
+
 [tui.status_line_provider]
 server = "statusline"
 tool = "statusline"
 ```
 
+Codex는 상태줄 MCP 서버를 별도로 실행하므로 서버의 `env`에 `NODE_USE_SYSTEM_CA`를 지정한다.
+이미 해당 `env` 테이블이 있으면 기존 키를 유지하고 `NODE_USE_SYSTEM_CA`만 추가하거나 갱신한다.
 Codex CLI를 재시작한다.
 
 ## 개발 검증

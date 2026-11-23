@@ -145,6 +145,9 @@ enabled = true
 [sandbox_workspace_write]
 network_access = true
 
+[shell_environment_policy.set]
+NODE_USE_SYSTEM_CA = "1"
+
 [tools.experimental_request_user_input]
 enabled = true
 
