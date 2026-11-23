@@ -13,10 +13,11 @@ interface CatalogModel {
 
 interface CatalogEntry extends Record<string, unknown> {
   readonly slug: string;
-  context_window: number;
+  readonly context_window: number;
 }
 
-const maxContextWindow = 305_000;
+const maxContextWindow = 292_000;
+const clientCatalogPath = ".codex/model_catalog.json";
 const officialCatalogUrl =
   "https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json";
 
@@ -30,41 +31,24 @@ const readCatalog = (contents: string, source: string) => {
     `Expected a models array in ${source}`
   );
   const entries: unknown[] = catalog.models;
-  const models = new Map<string, CatalogModel>();
-  const catalogEntries: CatalogEntry[] = [];
-  let capped = false;
-  for (const entry of entries) {
+  const slugs = new Set<string>();
+  const models = entries.map((entry): CatalogEntry => {
     assert.ok(
       isRecord(entry) && typeof entry.slug === "string" && entry.slug,
       "Expected a nonempty catalog model slug"
     );
-    const { slug, context_window, supported_reasoning_levels } = entry;
-    assert.ok(!models.has(slug), `Duplicate catalog model: ${slug}`);
+    const { slug, context_window } = entry;
+    assert.ok(!slugs.has(slug), `Duplicate catalog model: ${slug}`);
     assert.ok(
       typeof context_window === "number" &&
         Number.isSafeInteger(context_window) &&
         context_window > 0,
       `Invalid context window for ${slug}`
     );
-    const contextWindow = Math.min(context_window, maxContextWindow);
-    if (contextWindow < context_window) {
-      capped = true;
-    }
-    catalogEntries.push({ ...entry, slug, context_window: contextWindow });
-    models.set(slug, {
-      contextWindow,
-      reasoningLevels: supported_reasoning_levels,
-      visibility: entry.visibility
-    });
-  }
-  return {
-    clientCatalog: capped
-      ? `${JSON.stringify({ ...catalog, models: catalogEntries }, null, 2)}\n`
-      : contents,
-    catalog,
-    entries: catalogEntries,
-    models
-  };
+    slugs.add(slug);
+    return { ...entry, slug, context_window };
+  });
+  return { ...catalog, models };
 };
 
 const fetchOfficialCatalog = async () => {
@@ -79,33 +63,32 @@ const fetchOfficialCatalog = async () => {
   return await response.text();
 };
 
-const mergeCatalog = (officialContents: string, localContents: string) => {
-  const official = readCatalog(officialContents, officialCatalogUrl);
-  const local = readCatalog(localContents, "config/codex-models.json");
-  const merged = new Map(official.entries.map((entry) => [entry.slug, entry]));
-  for (const entry of local.entries) {
+const mergeCatalog = (
+  official: ReturnType<typeof readCatalog>,
+  local: ReturnType<typeof readCatalog>
+) => {
+  const merged = new Map(official.models.map((entry) => [entry.slug, entry]));
+  for (const entry of local.models) {
     if (!merged.has(entry.slug)) {
-      merged.set(entry.slug, entry);
+      merged.set(
+        entry.slug,
+        isCodexLaneSlug(entry.slug) ? { ...entry, visibility: "hide" } : entry
+      );
     }
   }
   const hiddenModels = new Set(modelRoutes.codex.hiddenModels);
   const entries = [...merged.values()];
-  for (const entry of local.entries) {
-    if (!official.models.has(entry.slug) && isCodexLaneSlug(entry.slug)) {
-      entry.visibility = "hide";
-    }
-  }
   for (const { alias } of deriveCodexAliases(
     entries.map(({ slug, visibility }) => ({ slug, visibility }))
   )) {
     hiddenModels.add(alias);
   }
-  for (const entry of entries) {
-    if (hiddenModels.has(entry.slug)) {
-      entry.visibility = "hide";
-    }
-  }
-  return `${JSON.stringify({ ...official.catalog, models: entries }, null, 2)}\n`;
+  return {
+    ...official,
+    models: entries.map((entry) =>
+      hiddenModels.has(entry.slug) ? { ...entry, visibility: "hide" } : entry
+    )
+  };
 };
 
 const requireModel = (
@@ -331,39 +314,58 @@ assert.ok(
 );
 const check = args[0] === "--check";
 const refresh = args[0] === "--refresh";
-const [localCatalog, template] = await Promise.all([
-  readFile("config/codex-models.json", "utf-8"),
+const [localContents, template] = await Promise.all([
+  readFile(clientCatalogPath, "utf-8"),
   readFile("config/proxy.template.yaml", "utf-8")
 ]);
-const catalogContents = refresh
-  ? mergeCatalog(await fetchOfficialCatalog(), localCatalog)
+const localCatalog = readCatalog(localContents, clientCatalogPath);
+const catalog = refresh
+  ? mergeCatalog(
+      readCatalog(await fetchOfficialCatalog(), officialCatalogUrl),
+      localCatalog
+    )
   : localCatalog;
-const parsedCatalog = readCatalog(
-  catalogContents,
-  refresh ? officialCatalogUrl : "config/codex-models.json"
-);
-const config = renderConfig(template, parsedCatalog.models);
-const outputs = [
-  ...(refresh
-    ? [
+const clientModels = catalog.models.map((entry): CatalogEntry => ({
+  ...entry,
+  context_window: Math.min(entry.context_window, maxContextWindow)
+}));
+const config = renderConfig(
+  template,
+  new Map(
+    clientModels.map(
+      ({ slug, context_window, supported_reasoning_levels, visibility }) => [
+        slug,
         {
-          path: "config/codex-models.json",
-          contents: parsedCatalog.clientCatalog
+          contextWindow: context_window,
+          reasoningLevels: supported_reasoning_levels,
+          visibility
         }
       ]
-    : []),
+    )
+  )
+);
+const outputs = [
   {
     path: "config.example.yaml",
     contents: `# Generated by pnpm run generate:config. Edit the sources in config/.\n${config}`
   },
-  { path: ".codex/model_catalog.json", contents: parsedCatalog.clientCatalog }
+  {
+    path: clientCatalogPath,
+    contents:
+      refresh ||
+      catalog.models.some(
+        ({ context_window }) => context_window > maxContextWindow
+      )
+        ? `${JSON.stringify({ ...catalog, models: clientModels }, null, 2)}\n`
+        : localContents
+  }
 ];
 await Promise.all(
   outputs.map(async ({ path, contents }) => {
     if (check) {
       assert.ok(
         (await readFile(path, "utf-8")) === contents,
-        `${path} is stale. Run pnpm run generate:config.`
+        `${path} is stale. Run node scripts/generate-config.mts.`
       );
     } else {
       await writeFile(path, contents);

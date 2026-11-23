@@ -195,11 +195,12 @@ Codex CLI를 재시작한다.
 
 `pnpm run generate`는 카탈로그와 pstack 에이전트 설정을 병렬로 갱신한다.
 
-`pnpm run generate:config`는 [공식 Codex 카탈로그](https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json)를 새로 받아 메타데이터 스냅샷을 갱신한다.
-기존 GLM 모델과 카탈로그에서 사라진 모델을 유지하고 별칭 및 프록시 설정도 다시 생성한다.
-`config/codex-models.json`, `config.example.yaml`, `.codex/model_catalog.json`을 함께 커밋한다.
-`pnpm run check:generated`는 네트워크 없이 생성물의 차이를 확인한다.
-[모델 라우팅](config/model-routes.mts)이나 [프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤에도 `pnpm run generate:config`를 실행한다.
+`pnpm run generate:config`는 [공식 Codex 카탈로그](https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json)를 새로 받는다.
+`models[].slug`를 기준으로 기존 GLM 모델과 공식 카탈로그에서 사라진 모델을 메모리에서 병합한다.
+병합 결과로 `.codex/model_catalog.json`과 `config.example.yaml`을 다시 생성하고 두 파일을 함께 커밋한다.
+[모델 라우팅](config/model-routes.mts)이나 [프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤
+`node scripts/generate-config.mts`를 실행하면 기존 클라이언트 카탈로그로 오프라인에서 다시 생성한다.
+`pnpm run check:generated`도 같은 입력으로 생성물의 차이를 확인한다.
 카탈로그에 새 숫자 버전 모델을 공개하고 다시 생성하면 각 등급에서 가장 높은 공개 모델이
 직접 경로가 되고, 알려진 이전 숫자 버전은 자동으로 그 모델을 가리키는 별칭이 된다.
 

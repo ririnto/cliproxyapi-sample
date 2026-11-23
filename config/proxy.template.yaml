@@ -825,11 +825,11 @@ oauth:
       # @codex-context
     claude:
       - name: "claude-fable-5-2"
-        max-context-length: 305000
+        max-context-length: 292000
       - name: "claude-opus-5-5"
-        max-context-length: 305000
+        max-context-length: 292000
       - name: "claude-sonnet-5-5"
-        max-context-length: 305000
+        max-context-length: 292000
       - name: "claude-haiku-5-5"
         max-context-length: 128000
 
