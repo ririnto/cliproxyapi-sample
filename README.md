@@ -78,7 +78,7 @@ curl --fail --silent --show-error http://127.0.0.1:8317/v1/models
 
 | 클라이언트 모델 ID | Responses API | 업스트림 모델 ID |
 | --- | --- | --- |
-| `zai-coding-plan/glm-5.4` | [Z.AI Coding Plan](https://docs.z.ai/devpack/latest-model) | `glm-5.4` |
+| `zai/glm-5.4` | [Z.AI Coding Plan](https://docs.z.ai/devpack/latest-model) | `glm-5.4` |
 | `zhipuai-coding-plan/glm-5.4` | [Zhipu AI Coding Plan](https://docs.bigmodel.cn/cn/coding-plan/latest-model) | `glm-5.4` |
 | `glm-5.3-flash`, `zai/glm-5.3-flash` | Z.AI Coding Plan | `glm-5.3-flash` |
 
@@ -133,7 +133,7 @@ NODE_USE_SYSTEM_CA = "1"
 `model_providers.openai` 테이블은 비워 둔다.
 `shell_environment_policy.set`의 `NODE_USE_SYSTEM_CA`는 Codex가 실행한 셸 명령에서 Node.js가 시스템 CA 인증서를 사용하도록 설정한다.
 새 Codex 세션에서 `/model`을 열어 `gpt-6.2-sol`과 두 GLM-5.4 모델이 표시되는지 확인한다.
-Claude Code의 사용자 지정 모델은 `zai-coding-plan/glm-5.4`를 사용한다.
+Claude Code의 사용자 지정 모델은 `zai/glm-5.4`를 사용한다.
 
 전체 파일을 적용하면 `approval_policy = "on-request"`와
 `sandbox_mode = "danger-full-access"`도 적용된다.

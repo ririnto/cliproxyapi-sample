@@ -12,7 +12,7 @@ export const modelRoutes = {
     {
       marker: "zai-models",
       name: "glm-5.4",
-      slug: "zai-coding-plan/glm-5.4",
+      slug: "zai/glm-5.4",
       displayName: "GLM-5.4 (Z.AI Coding Plan)"
     },
     {

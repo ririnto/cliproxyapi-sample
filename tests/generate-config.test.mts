@@ -99,7 +99,7 @@ await test("generates configs and rejects drift or invalid input", async () => {
           typeof model === "object" && model !== null && "slug" in model
         );
         return (
-          model.slug !== "zai-coding-plan/glm-5.4" &&
+          model.slug !== "zai/glm-5.4" &&
           model.slug !== "zhipuai-coding-plan/glm-5.4" &&
           model.slug !== "gpt-6.1-sol"
         );
@@ -153,7 +153,7 @@ await test("generates configs and rejects drift or invalid input", async () => {
       { slug: "gpt-6.10-sol", context_window: 292_000 },
       { slug: "gpt-6.1-sol", visibility: "hide" },
       {
-        slug: "zai-coding-plan/glm-5.4",
+        slug: "zai/glm-5.4",
         context_window: 292_000,
         max_context_window: 292_000,
         visibility: "list",

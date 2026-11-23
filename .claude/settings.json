@@ -40,7 +40,7 @@
   "env": {
     "ANTHROPIC_API_KEY": "sk-dummy",
     "ANTHROPIC_BASE_URL": "http://localhost:8317",
-    "ANTHROPIC_CUSTOM_MODEL_OPTION": "zai-coding-plan/glm-5.4",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION": "zai/glm-5.4",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "Z.AI Coding Plan model for coding and agent workflows.",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "GLM-5.4 (Z.AI Coding Plan)",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES": "effort,max_effort,thinking",
@@ -267,7 +267,7 @@
       "effortLevel": "high",
       "maxEffortLevel": "high"
     },
-    "zai-coding-plan/glm-5.4": {
+    "zai/glm-5.4": {
       "autoCompactWindow": 305000,
       "effortLevel": "xhigh",
       "maxEffortLevel": "max"
