@@ -301,17 +301,6 @@ requests:
         params:
           reasoning.effort: max
       - models:
-          - name: glm-5.3-flash
-            protocol: codex
-            match:
-              - reasoning.effort: high
-          - name: zai/glm-5.3-flash
-            protocol: codex
-            match:
-              - reasoning.effort: high
-        params:
-          reasoning.effort: max
-      - models:
           - name: zai/glm-5.4
             protocol: codex
             match:
@@ -328,17 +317,6 @@ requests:
             protocol: codex
             match:
               - reasoning.effort: medium
-        params:
-          reasoning.effort: high
-      - models:
-          - name: glm-5.3-flash
-            protocol: codex
-            match:
-              - reasoning.effort: low
-          - name: zai/glm-5.3-flash
-            protocol: codex
-            match:
-              - reasoning.effort: low
         params:
           reasoning.effort: high
     filter:

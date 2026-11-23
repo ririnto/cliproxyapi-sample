@@ -26,8 +26,7 @@ export const modelRoutes = {
       name: "glm-5.3-flash",
       slug: "glm-5.3-flash",
       additionalAliases: ["zai/glm-5.3-flash"],
-      displayName: "GLM 5.3 Flash",
-      promoteSupportedEfforts: true
+      displayName: "GLM 5.3 Flash"
     }
   ]
 };

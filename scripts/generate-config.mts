@@ -197,14 +197,7 @@ const renderConfig = (
     requireModel(catalog, alias);
   }
   const glmRoutes = glm.map(
-    ({
-      marker,
-      name,
-      slug,
-      additionalAliases = [],
-      displayName,
-      promoteSupportedEfforts = false
-    }) => {
+    ({ marker, name, slug, additionalAliases = [], displayName }) => {
       const { contextWindow, reasoningLevels } = requireModel(catalog, slug);
       assert.ok(
         Array.isArray(reasoningLevels),
@@ -238,8 +231,7 @@ const renderConfig = (
           thinking: { levels: [...effortOrder] }
         })),
         supported,
-        highest,
-        promoteSupportedEfforts
+        highest
       };
     }
   );
@@ -247,28 +239,20 @@ const renderConfig = (
     glmRoutes.flatMap(({ models }) => models.map(({ alias }) => alias)),
     "GLM model alias"
   );
-  // The proxy applies overrides in order. Match higher efforts before promotion.
   const glmOverrides = effortOrder.flatMap((requested, index) => {
     const byTarget = new Map<string, string[]>();
-    for (const {
-      models,
-      supported,
-      highest,
-      promoteSupportedEfforts
-    } of glmRoutes) {
-      if (!promoteSupportedEfforts && supported.has(requested)) {
+    for (const { models, supported, highest } of glmRoutes) {
+      if (supported.has(requested)) {
         continue;
       }
       const forwarded =
         effortOrder
           .slice(0, index)
           .findLast((effort) => supported.has(effort)) ?? highest;
-      if (requested !== forwarded) {
-        byTarget.set(forwarded, [
-          ...(byTarget.get(forwarded) ?? []),
-          ...models.map(({ alias }) => alias)
-        ]);
-      }
+      byTarget.set(forwarded, [
+        ...(byTarget.get(forwarded) ?? []),
+        ...models.map(({ alias }) => alias)
+      ]);
     }
     return [...byTarget].map(([forwarded, models]) => ({
       models: models.map((name) => ({
