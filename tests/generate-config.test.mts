@@ -5,6 +5,7 @@ import {
   cp,
   mkdir,
   mkdtempDisposable,
+  readdir,
   readFile,
   writeFile
 } from "node:fs/promises";
@@ -21,15 +22,26 @@ await test("generates configs and rejects drift or invalid input", async () => {
     path.join(tmpdir(), "cliproxy-generate-")
   );
   const cwd = directory.path;
-  await cp(new URL("../config/", import.meta.url), path.join(cwd, "config"), {
-    recursive: true
-  });
+  const configDir = path.join(cwd, "config");
+  await mkdir(configDir);
   await mkdir(path.join(cwd, ".codex"));
+  const clientCatalog = path.join(cwd, ".codex/model_catalog.json");
+  await Promise.all([
+    cp(
+      new URL("../config/proxy.template.yaml", import.meta.url),
+      path.join(configDir, "proxy.template.yaml")
+    ),
+    cp(new URL("../.codex/model_catalog.json", import.meta.url), clientCatalog)
+  ]);
   const generator = fileURLToPath(
     new URL("../scripts/generate-config.mts", import.meta.url)
   );
-  const run = async (expectedStatus: number, ...args: string[]) => {
-    const child = spawn(process.execPath, [generator, ...args], {
+  const run = async (
+    expectedStatus: number,
+    args: string[] = [],
+    nodeArgs: string[] = []
+  ) => {
+    const child = spawn(process.execPath, [...nodeArgs, generator, ...args], {
       cwd,
       stdio: ["ignore", "ignore", "pipe"]
     });
@@ -41,29 +53,34 @@ await test("generates configs and rejects drift or invalid input", async () => {
     return stderr;
   };
   const proxyConfig = path.join(cwd, "config.example.yaml");
-  const clientCatalog = path.join(cwd, ".codex/model_catalog.json");
   const snapshot = async () =>
     await Promise.all([readFile(proxyConfig), readFile(clientCatalog)]);
 
   await run(0);
   const first = await snapshot();
-  await run(0, "--check");
+  await run(0, ["--check"]);
   await run(0);
   assert.deepEqual(await snapshot(), first);
 
   const stale = Buffer.from("stale\n");
-  const checkDrift = async (file: string) => {
+  const checkDrift = async (file: string, replacement: Buffer) => {
     const current = await readFile(file);
-    await writeFile(file, stale);
-    assert.match(await run(1, "--check"), /is stale/u);
-    assert.deepEqual(await readFile(file), stale);
+    await writeFile(file, replacement);
+    assert.match(await run(1, ["--check"]), /is stale/u);
+    assert.deepEqual(await readFile(file), replacement);
     await writeFile(file, current);
   };
-  await checkDrift(proxyConfig);
-  await checkDrift(clientCatalog);
+  await checkDrift(proxyConfig, stale);
+  await checkDrift(
+    clientCatalog,
+    Buffer.from(
+      first[1]
+        .toString()
+        .replace('"context_window": 292000', '"context_window": 400000')
+    )
+  );
 
-  const catalogFile = path.join(cwd, "config/codex-models.json");
-  const catalog: unknown = JSON.parse(await readFile(catalogFile, "utf-8"));
+  const catalog: unknown = JSON.parse(await readFile(clientCatalog, "utf-8"));
   assert.ok(
     typeof catalog === "object" && catalog !== null && "models" in catalog
   );
@@ -76,11 +93,31 @@ await test("generates configs and rejects drift or invalid input", async () => {
     { slug: "gpt-99-astra-preview", context_window: 26_000, visibility: "list" }
   ];
   const sourceCatalog = JSON.stringify({
-    models: [...catalogModels, ...successors]
+    models: [
+      ...catalogModels.filter((model) => {
+        assert.ok(
+          typeof model === "object" && model !== null && "slug" in model
+        );
+        return model.slug !== "glm-5.3" && model.slug !== "gpt-6.1-sol";
+      }),
+      ...successors
+    ]
   });
-  await writeFile(catalogFile, sourceCatalog);
-  await run(0);
-  assert.equal(await readFile(catalogFile, "utf-8"), sourceCatalog);
+  const sourcePath = path.join(cwd, "upstream.json");
+  await writeFile(sourcePath, sourceCatalog);
+  await run(
+    0,
+    ["--refresh"],
+    [
+      "--import",
+      `data:text/javascript,${encodeURIComponent(
+        'import { readFile } from "node:fs/promises"; globalThis.fetch = async () => new Response(await readFile("upstream.json"));'
+      )}`
+    ]
+  );
+  assert.equal(await readFile(sourcePath, "utf-8"), sourceCatalog);
+  assert.deepEqual(await readdir(configDir), ["proxy.template.yaml"]);
+  await run(0, ["--check"]);
   const proxy = parseDocument(await readFile(proxyConfig, "utf-8"));
   const aliases = proxy.getIn(["oauth", "model-alias", "codex"]);
   assert.ok(isSeq(aliases));
@@ -98,7 +135,7 @@ await test("generates configs and rejects drift or invalid input", async () => {
   assert.ok(isSeq(context));
   assert.partialDeepStrictEqual(context.toJSON(), [
     { name: "gpt-6.2-astra", "max-context-length": 272_000 },
-    { name: "gpt-6.10-sol", "max-context-length": 305_000 }
+    { name: "gpt-6.10-sol", "max-context-length": 292_000 }
   ]);
   assert.partialDeepStrictEqual(
     JSON.parse(await readFile(clientCatalog, "utf-8")),
@@ -106,14 +143,16 @@ await test("generates configs and rejects drift or invalid input", async () => {
       models: [
         {
           slug: "gpt-6.2-sol",
+          visibility: "hide",
           supported_reasoning_levels: [{ effort: "ultra" }]
         },
-        { slug: "gpt-6.10-sol", context_window: 305_000 }
+        { slug: "gpt-6.10-sol", context_window: 292_000 },
+        { slug: "gpt-6.1-sol", visibility: "hide" },
+        { slug: "glm-5.3", context_window: 292_000, visibility: "list" }
       ]
     }
   );
-  await writeFile(
-    catalogFile,
+  const duplicateCatalog = Buffer.from(
     JSON.stringify({
       models: [
         { slug: "duplicate", context_window: 1 },
@@ -123,8 +162,8 @@ await test("generates configs and rejects drift or invalid input", async () => {
   );
   await Promise.all([
     writeFile(proxyConfig, stale),
-    writeFile(clientCatalog, stale)
+    writeFile(clientCatalog, duplicateCatalog)
   ]);
   assert.match(await run(1), /Duplicate catalog model/u);
-  assert.deepEqual(await snapshot(), [stale, stale]);
+  assert.deepEqual(await snapshot(), [stale, duplicateCatalog]);
 });

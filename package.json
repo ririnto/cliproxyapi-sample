@@ -14,7 +14,7 @@
     "generate": "run-p generate:*",
     "generate:agents": "node scripts/generate-agents.mts",
     "generate:config": "run-s generate:config:refresh generate:config:format",
-    "generate:config:format": "ultracite fix config/codex-models.json .codex/model_catalog.json",
+    "generate:config:format": "ultracite fix .codex/model_catalog.json",
     "generate:config:refresh": "node scripts/generate-config.mts --refresh",
     "pre-commit": "run-p check:markdownlint-cli2 check:ultracite",
     "pre-push": "pnpm run check",
