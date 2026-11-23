@@ -21,13 +21,5 @@ jobs:
         with:
           cache: true
       - run: pnpm install --frozen-lockfile
-      - name: Install CLIProxyAPI for routing tests
-        working-directory: ${{ runner.temp }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |-
-          gh release download --repo router-for-me/CLIProxyAPI --pattern 'CLIProxyAPI_*_linux_amd64.tar.gz' --output cliproxy.tar.gz
-          tar -xzf cliproxy.tar.gz cli-proxy-api
-          echo "CLIPROXYAPI_TEST_BINARY=$RUNNER_TEMP/cli-proxy-api" >> "$GITHUB_ENV"
       - run: pnpm run pre-push
       - run: docker compose -f compose.yaml config --quiet

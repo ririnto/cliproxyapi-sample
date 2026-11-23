@@ -1,0 +1,22 @@
+{
+  "codex": {
+    "codex": {
+      "codex-auto-review": {},
+      "gpt-5.5": {
+        "visibility": "hide"
+      }
+    },
+    "zai": {
+      "glm-5.4": {
+        "context_window": 292000,
+        "max_context_window": 1000000,
+        "displayName": "GLM-5.4"
+      },
+      "glm-5.3-flash": {
+        "context_window": 292000,
+        "max_context_window": 1000000,
+        "displayName": "GLM 5.3 Flash"
+      }
+    }
+  }
+}

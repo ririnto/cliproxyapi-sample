@@ -2084,7 +2084,7 @@
       },
       "supports_image_detail_original": false,
       "context_window": 292000,
-      "max_context_window": 292000,
+      "max_context_window": 1000000,
       "comp_hash": null,
       "effective_context_window_percent": 95,
       "experimental_supported_tools": [],
@@ -2100,7 +2100,7 @@
     {
       "slug": "glm-5.3-flash",
       "tool_mode": "code_mode_only",
-      "display_name": "GLM-5.3-Flash",
+      "display_name": "GLM 5.3 Flash",
       "description": "GLM-5.3-Flash is a native multimodal model in the GLM-5 series.",
       "default_reasoning_level": "max",
       "supported_reasoning_levels": [
@@ -2143,7 +2143,7 @@
       },
       "supports_image_detail_original": false,
       "context_window": 292000,
-      "max_context_window": 872000,
+      "max_context_window": 1000000,
       "comp_hash": null,
       "effective_context_window_percent": 95,
       "experimental_supported_tools": [],

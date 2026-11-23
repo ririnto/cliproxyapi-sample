@@ -83,6 +83,7 @@ GPT가 보이지 않으면 서비스를 실행한 환경에서 Codex 로그인�
 프록시는 모델 ID에 해당하는 공급자의 키를 사용한다.
 
 이 샘플의 클라이언트 컨텍스트 한도는 292,000토큰이다.
+프록시는 Z.AI의 [Codex용 Responses API](https://docs.z.ai/devpack/tool/codex)로 GLM 요청을 보낸다.
 GLM-5.4 경로는 텍스트와 이미지 입력, 함수 호출, 스트리밍을 지원한다.
 GLM-5.4와 GLM-5.3-Flash의 `low`, `high`, `max` 요청은 그대로 전달한다.
 `medium`은 `high`로, `xhigh`는 `max`로 변환한다.
@@ -205,28 +206,27 @@ Codex CLI를 재시작한다.
 `pnpm run generate`는 카탈로그와 pstack 에이전트 설정을 병렬로 갱신한다.
 
 `pnpm run generate:config`는 [공식 Codex 카탈로그](https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json)를 새로 받는다.
-`models[].slug`를 기준으로 기존 GLM 모델과 공식 카탈로그에서 사라진 모델을 메모리에서 병합한다.
+`models[].slug`를 기준으로 병합하면서 공식 카탈로그에 없는 로컬 모델 항목을 유지한다.
+`config/models.json`은 모델 설정을 프로토콜, 공급자, 모델 ID 순으로 묶는다.
+병합된 모델에 이 파일의 표시 이름, 컨텍스트, 노출 설정을 적용한다.
 병합 결과로 `.codex/model_catalog.json`과 `config.example.yaml`을 다시 생성하고 두 파일을 함께 커밋한다.
-[모델 라우팅](config/model-routes.mts)이나 [프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤
+[모델 설정](config/models.json)이나 [프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤
 `node scripts/generate-config.mts`를 실행하면 기존 클라이언트 카탈로그로 오프라인에서 다시 생성한다.
 `pnpm run check:generated`도 같은 입력으로 생성물의 차이를 확인한다.
-카탈로그에 새 숫자 버전 모델을 공개하고 다시 생성하면 각 등급에서 가장 높은 공개 모델이
-직접 경로가 되고, 알려진 이전 숫자 버전은 자동으로 그 모델을 가리키는 별칭이 된다.
+`gpt-6.2-sol`처럼 `gpt-`로 시작하고 숫자 버전과 영문 계열명으로 끝나는 모델 ID에서 계열을 추출한다.
+각 계열에서 가장 높은 공개 버전이 직접 경로가 되고, 알려진 이전 버전은 자동으로 그 모델을 가리키는 별칭이 된다.
 
 `pnpm run generate:agents`는 [upstream pstack 에이전트](https://github.com/cursor/plugins/tree/main/pstack/agents)의 Markdown을 가져와 `.codex/agents/`의 `poteto-agent.toml`과 `comment-sicko.toml`을 갱신한다.
 갱신한 TOML을 사용자 설정으로 적용하려면 `${CODEX_HOME:-$HOME/.codex}/agents/`에 복사한다.
 
 기여 시 [공통 개발 지침](.agents/engineering.md)을 참고한다.
 [package.json](package.json)에 지정된 Node.js와 pnpm을 사용한다.
-라우팅 테스트는 PATH의 `cliproxyapi`를 실행한다.
-실행 파일 이름이 다르면 `CLIPROXYAPI_TEST_BINARY`에 절대 경로를 지정한다.
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm run pre-push
 ```
 
-이 명령은 문서 형식, 린트, 타입과 테스트를 검사한다.
-라우팅 테스트는 임시 계정으로 모델 목록을 조회하고 로컬 Responses 서버에서 GLM 요청을 확인한다.
-[CI](.github/workflows/checks.yaml)는 최신 Linux amd64 릴리스로 같은 검사를 실행하고
+이 명령은 문서 형식, 린트, 타입, 생성 파일을 검사한다.
+[CI](.github/workflows/checks.yaml)는 같은 검사를 실행하고
 `docker compose -f compose.yaml config --quiet`로 Compose 설정을 확인한다.

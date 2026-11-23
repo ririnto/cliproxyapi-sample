@@ -166,25 +166,13 @@
       }
     }
   },
-  "fallbackModel": ["glm-5.3-flash", "claude-sonnet-5-5", "gpt-6.1-terra"],
+  "fallbackModel": ["glm-5.3-flash", "gpt-6.1-terra"],
   "feedbackSurveyRate": 0,
   "includeGitInstructions": false,
   "language": "Korean",
   "model": "opus",
   "modelPricing": {
     "overrides": {
-      "gemini-3.8-flash": {
-        "cacheRead": 0.075,
-        "cacheWrite": 0,
-        "input": 0.75,
-        "output": 3.75
-      },
-      "gemini-4-argon": {
-        "cacheRead": 0.1,
-        "cacheWrite": 0,
-        "input": 2,
-        "output": 10
-      },
       "glm-5.3-flash": {
         "cacheRead": 0.03,
         "cacheWrite": 0,
@@ -212,36 +200,6 @@
     }
   },
   "modelSettings": {
-    "claude-fable-5-2": {
-      "autoCompactWindow": 305000,
-      "effortLevel": "high",
-      "maxEffortLevel": "xhigh"
-    },
-    "claude-haiku-5-5": {
-      "autoCompactWindow": 128000,
-      "effortLevel": "medium",
-      "maxEffortLevel": "high"
-    },
-    "claude-opus-5-5": {
-      "autoCompactWindow": 305000,
-      "effortLevel": "medium",
-      "maxEffortLevel": "high"
-    },
-    "claude-sonnet-5-5": {
-      "autoCompactWindow": 305000,
-      "effortLevel": "medium",
-      "maxEffortLevel": "high"
-    },
-    "gemini-3.8-flash": {
-      "autoCompactWindow": 305000,
-      "effortLevel": "medium",
-      "maxEffortLevel": "high"
-    },
-    "gemini-4-argon": {
-      "autoCompactWindow": 305000,
-      "effortLevel": "medium",
-      "maxEffortLevel": "high"
-    },
     "glm-5.3-flash": {
       "autoCompactWindow": 305000,
       "effortLevel": "xhigh",
