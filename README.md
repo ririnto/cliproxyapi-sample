@@ -16,6 +16,7 @@ cp -i config.example.yaml "$(brew --prefix)/etc/cliproxyapi.conf"
 Homebrew는 설치할 때 기본 설정 파일도 만든다.
 기존에 사용하던 설정이 있다면 복사 확인에 `n`을 입력하고 필요한 항목을 병합한다.
 GLM을 사용하려면 복사한 설정의 `__ZAI_API_KEY__`를 Z.ai 키로 교체한다.
+중국 Zhipu AI Coding Plan을 사용하려면 `__ZHIPUAI_API_KEY__`를 해당 플랜의 키로 교체한다.
 `server.host`는 `127.0.0.1`로 유지한다.
 
 ```sh
@@ -41,7 +42,7 @@ cp -i config.example.yaml config.yaml
 
 기본 bridge 네트워크에서는 `config.yaml`의 `server.host`를 `"0.0.0.0"`으로 바꾼다.
 [Compose 설정](compose.yaml)은 호스트의 `127.0.0.1:8317`만 컨테이너에 연결한다.
-GLM을 사용하려면 이 파일에서 `__ZAI_API_KEY__`를 교체한다.
+사용할 GLM 공급자에 맞춰 이 파일에서 `__ZAI_API_KEY__` 또는 `__ZHIPUAI_API_KEY__`를 교체한다.
 
 ```sh
 docker compose up -d
@@ -73,19 +74,30 @@ Docker Desktop에서는 host networking을 먼저 활성화해야 한다.
 curl --fail --silent --show-error http://127.0.0.1:8317/v1/models
 ```
 
-응답의 `data[].id`에서 `glm-5.3`과 `glm-5.3-flash`를 확인한다.
+응답의 `data[].id`에서 다음 GLM 모델을 확인한다.
+
+| 클라이언트 모델 ID | Responses API | 업스트림 모델 ID |
+| --- | --- | --- |
+| `zai-coding-plan/glm-5.4` | [Z.AI Coding Plan](https://docs.z.ai/devpack/latest-model) | `glm-5.4` |
+| `zhipuai-coding-plan/glm-5.4` | [Zhipu AI Coding Plan](https://docs.bigmodel.cn/cn/coding-plan/latest-model) | `glm-5.4` |
+| `glm-5.3-flash`, `zai/glm-5.3-flash` | Z.AI Coding Plan | `glm-5.3-flash` |
+
 GPT가 보이지 않으면 서비스를 실행한 환경에서 Codex 로그인을 마쳤는지 확인한다.
 이 요청은 프록시가 공개한 모델 목록만 읽는다.
 실제 모델 접근 권한은 해당 계정으로 추론 요청을 보냈을 때 확인할 수 있다.
 
 샘플의 `access.api-keys` 목록은 비어 있다.
 여기에 클라이언트 키를 추가했다면 요청에 `Authorization: Bearer <클라이언트 키>` 헤더를 보낸다.
-Z.ai 키는 프록시가 Z.ai에 접속할 때 사용한다.
+프록시는 모델 ID에 해당하는 공급자의 키를 사용한다.
 
-GLM 요청은 Z.ai의 Responses API로 전달한다.
-요청한 reasoning effort보다 높은 지원 수준 중 가장 가까운 값을 사용한다.
+[Models.dev](https://models.dev/models/zhipuai/glm-5.4/)는 GLM-5.4의 컨텍스트를 1,000,000토큰, 출력 한도를 131,072토큰으로 표시한다.
+이 샘플의 클라이언트 컨텍스트 한도는 292,000토큰이다.
+GLM-5.4 경로는 텍스트와 이미지 입력, 함수 호출, 스트리밍을 지원한다.
+GLM-5.4의 `low`, `high`, `max` 요청은 그대로 전달한다.
+`medium`은 `high`로, `xhigh`는 `max`로 변환한다.
+GLM-5.3-Flash는 요청보다 높은 지원 수준 중 가장 가까운 값을 사용한다.
 더 높은 수준이 없으면 지원 최댓값을 사용한다.
-`minimal` 요청은 상위 서비스에 전달하지 않고 거절한다.
+프록시는 `minimal`과 `ultra`를 거절한다.
 
 | 요청 | 프록시 동작 |
 | --- | --- |
@@ -120,7 +132,8 @@ NODE_USE_SYSTEM_CA = "1"
 
 `model_providers.openai` 테이블은 비워 둔다.
 `shell_environment_policy.set`의 `NODE_USE_SYSTEM_CA`는 Codex가 실행한 셸 명령에서 Node.js가 시스템 CA 인증서를 사용하도록 설정한다.
-새 Codex 세션에서 `/model`을 열어 `gpt-6.2-sol`과 `glm-5.3`이 표시되는지 확인한다.
+새 Codex 세션에서 `/model`을 열어 `gpt-6.2-sol`과 두 GLM-5.4 모델이 표시되는지 확인한다.
+Claude Code의 사용자 지정 모델은 `zai-coding-plan/glm-5.4`를 사용한다.
 
 전체 파일을 적용하면 `approval_policy = "on-request"`와
 `sandbox_mode = "danger-full-access"`도 적용된다.
