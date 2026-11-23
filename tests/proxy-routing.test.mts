@@ -26,13 +26,24 @@ const listen = async (server: Server) => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
+const glmRoutes = [
+  { alias: "zai-coding-plan/glm-5.4", model: "glm-5.4", upstream: "zai" },
+  {
+    alias: "zhipuai-coding-plan/glm-5.4",
+    model: "glm-5.4",
+    upstream: "zhipuai-coding-plan"
+  },
+  { alias: "glm-5.3-flash", model: "glm-5.3-flash", upstream: "zai" },
+  { alias: "zai/glm-5.3-flash", model: "glm-5.3-flash", upstream: "zai" }
+] as const;
+
 await test("CLIProxyAPI routes the sample models", async (t) => {
   await using directory = await mkdtempDisposable(
     path.join(tmpdir(), "cliproxy-routing-")
   );
   const home = directory.path;
   const requests = new Map<string, unknown>();
-  await using upstream = createServer((request, response) => {
+  await using responsesServer = createServer((request, response) => {
     void json(request).then((body: unknown) => {
       const id = `resp_${requests.size}`;
       requests.set(id, { path: request.url, body });
@@ -41,10 +52,21 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
         type: "response.completed",
         response: { id, status: "completed", output: [] }
       };
-      return response.end(`data: ${JSON.stringify(completed)}\n\n`);
+      if (isRecord(body) && body.stream === true) {
+        const delta = {
+          type: "response.output_text.delta",
+          delta: "Synthetic output"
+        };
+        response.write(
+          `event: ${delta.type}\ndata: ${JSON.stringify(delta)}\n\n`
+        );
+      }
+      return response.end(
+        `event: ${completed.type}\ndata: ${JSON.stringify(completed)}\n\n`
+      );
     });
   });
-  const upstreamPort = await listen(upstream);
+  const upstreamPort = await listen(responsesServer);
   const config = parseDocument(
     await readFile(new URL("../config.example.yaml", import.meta.url), "utf-8")
   );
@@ -70,11 +92,17 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
   config.setIn(["management", "disable-control-panel"], true);
   const codexKeys = config.getIn(["api-keys", "codex"]);
   assert.ok(isSeq(codexKeys));
-  const zai = codexKeys.items.find(
-    (group) => isMap(group) && group.get("name") === "zai"
-  );
-  assert.ok(isMap(zai));
-  zai.set("base-url", `http://127.0.0.1:${upstreamPort}`);
+  for (const [name, baseUrl] of [
+    ["zai", "https://api.z.ai/api/v1"],
+    ["zhipuai-coding-plan", "https://open.bigmodel.cn/api/v1"]
+  ]) {
+    const group: unknown = codexKeys.items.find(
+      (entry) => isMap(entry) && entry.get("name") === name
+    );
+    assert.ok(isMap(group), name);
+    assert.equal(group.get("base-url"), baseUrl);
+    group.set("base-url", `http://127.0.0.1:${upstreamPort}/${name}`);
+  }
   await writeFile(path.join(home, "config.yaml"), config.toString());
   const proxy = spawn(
     process.env.CLIPROXYAPI_TEST_BINARY ?? "cliproxyapi",
@@ -146,48 +174,181 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
       }
     );
     await t.test(
-      "GLM bare and Z.ai-prefixed requests forward native and remapped efforts",
+      "GLM advertises the configured IDs, context, and reasoning",
       async () => {
-        const cases = [];
-        for (const model of ["glm-5.3", "glm-5.3-flash"]) {
-          for (const prefix of ["", "zai/"]) {
-            for (const [input, expected] of [
-              ["low", "high"],
+        const response = await fetch(`${url}/models`, {
+          signal: AbortSignal.timeout(1000)
+        });
+        assert.equal(response.status, 200);
+        const payload: unknown = await response.json();
+        assert.ok(isRecord(payload) && Array.isArray(payload.data));
+        const entries: unknown[] = payload.data;
+        const glmIDs = entries.flatMap((entry) =>
+          isRecord(entry) &&
+          typeof entry.id === "string" &&
+          entry.id.includes("glm-")
+            ? [entry.id]
+            : []
+        );
+        assert.equal(glmIDs.length, glmRoutes.length);
+        assert.deepEqual(
+          new Set(glmIDs),
+          new Set(glmRoutes.map(({ alias }) => alias))
+        );
+        for (const { alias } of glmRoutes) {
+          const capabilities = models.get(alias);
+          assert.ok(capabilities, alias);
+          assert.equal(capabilities.context_window, 292_000, alias);
+          if (alias.endsWith("/glm-5.4")) {
+            assert.deepEqual(
+              capabilities.input_modalities,
+              ["text", "image"],
+              alias
+            );
+          }
+          assert.ok(
+            Array.isArray(capabilities.supported_reasoning_levels),
+            alias
+          );
+          const levels: unknown[] = capabilities.supported_reasoning_levels;
+          assert.deepEqual(
+            new Set(
+              levels.map((level) => {
+                assert.ok(isRecord(level));
+                return level.effort;
+              })
+            ),
+            new Set(["high", "low", "max", "medium", "xhigh"]),
+            alias
+          );
+        }
+      }
+    );
+    await t.test(
+      "GLM requests use only their configured provider and forward supported efforts",
+      async () => {
+        await Promise.all(
+          glmRoutes.flatMap(({ alias, model, upstream }) =>
+            [
+              ["low", model === "glm-5.4" ? "low" : "high"],
               ["medium", "high"],
-              ["high", "max"],
+              ["high", model === "glm-5.4" ? "high" : "max"],
               ["xhigh", "max"],
               ["max", "max"]
-            ]) {
-              cases.push({
-                model,
-                clientModel: prefix + model,
-                input,
-                expected
+            ].map(async ([input, expected]) => {
+              const response = await fetch(`${url}/responses`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                signal: AbortSignal.timeout(5000),
+                body: JSON.stringify({
+                  model: alias,
+                  reasoning: { effort: input },
+                  input: "Synthetic input"
+                })
               });
-            }
-          }
-        }
-        await Promise.all(
-          cases.map(async ({ model, clientModel, input, expected }) => {
-            const response = await fetch(`${url}/responses`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              signal: AbortSignal.timeout(5000),
-              body: JSON.stringify({
-                model: clientModel,
-                reasoning: { effort: input },
-                input: "Synthetic input"
-              })
-            });
-            const payload: unknown = await response.json();
-            assert.equal(response.status, 200, JSON.stringify(payload));
-            assert.ok(isRecord(payload) && typeof payload.id === "string");
-            assert.partialDeepStrictEqual(requests.get(payload.id), {
-              path: "/responses",
-              body: { model, reasoning: { effort: expected } }
-            });
-          })
+              const payload: unknown = await response.json();
+              assert.equal(response.status, 200, JSON.stringify(payload));
+              assert.ok(isRecord(payload) && typeof payload.id === "string");
+              assert.partialDeepStrictEqual(requests.get(payload.id), {
+                path: `/${upstream}/responses`,
+                body: { model, reasoning: { effort: expected } }
+              });
+            })
+          )
         );
+      }
+    );
+    await t.test(
+      "GLM-5.4 forwards image input and function tools and streams Responses events",
+      async () => {
+        const tools = [
+          {
+            type: "function",
+            name: "get_value",
+            parameters: { type: "object", properties: {} }
+          }
+        ];
+        const input = [
+          {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: "Synthetic input" },
+              {
+                type: "input_image",
+                image_url:
+                  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aAuoAAAAASUVORK5CYII="
+              }
+            ]
+          }
+        ];
+        await Promise.all(
+          glmRoutes
+            .filter(({ model }) => model === "glm-5.4")
+            .map(async ({ alias, upstream }) => {
+              const response = await fetch(`${url}/responses`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                signal: AbortSignal.timeout(5000),
+                body: JSON.stringify({
+                  model: alias,
+                  input,
+                  tools,
+                  stream: true
+                })
+              });
+              assert.equal(response.status, 200);
+              assert.match(
+                response.headers.get("content-type") ?? "",
+                /^text\/event-stream/u
+              );
+              const events = await response.text();
+              assert.match(
+                events,
+                /event: response\.output_text\.delta\ndata: .*Synthetic output/u
+              );
+              assert.match(events, /event: response\.completed/u);
+              const id = /"id":"(?<id>resp_\d+)"/u.exec(events)?.groups?.id;
+              assert.ok(id !== undefined, events);
+              assert.partialDeepStrictEqual(requests.get(id), {
+                path: `/${upstream}/responses`,
+                body: { model: "glm-5.4", input, tools, stream: true }
+              });
+            })
+        );
+      }
+    );
+    await t.test(
+      "the Claude Code custom model uses the migrated Z.AI route",
+      async () => {
+        const settings: unknown = JSON.parse(
+          await readFile(
+            new URL("../.claude/settings.json", import.meta.url),
+            "utf-8"
+          )
+        );
+        assert.ok(isRecord(settings) && isRecord(settings.env));
+        const model = settings.env.ANTHROPIC_CUSTOM_MODEL_OPTION;
+        assert.equal(model, "zai-coding-plan/glm-5.4");
+        assert.equal(settings.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "292000");
+        assert.ok(Array.isArray(settings.fallbackModel));
+        assert.ok(!settings.fallbackModel.includes("glm-5.3"));
+        const response = await fetch(`${url}/messages`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          signal: AbortSignal.timeout(5000),
+          body: JSON.stringify({
+            model,
+            max_tokens: 100,
+            messages: [{ role: "user", content: "Synthetic input" }]
+          })
+        });
+        assert.equal(response.status, 200);
+        await response.json();
+        assert.partialDeepStrictEqual([...requests.values()].at(-1), {
+          path: "/zai/responses",
+          body: { model: "glm-5.4" }
+        });
       }
     );
     await t.test(
@@ -195,9 +356,9 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
       async () => {
         const forwardedCount = requests.size;
         await Promise.all(
-          ["glm-5.3", "glm-5.3-flash", "zai/glm-5.3", "zai/glm-5.3-flash"]
-            .flatMap((model) =>
-              ["minimal", "ultra"].map((effort) => ({ model, effort }))
+          glmRoutes
+            .flatMap(({ alias }) =>
+              ["minimal", "ultra"].map((effort) => ({ model: alias, effort }))
             )
             .map(async ({ model, effort }) => {
               const response = await fetch(`${url}/responses`, {
@@ -215,6 +376,24 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
                 error: { type: "invalid_request_error" }
               });
             })
+        );
+        assert.equal(requests.size, forwardedCount);
+      }
+    );
+    await t.test(
+      "the removed GLM-5.3 IDs do not route to a provider",
+      async () => {
+        const forwardedCount = requests.size;
+        await Promise.all(
+          ["glm-5.3", "zai/glm-5.3"].map(async (model) => {
+            const response = await fetch(`${url}/responses`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              signal: AbortSignal.timeout(5000),
+              body: JSON.stringify({ model, input: "Synthetic input" })
+            });
+            assert.equal(response.ok, false, model);
+          })
         );
         assert.equal(requests.size, forwardedCount);
       }

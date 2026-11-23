@@ -40,9 +40,9 @@
   "env": {
     "ANTHROPIC_API_KEY": "sk-dummy",
     "ANTHROPIC_BASE_URL": "http://localhost:8317",
-    "ANTHROPIC_CUSTOM_MODEL_OPTION": "glm-5.3",
-    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "GLM-5.3 is Z.ai's latest flagship model, delivering comprehensive advancements in complex software engineering and agent capabilities.",
-    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "GLM-5.3",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION": "zai-coding-plan/glm-5.4",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "Z.AI Coding Plan model for coding and agent workflows.",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "GLM-5.4 (Z.AI Coding Plan)",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES": "effort,max_effort,thinking",
     "ANTHROPIC_DEFAULT_FABLE_MODEL": "gpt-6.2-astra",
     "ANTHROPIC_DEFAULT_FABLE_MODEL_DESCRIPTION": "Our most capable model for complex coding and professional work.",
@@ -190,12 +190,6 @@
         "input": 2,
         "output": 10
       },
-      "glm-5.3": {
-        "cacheRead": 0.26,
-        "cacheWrite": 0,
-        "input": 1.4,
-        "output": 4.4
-      },
       "glm-5.3-flash": {
         "cacheRead": 0.03,
         "cacheWrite": 0,
@@ -253,11 +247,6 @@
       "effortLevel": "medium",
       "maxEffortLevel": "high"
     },
-    "glm-5.3": {
-      "autoCompactWindow": 305000,
-      "effortLevel": "xhigh",
-      "maxEffortLevel": "max"
-    },
     "glm-5.3-flash": {
       "autoCompactWindow": 305000,
       "effortLevel": "xhigh",
@@ -277,6 +266,11 @@
       "autoCompactWindow": 305000,
       "effortLevel": "high",
       "maxEffortLevel": "high"
+    },
+    "zai-coding-plan/glm-5.4": {
+      "autoCompactWindow": 305000,
+      "effortLevel": "xhigh",
+      "maxEffortLevel": "max"
     }
   },
   "permissions": {

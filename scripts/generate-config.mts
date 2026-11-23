@@ -185,7 +185,7 @@ const renderConfig = (
   template: string,
   catalog: ReadonlyMap<string, CatalogModel>
 ) => {
-  const { codex, zai } = modelRoutes;
+  const { codex, glm } = modelRoutes;
   const aliases = deriveCodexAliases(
     [...catalog].map(([slug, { visibility }]) => ({ slug, visibility }))
   );
@@ -196,58 +196,78 @@ const renderConfig = (
   for (const { alias } of aliases) {
     requireModel(catalog, alias);
   }
-  assertUnique(
-    zai.models.map(({ slug }) => slug),
-    "Z.ai model"
+  const glmRoutes = glm.map(
+    ({
+      marker,
+      name,
+      slug,
+      additionalAliases = [],
+      displayName,
+      promoteSupportedEfforts = false
+    }) => {
+      const { contextWindow, reasoningLevels } = requireModel(catalog, slug);
+      assert.ok(
+        Array.isArray(reasoningLevels),
+        `Missing reasoning levels for ${slug}`
+      );
+      const catalogLevels: unknown[] = reasoningLevels;
+      const supported = new Set(
+        catalogLevels.map((level) => {
+          assert.ok(
+            isRecord(level) &&
+              typeof level.effort === "string" &&
+              level.effort.length > 0,
+            `Invalid reasoning level for ${slug}`
+          );
+          return level.effort;
+        })
+      );
+      const highest = effortOrder.find((effort) => supported.has(effort));
+      assert.ok(
+        highest !== undefined,
+        `No usable reasoning effort for ${slug}`
+      );
+      return {
+        marker,
+        models: [slug, ...additionalAliases].map((alias) => ({
+          name,
+          alias,
+          "display-name": displayName,
+          "max-context-length": contextWindow,
+          "is-compat": true,
+          thinking: { levels: [...effortOrder] }
+        })),
+        supported,
+        highest,
+        promoteSupportedEfforts
+      };
+    }
   );
-  const zaiRoutes = zai.models.map(({ slug, displayName }) => {
-    const { contextWindow, reasoningLevels } = requireModel(catalog, slug);
-    assert.ok(
-      Array.isArray(reasoningLevels),
-      `Missing reasoning levels for ${slug}`
-    );
-    const catalogLevels: unknown[] = reasoningLevels;
-    const supported = new Set(
-      catalogLevels.map((level) => {
-        assert.ok(
-          isRecord(level) &&
-            typeof level.effort === "string" &&
-            level.effort.length > 0,
-          `Invalid reasoning level for ${slug}`
-        );
-        return level.effort;
-      })
-    );
-    const highest = effortOrder.find((effort) => supported.has(effort));
-    assert.ok(highest !== undefined, `No usable reasoning effort for ${slug}`);
-    return {
-      model: {
-        name: slug,
-        alias: slug,
-        "display-name": displayName,
-        "max-context-length": contextWindow,
-        "is-compat": true,
-        thinking: { levels: [...effortOrder] }
-      },
-      supported,
-      highest
-    };
-  });
+  assertUnique(
+    glmRoutes.flatMap(({ models }) => models.map(({ alias }) => alias)),
+    "GLM model alias"
+  );
   // The proxy applies overrides in order. Match higher efforts before promotion.
-  const zaiOverrides = effortOrder.flatMap((requested, index) => {
+  const glmOverrides = effortOrder.flatMap((requested, index) => {
     const byTarget = new Map<string, string[]>();
-    for (const { model, supported, highest } of zaiRoutes) {
+    for (const {
+      models,
+      supported,
+      highest,
+      promoteSupportedEfforts
+    } of glmRoutes) {
+      if (!promoteSupportedEfforts && supported.has(requested)) {
+        continue;
+      }
       const forwarded =
         effortOrder
           .slice(0, index)
           .findLast((effort) => supported.has(effort)) ?? highest;
       if (requested !== forwarded) {
-        const models = byTarget.get(forwarded);
-        if (models) {
-          models.push(model.name);
-        } else {
-          byTarget.set(forwarded, [model.name]);
-        }
+        byTarget.set(forwarded, [
+          ...(byTarget.get(forwarded) ?? []),
+          ...models.map(({ alias }) => alias)
+        ]);
       }
     }
     return [...byTarget].map(([forwarded, models]) => ({
@@ -276,13 +296,15 @@ const renderConfig = (
   }));
 
   const sections = [
-    { indent: 6, marker: "zai-overrides", entries: zaiOverrides, quote: false },
-    {
+    { indent: 6, marker: "glm-overrides", entries: glmOverrides, quote: false },
+    ...[...new Set(glmRoutes.map(({ marker }) => marker))].map((marker) => ({
       indent: 8,
-      marker: "zai-models",
-      entries: zaiRoutes.map(({ model }) => model),
+      marker,
+      entries: glmRoutes
+        .filter((route) => route.marker === marker)
+        .flatMap(({ models }) => models),
       quote: false
-    },
+    })),
     { indent: 6, marker: "codex-aliases", entries: aliases, quote: true },
     { indent: 6, marker: "codex-context", entries: codexContext, quote: true }
   ];

@@ -280,7 +280,7 @@ requests:
   #         - 'input.#(type=="additional_tools")#.tools.#(name=="functions")#.tools.#(name=="apply_patch")#'
   payload:
     override:
-      # @zai-overrides
+      # @glm-overrides
     filter:
       - models:
           - name: github_copilot/gpt-*
@@ -734,12 +734,17 @@ client:
 api-keys:
   codex:
     - name: zai
-      prefix: zai
       base-url: https://api.z.ai/api/v1
       models:
         # @zai-models
       keys:
         - api-key: __ZAI_API_KEY__
+    - name: zhipuai-coding-plan
+      base-url: https://open.bigmodel.cn/api/v1
+      models:
+        # @zhipuai-models
+      keys:
+        - api-key: __ZHIPUAI_API_KEY__
 
 # END API KEY EXAMPLES
 

@@ -98,7 +98,11 @@ await test("generates configs and rejects drift or invalid input", async () => {
         assert.ok(
           typeof model === "object" && model !== null && "slug" in model
         );
-        return model.slug !== "glm-5.3" && model.slug !== "gpt-6.1-sol";
+        return (
+          model.slug !== "zai-coding-plan/glm-5.4" &&
+          model.slug !== "zhipuai-coding-plan/glm-5.4" &&
+          model.slug !== "gpt-6.1-sol"
+        );
       }),
       ...successors
     ]
@@ -137,21 +141,43 @@ await test("generates configs and rejects drift or invalid input", async () => {
     { name: "gpt-6.2-astra", "max-context-length": 272_000 },
     { name: "gpt-6.10-sol", "max-context-length": 292_000 }
   ]);
-  assert.partialDeepStrictEqual(
-    JSON.parse(await readFile(clientCatalog, "utf-8")),
-    {
-      models: [
-        {
-          slug: "gpt-6.2-sol",
-          visibility: "hide",
-          supported_reasoning_levels: [{ effort: "ultra" }]
-        },
-        { slug: "gpt-6.10-sol", context_window: 292_000 },
-        { slug: "gpt-6.1-sol", visibility: "hide" },
-        { slug: "glm-5.3", context_window: 292_000, visibility: "list" }
-      ]
-    }
-  );
+  const refreshedCatalog = await readFile(clientCatalog, "utf-8");
+  assert.doesNotMatch(refreshedCatalog, /"slug": "glm-5\.3"/u);
+  assert.partialDeepStrictEqual(JSON.parse(refreshedCatalog), {
+    models: [
+      {
+        slug: "gpt-6.2-sol",
+        visibility: "hide",
+        supported_reasoning_levels: [{ effort: "ultra" }]
+      },
+      { slug: "gpt-6.10-sol", context_window: 292_000 },
+      { slug: "gpt-6.1-sol", visibility: "hide" },
+      {
+        slug: "zai-coding-plan/glm-5.4",
+        context_window: 292_000,
+        max_context_window: 292_000,
+        visibility: "list",
+        input_modalities: ["text", "image"],
+        supported_reasoning_levels: [
+          { effort: "low" },
+          { effort: "high" },
+          { effort: "max" }
+        ]
+      },
+      {
+        slug: "zhipuai-coding-plan/glm-5.4",
+        context_window: 292_000,
+        max_context_window: 292_000,
+        visibility: "list",
+        input_modalities: ["text", "image"],
+        supported_reasoning_levels: [
+          { effort: "low" },
+          { effort: "high" },
+          { effort: "max" }
+        ]
+      }
+    ]
+  });
   const duplicateCatalog = Buffer.from(
     JSON.stringify({
       models: [

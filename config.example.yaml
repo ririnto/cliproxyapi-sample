@@ -282,7 +282,11 @@ requests:
   payload:
     override:
       - models:
-          - name: glm-5.3
+          - name: zai-coding-plan/glm-5.4
+            protocol: codex
+            match:
+              - reasoning.effort: xhigh
+          - name: zhipuai-coding-plan/glm-5.4
             protocol: codex
             match:
               - reasoning.effort: xhigh
@@ -290,36 +294,48 @@ requests:
             protocol: codex
             match:
               - reasoning.effort: xhigh
+          - name: zai/glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: xhigh
         params:
           reasoning.effort: max
       - models:
-          - name: glm-5.3
-            protocol: codex
-            match:
-              - reasoning.effort: high
           - name: glm-5.3-flash
             protocol: codex
             match:
               - reasoning.effort: high
+          - name: zai/glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: high
         params:
           reasoning.effort: max
       - models:
-          - name: glm-5.3
+          - name: zai-coding-plan/glm-5.4
+            protocol: codex
+            match:
+              - reasoning.effort: medium
+          - name: zhipuai-coding-plan/glm-5.4
             protocol: codex
             match:
               - reasoning.effort: medium
           - name: glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: medium
+          - name: zai/glm-5.3-flash
             protocol: codex
             match:
               - reasoning.effort: medium
         params:
           reasoning.effort: high
       - models:
-          - name: glm-5.3
+          - name: glm-5.3-flash
             protocol: codex
             match:
               - reasoning.effort: low
-          - name: glm-5.3-flash
+          - name: zai/glm-5.3-flash
             protocol: codex
             match:
               - reasoning.effort: low
@@ -778,12 +794,11 @@ client:
 api-keys:
   codex:
     - name: zai
-      prefix: zai
       base-url: https://api.z.ai/api/v1
       models:
-        - name: glm-5.3
-          alias: glm-5.3
-          display-name: GLM 5.3
+        - name: glm-5.4
+          alias: zai-coding-plan/glm-5.4
+          display-name: GLM-5.4 (Z.AI Coding Plan)
           max-context-length: 292000
           is-compat: true
           thinking:
@@ -805,8 +820,37 @@ api-keys:
               - high
               - medium
               - low
+        - name: glm-5.3-flash
+          alias: zai/glm-5.3-flash
+          display-name: GLM 5.3 Flash
+          max-context-length: 292000
+          is-compat: true
+          thinking:
+            levels:
+              - max
+              - xhigh
+              - high
+              - medium
+              - low
       keys:
         - api-key: __ZAI_API_KEY__
+    - name: zhipuai-coding-plan
+      base-url: https://open.bigmodel.cn/api/v1
+      models:
+        - name: glm-5.4
+          alias: zhipuai-coding-plan/glm-5.4
+          display-name: GLM-5.4 (Zhipu AI Coding Plan)
+          max-context-length: 292000
+          is-compat: true
+          thinking:
+            levels:
+              - max
+              - xhigh
+              - high
+              - medium
+              - low
+      keys:
+        - api-key: __ZHIPUAI_API_KEY__
 
 # END API KEY EXAMPLES
 
