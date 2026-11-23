@@ -11,12 +11,10 @@ export const modelRoutes = {
   glm: [
     {
       name: "glm-5.4",
-      slug: "zai/glm-5.4",
       displayName: "GLM-5.4"
     },
     {
       name: "glm-5.3-flash",
-      slug: "zai/glm-5.3-flash",
       displayName: "GLM 5.3 Flash"
     }
   ]

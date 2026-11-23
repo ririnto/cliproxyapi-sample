@@ -282,27 +282,27 @@ requests:
   payload:
     override:
       - models:
-          - name: zai/glm-5.4
-            protocol: codex
+          - name: glm-5.4
+            protocol: claude
             match:
-              - reasoning.effort: xhigh
-          - name: zai/glm-5.3-flash
-            protocol: codex
+              - output_config.effort: xhigh
+          - name: glm-5.3-flash
+            protocol: claude
             match:
-              - reasoning.effort: xhigh
+              - output_config.effort: xhigh
         params:
-          reasoning.effort: max
+          output_config.effort: max
       - models:
-          - name: zai/glm-5.4
-            protocol: codex
+          - name: glm-5.4
+            protocol: claude
             match:
-              - reasoning.effort: medium
-          - name: zai/glm-5.3-flash
-            protocol: codex
+              - output_config.effort: medium
+          - name: glm-5.3-flash
+            protocol: claude
             match:
-              - reasoning.effort: medium
+              - output_config.effort: medium
         params:
-          reasoning.effort: high
+          output_config.effort: high
     filter:
       - models:
           - name: github_copilot/gpt-*
@@ -754,13 +754,12 @@ client:
 #         - name: "kimi-k2.5"
 #           alias: "claude-opus-4.66"
 api-keys:
-  codex:
+  claude:
     - name: zai
-      prefix: zai
-      base-url: https://api.z.ai/api/v1
+      base-url: https://api.z.ai/api/anthropic
       models:
         - name: glm-5.4
-          alias: zai/glm-5.4
+          alias: glm-5.4
           display-name: GLM-5.4
           max-context-length: 292000
           is-compat: true
@@ -772,7 +771,7 @@ api-keys:
               - medium
               - low
         - name: glm-5.3-flash
-          alias: zai/glm-5.3-flash
+          alias: glm-5.3-flash
           display-name: GLM 5.3 Flash
           max-context-length: 292000
           is-compat: true
@@ -785,7 +784,6 @@ api-keys:
               - low
       keys:
         - api-key: __ZAI_API_KEY__
-          prefix: ""
 
 # END API KEY EXAMPLES
 

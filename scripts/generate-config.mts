@@ -196,11 +196,11 @@ const renderConfig = (
   for (const { alias } of aliases) {
     requireModel(catalog, alias);
   }
-  const glmRoutes = glm.map(({ name, slug, displayName }) => {
-    const { contextWindow, reasoningLevels } = requireModel(catalog, slug);
+  const glmRoutes = glm.map(({ name, displayName }) => {
+    const { contextWindow, reasoningLevels } = requireModel(catalog, name);
     assert.ok(
       Array.isArray(reasoningLevels),
-      `Missing reasoning levels for ${slug}`
+      `Missing reasoning levels for ${name}`
     );
     const catalogLevels: unknown[] = reasoningLevels;
     const supported = new Set(
@@ -209,17 +209,17 @@ const renderConfig = (
           isRecord(level) &&
             typeof level.effort === "string" &&
             level.effort.length > 0,
-          `Invalid reasoning level for ${slug}`
+          `Invalid reasoning level for ${name}`
         );
         return level.effort;
       })
     );
     const highest = effortOrder.find((effort) => supported.has(effort));
-    assert.ok(highest !== undefined, `No usable reasoning effort for ${slug}`);
+    assert.ok(highest !== undefined, `No usable reasoning effort for ${name}`);
     return {
       model: {
         name,
-        alias: slug,
+        alias: name,
         "display-name": displayName,
         "max-context-length": contextWindow,
         "is-compat": true,
@@ -251,10 +251,10 @@ const renderConfig = (
     return [...byTarget].map(([forwarded, models]) => ({
       models: models.map((name) => ({
         name,
-        protocol: "codex",
-        match: [{ "reasoning.effort": requested }]
+        protocol: "claude",
+        match: [{ "output_config.effort": requested }]
       })),
-      params: { "reasoning.effort": forwarded }
+      params: { "output_config.effort": forwarded }
     }));
   });
   const contextTargets = new Map<string, string>();

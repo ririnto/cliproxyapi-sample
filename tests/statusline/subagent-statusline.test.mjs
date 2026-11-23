@@ -42,7 +42,7 @@ await test("subagent rows preserve task ids and align right metrics", () => {
           description: "Investigate fixture",
           effort: "high",
           id: "task-1",
-          model: "zai/glm-5.4",
+          model: "glm-5.4",
           name: "worker",
           startTime: nowMs - 65_000,
           status: "running",
@@ -66,7 +66,7 @@ await test("subagent rows preserve task ids and align right metrics", () => {
   );
   assert.match(
     stripVTControlCharacters(parseRow(rows[0]).content),
-    /zai\/glm-5\.4 high/u
+    /\bglm-5\.4 high/u
   );
   assert.match(stripVTControlCharacters(parseRow(rows[0]).content), /20k tok/u);
   assert.doesNotMatch(
