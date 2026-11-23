@@ -16,9 +16,9 @@ export const modelRoutes = {
       displayName: "GLM-5.4 (Z.AI Coding Plan)"
     },
     {
-      marker: "zhipuai-models",
+      marker: "zai-cn-models",
       name: "glm-5.4",
-      slug: "zhipuai-coding-plan/glm-5.4",
+      slug: "zai/glm-5.4-cn",
       displayName: "GLM-5.4 (Zhipu AI Coding Plan)"
     },
     {

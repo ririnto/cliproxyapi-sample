@@ -2098,7 +2098,7 @@
       "supports_reasoning_summary_parameter": false
     },
     {
-      "slug": "zhipuai-coding-plan/glm-5.4",
+      "slug": "zai/glm-5.4-cn",
       "tool_mode": "code_mode_only",
       "display_name": "GLM-5.4 (Zhipu AI Coding Plan)",
       "description": "Zhipu AI Coding Plan model for coding and agent workflows.",
