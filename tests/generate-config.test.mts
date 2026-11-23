@@ -142,7 +142,7 @@ await test("generates configs and rejects drift or invalid input", async () => {
     { name: "gpt-6.10-sol", "max-context-length": 292_000 }
   ]);
   const refreshedCatalog = await readFile(clientCatalog, "utf-8");
-  assert.doesNotMatch(refreshedCatalog, /"slug": "(?:[^"]+\/)?glm-5\.3[^"]*"/u);
+  assert.doesNotMatch(refreshedCatalog, /"slug": "glm-5\.3"/u);
   assert.partialDeepStrictEqual(JSON.parse(refreshedCatalog), {
     models: [
       {
