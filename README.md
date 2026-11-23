@@ -74,16 +74,9 @@ Docker Desktop에서는 host networking을 먼저 활성화해야 한다.
 curl --fail --silent --show-error http://127.0.0.1:8317/v1/models
 ```
 
-응답의 `data[].id`에서 다음 GLM 모델을 확인한다.
-
-| 클라이언트 모델 ID | Responses API | 업스트림 모델 ID |
-| --- | --- | --- |
-| `zai/glm-5.4` | [Z.AI Coding Plan](https://docs.z.ai/devpack/latest-model) | `glm-5.4` |
-| `zhipuai-coding-plan/glm-5.4` | [Zhipu AI Coding Plan](https://docs.bigmodel.cn/cn/coding-plan/latest-model) | `glm-5.4` |
-| `glm-5.3-flash`, `zai/glm-5.3-flash` | Z.AI Coding Plan | `glm-5.3-flash` |
+응답의 `data[].id`에서 프록시가 공개한 모델 ID를 확인한다.
 
 GPT가 보이지 않으면 서비스를 실행한 환경에서 Codex 로그인을 마쳤는지 확인한다.
-이 요청은 프록시가 공개한 모델 목록만 읽는다.
 실제 모델 접근 권한은 해당 계정으로 추론 요청을 보냈을 때 확인할 수 있다.
 
 샘플의 `access.api-keys` 목록은 비어 있다.
@@ -131,7 +124,6 @@ NODE_USE_SYSTEM_CA = "1"
 `model_providers.openai` 테이블은 비워 둔다.
 `shell_environment_policy.set`의 `NODE_USE_SYSTEM_CA`는 Codex가 실행한 셸 명령에서 Node.js가 시스템 CA 인증서를 사용하도록 설정한다.
 새 Codex 세션에서 `/model`을 열어 `gpt-6.2-sol`과 두 GLM-5.4 모델이 표시되는지 확인한다.
-Claude Code의 사용자 지정 모델은 `zai/glm-5.4`를 사용한다.
 
 전체 파일을 적용하면 `approval_policy = "on-request"`와
 `sandbox_mode = "danger-full-access"`도 적용된다.

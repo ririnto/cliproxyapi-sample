@@ -739,10 +739,10 @@ api-keys:
         # @zai-models
       keys:
         - api-key: __ZAI_API_KEY__
-    - name: zhipuai-coding-plan
+    - name: zai-cn
       base-url: https://open.bigmodel.cn/api/v1
       models:
-        # @zhipuai-models
+        # @zai-cn-models
       keys:
         - api-key: __ZHIPUAI_API_KEY__
 

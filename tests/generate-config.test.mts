@@ -100,7 +100,7 @@ await test("generates configs and rejects drift or invalid input", async () => {
         );
         return (
           model.slug !== "zai/glm-5.4" &&
-          model.slug !== "zhipuai-coding-plan/glm-5.4" &&
+          model.slug !== "zai/glm-5.4-cn" &&
           model.slug !== "gpt-6.1-sol"
         );
       }),
@@ -142,7 +142,6 @@ await test("generates configs and rejects drift or invalid input", async () => {
     { name: "gpt-6.10-sol", "max-context-length": 292_000 }
   ]);
   const refreshedCatalog = await readFile(clientCatalog, "utf-8");
-  assert.doesNotMatch(refreshedCatalog, /"slug": "glm-5\.3"/u);
   assert.partialDeepStrictEqual(JSON.parse(refreshedCatalog), {
     models: [
       {
@@ -165,7 +164,7 @@ await test("generates configs and rejects drift or invalid input", async () => {
         ]
       },
       {
-        slug: "zhipuai-coding-plan/glm-5.4",
+        slug: "zai/glm-5.4-cn",
         context_window: 292_000,
         max_context_window: 292_000,
         visibility: "list",

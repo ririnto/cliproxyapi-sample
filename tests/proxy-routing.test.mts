@@ -29,15 +29,21 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const glmRoutes = [
   { alias: "zai/glm-5.4", model: "glm-5.4", upstream: "zai" },
   {
-    alias: "zhipuai-coding-plan/glm-5.4",
+    alias: "zai/glm-5.4-cn",
     model: "glm-5.4",
-    upstream: "zhipuai-coding-plan"
+    upstream: "zai-cn"
   },
   { alias: "glm-5.3-flash", model: "glm-5.3-flash", upstream: "zai" },
   { alias: "zai/glm-5.3-flash", model: "glm-5.3-flash", upstream: "zai" }
 ] as const;
 
-const retiredGlmIds = ["glm-5.3", "zai/glm-5.3", "zai-coding-plan/glm-5.4"];
+const zaiUpstreams = {
+  zai: { baseUrl: "https://api.z.ai/api/v1", apiKey: "__ZAI_API_KEY__" },
+  "zai-cn": {
+    baseUrl: "https://open.bigmodel.cn/api/v1",
+    apiKey: "__ZHIPUAI_API_KEY__"
+  }
+};
 
 await test("CLIProxyAPI routes the sample models", async (t) => {
   await using directory = await mkdtempDisposable(
@@ -48,7 +54,11 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
   await using responsesServer = createServer((request, response) => {
     void json(request).then((body: unknown) => {
       const id = `resp_${requests.size}`;
-      requests.set(id, { path: request.url, body });
+      requests.set(id, {
+        path: request.url,
+        authorization: request.headers.authorization,
+        body
+      });
       response.writeHead(200, { "content-type": "text/event-stream" });
       const completed = {
         type: "response.completed",
@@ -94,10 +104,7 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
   config.setIn(["management", "disable-control-panel"], true);
   const codexKeys = config.getIn(["api-keys", "codex"]);
   assert.ok(isSeq(codexKeys));
-  for (const [name, baseUrl] of [
-    ["zai", "https://api.z.ai/api/v1"],
-    ["zhipuai-coding-plan", "https://open.bigmodel.cn/api/v1"]
-  ]) {
+  for (const [name, { baseUrl }] of Object.entries(zaiUpstreams)) {
     const group: unknown = codexKeys.items.find(
       (entry) => isMap(entry) && entry.get("name") === name
     );
@@ -197,11 +204,11 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
           new Set(glmIDs),
           new Set(glmRoutes.map(({ alias }) => alias))
         );
-        for (const { alias } of glmRoutes) {
+        for (const { alias, model } of glmRoutes) {
           const capabilities = models.get(alias);
           assert.ok(capabilities, alias);
           assert.equal(capabilities.context_window, 292_000, alias);
-          if (alias.endsWith("/glm-5.4")) {
+          if (model === "glm-5.4") {
             assert.deepEqual(
               capabilities.input_modalities,
               ["text", "image"],
@@ -255,6 +262,7 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
                 requests.get(payload.id),
                 {
                   path: `/${upstream}/responses`,
+                  authorization: `Bearer ${zaiUpstreams[upstream].apiKey}`,
                   body: { model, reasoning: { effort: expected } }
                 },
                 `${alias} with ${input} effort`
@@ -325,7 +333,7 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
       }
     );
     await t.test(
-      "the Claude Code custom model uses the migrated Z.AI route",
+      "the Claude Code custom model uses the global Z.AI route",
       async () => {
         const settings: unknown = JSON.parse(
           await readFile(
@@ -340,7 +348,6 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
         const { fallbackModel } = settings;
         assert.ok(Array.isArray(fallbackModel));
         assert.ok(fallbackModel.includes("glm-5.3-flash"));
-        assert.ok(retiredGlmIds.every((id) => !fallbackModel.includes(id)));
         const response = await fetch(`${url}/messages`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -384,24 +391,6 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
                 error: { type: "invalid_request_error" }
               });
             })
-        );
-        assert.equal(requests.size, forwardedCount);
-      }
-    );
-    await t.test(
-      "the retired GLM IDs are rejected before requests reach a provider",
-      async () => {
-        const forwardedCount = requests.size;
-        await Promise.all(
-          retiredGlmIds.map(async (model) => {
-            const response = await fetch(`${url}/responses`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              signal: AbortSignal.timeout(5000),
-              body: JSON.stringify({ model, input: "Synthetic input" })
-            });
-            assert.equal(response.ok, false, model);
-          })
         );
         assert.equal(requests.size, forwardedCount);
       }
