@@ -282,7 +282,7 @@ requests:
   payload:
     override:
       - models:
-          - name: zai-coding-plan/glm-5.4
+          - name: zai/glm-5.4
             protocol: codex
             match:
               - reasoning.effort: xhigh
@@ -312,7 +312,7 @@ requests:
         params:
           reasoning.effort: max
       - models:
-          - name: zai-coding-plan/glm-5.4
+          - name: zai/glm-5.4
             protocol: codex
             match:
               - reasoning.effort: medium
@@ -797,7 +797,7 @@ api-keys:
       base-url: https://api.z.ai/api/v1
       models:
         - name: glm-5.4
-          alias: zai-coding-plan/glm-5.4
+          alias: zai/glm-5.4
           display-name: GLM-5.4 (Z.AI Coding Plan)
           max-context-length: 292000
           is-compat: true

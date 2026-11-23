@@ -27,7 +27,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const glmRoutes = [
-  { alias: "zai-coding-plan/glm-5.4", model: "glm-5.4", upstream: "zai" },
+  { alias: "zai/glm-5.4", model: "glm-5.4", upstream: "zai" },
   {
     alias: "zhipuai-coding-plan/glm-5.4",
     model: "glm-5.4",
@@ -37,7 +37,7 @@ const glmRoutes = [
   { alias: "zai/glm-5.3-flash", model: "glm-5.3-flash", upstream: "zai" }
 ] as const;
 
-const retiredGlmIds = ["glm-5.3", "zai/glm-5.3"];
+const retiredGlmIds = ["glm-5.3", "zai/glm-5.3", "zai-coding-plan/glm-5.4"];
 
 await test("CLIProxyAPI routes the sample models", async (t) => {
   await using directory = await mkdtempDisposable(
@@ -331,7 +331,7 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
         );
         assert.ok(isRecord(settings) && isRecord(settings.env));
         const model = settings.env.ANTHROPIC_CUSTOM_MODEL_OPTION;
-        assert.equal(model, "zai-coding-plan/glm-5.4");
+        assert.equal(model, "zai/glm-5.4");
         assert.equal(settings.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "292000");
         const { fallbackModel } = settings;
         assert.ok(Array.isArray(fallbackModel));
@@ -385,7 +385,7 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
       }
     );
     await t.test(
-      "the removed GLM-5.3 IDs do not route to a provider",
+      "the retired GLM IDs are rejected before requests reach a provider",
       async () => {
         const forwardedCount = requests.size;
         await Promise.all(
