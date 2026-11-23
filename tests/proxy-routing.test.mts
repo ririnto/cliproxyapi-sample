@@ -227,14 +227,14 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
       }
     );
     await t.test(
-      "GLM requests use only their configured provider and forward supported efforts",
+      "GLM requests preserve explicit supported efforts and normalize only unsupported efforts",
       async () => {
         await Promise.all(
           glmRoutes.flatMap(({ alias, model, upstream }) =>
             [
-              ["low", model === "glm-5.4" ? "low" : "high"],
+              ["low", "low"],
               ["medium", "high"],
-              ["high", model === "glm-5.4" ? "high" : "max"],
+              ["high", "high"],
               ["xhigh", "max"],
               ["max", "max"]
             ].map(async ([input, expected]) => {
@@ -251,10 +251,14 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
               const payload: unknown = await response.json();
               assert.equal(response.status, 200, JSON.stringify(payload));
               assert.ok(isRecord(payload) && typeof payload.id === "string");
-              assert.partialDeepStrictEqual(requests.get(payload.id), {
-                path: `/${upstream}/responses`,
-                body: { model, reasoning: { effort: expected } }
-              });
+              assert.partialDeepStrictEqual(
+                requests.get(payload.id),
+                {
+                  path: `/${upstream}/responses`,
+                  body: { model, reasoning: { effort: expected } }
+                },
+                `${alias} with ${input} effort`
+              );
             })
           )
         );
