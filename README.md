@@ -80,7 +80,6 @@ curl --fail --silent --show-error http://127.0.0.1:8317/v1/models
 | --- | --- | --- |
 | `zai-coding-plan/glm-5.4` | [Z.AI Coding Plan](https://docs.z.ai/devpack/latest-model) | `glm-5.4` |
 | `zhipuai-coding-plan/glm-5.4` | [Zhipu AI Coding Plan](https://docs.bigmodel.cn/cn/coding-plan/latest-model) | `glm-5.4` |
-| `glm-5.3-flash`, `zai/glm-5.3-flash` | Z.AI Coding Plan | `glm-5.3-flash` |
 
 GPT가 보이지 않으면 서비스를 실행한 환경에서 Codex 로그인을 마쳤는지 확인한다.
 이 요청은 프록시가 공개한 모델 목록만 읽는다.
@@ -95,8 +94,6 @@ GPT가 보이지 않으면 서비스를 실행한 환경에서 Codex 로그인�
 GLM-5.4 경로는 텍스트와 이미지 입력, 함수 호출, 스트리밍을 지원한다.
 GLM-5.4의 `low`, `high`, `max` 요청은 그대로 전달한다.
 `medium`은 `high`로, `xhigh`는 `max`로 변환한다.
-GLM-5.3-Flash는 요청보다 높은 지원 수준 중 가장 가까운 값을 사용한다.
-더 높은 수준이 없으면 지원 최댓값을 사용한다.
 프록시는 `minimal`과 `ultra`를 거절한다.
 
 | 요청 | 프록시 동작 |
