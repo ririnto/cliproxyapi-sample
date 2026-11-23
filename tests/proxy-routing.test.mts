@@ -27,23 +27,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const glmRoutes = [
-  { alias: "zai/glm-5.4", model: "glm-5.4", upstream: "zai" },
-  {
-    alias: "zai/glm-5.4-cn",
-    model: "glm-5.4",
-    upstream: "zai-cn"
-  },
-  { alias: "glm-5.3-flash", model: "glm-5.3-flash", upstream: "zai" },
-  { alias: "zai/glm-5.3-flash", model: "glm-5.3-flash", upstream: "zai" }
+  { alias: "zai/glm-5.4", model: "glm-5.4" },
+  { alias: "zai/glm-5.3-flash", model: "glm-5.3-flash" }
 ] as const;
-
-const zaiUpstreams = {
-  zai: { baseUrl: "https://api.z.ai/api/v1", apiKey: "__ZAI_API_KEY__" },
-  "zai-cn": {
-    baseUrl: "https://open.bigmodel.cn/api/v1",
-    apiKey: "__ZHIPUAI_API_KEY__"
-  }
-};
 
 await test("CLIProxyAPI routes the sample models", async (t) => {
   await using directory = await mkdtempDisposable(
@@ -104,14 +90,13 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
   config.setIn(["management", "disable-control-panel"], true);
   const codexKeys = config.getIn(["api-keys", "codex"]);
   assert.ok(isSeq(codexKeys));
-  for (const [name, { baseUrl }] of Object.entries(zaiUpstreams)) {
-    const group: unknown = codexKeys.items.find(
-      (entry) => isMap(entry) && entry.get("name") === name
-    );
-    assert.ok(isMap(group), name);
-    assert.equal(group.get("base-url"), baseUrl);
-    group.set("base-url", `http://127.0.0.1:${upstreamPort}/${name}`);
-  }
+  assert.equal(codexKeys.items.length, 1);
+  const [group] = codexKeys.items;
+  assert.ok(isMap(group));
+  assert.equal(group.get("name"), "zai");
+  assert.equal(group.get("prefix"), "zai");
+  assert.equal(group.get("base-url"), "https://api.z.ai/api/v1");
+  group.set("base-url", `http://127.0.0.1:${upstreamPort}/zai`);
   await writeFile(path.join(home, "config.yaml"), config.toString());
   const proxy = spawn(
     process.env.CLIPROXYAPI_TEST_BINARY ?? "cliproxyapi",
@@ -141,12 +126,14 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
           assert.ok(isRecord(model) && typeof model.slug === "string");
           const {
             context_window,
+            display_name,
             input_modalities,
             service_tiers,
             supported_reasoning_levels
           } = model;
           capabilities.set(model.slug, {
             context_window,
+            display_name,
             input_modalities,
             service_tiers,
             supported_reasoning_levels
@@ -209,6 +196,7 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
           assert.ok(capabilities, alias);
           assert.equal(capabilities.context_window, 292_000, alias);
           if (model === "glm-5.4") {
+            assert.equal(capabilities.display_name, "GLM-5.4", alias);
             assert.deepEqual(
               capabilities.input_modalities,
               ["text", "image"],
@@ -237,7 +225,7 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
       "GLM requests preserve explicit supported efforts and normalize only unsupported efforts",
       async () => {
         await Promise.all(
-          glmRoutes.flatMap(({ alias, model, upstream }) =>
+          glmRoutes.flatMap(({ alias, model }) =>
             [
               ["low", "low"],
               ["medium", "high"],
@@ -261,8 +249,8 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
               assert.partialDeepStrictEqual(
                 requests.get(payload.id),
                 {
-                  path: `/${upstream}/responses`,
-                  authorization: `Bearer ${zaiUpstreams[upstream].apiKey}`,
+                  path: "/zai/responses",
+                  authorization: "Bearer __ZAI_API_KEY__",
                   body: { model, reasoning: { effort: expected } }
                 },
                 `${alias} with ${input} effort`
@@ -296,44 +284,38 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
             ]
           }
         ];
-        await Promise.all(
-          glmRoutes
-            .filter(({ model }) => model === "glm-5.4")
-            .map(async ({ alias, upstream }) => {
-              const response = await fetch(`${url}/responses`, {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                signal: AbortSignal.timeout(5000),
-                body: JSON.stringify({
-                  model: alias,
-                  input,
-                  tools,
-                  stream: true
-                })
-              });
-              assert.equal(response.status, 200);
-              assert.match(
-                response.headers.get("content-type") ?? "",
-                /^text\/event-stream/u
-              );
-              const events = await response.text();
-              assert.match(
-                events,
-                /event: response\.output_text\.delta\ndata: .*Synthetic output/u
-              );
-              assert.match(events, /event: response\.completed/u);
-              const id = /"id":"(?<id>resp_\d+)"/u.exec(events)?.groups?.id;
-              assert.ok(id !== undefined, events);
-              assert.partialDeepStrictEqual(requests.get(id), {
-                path: `/${upstream}/responses`,
-                body: { model: "glm-5.4", input, tools, stream: true }
-              });
-            })
+        const response = await fetch(`${url}/responses`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          signal: AbortSignal.timeout(5000),
+          body: JSON.stringify({
+            model: "zai/glm-5.4",
+            input,
+            tools,
+            stream: true
+          })
+        });
+        assert.equal(response.status, 200);
+        assert.match(
+          response.headers.get("content-type") ?? "",
+          /^text\/event-stream/u
         );
+        const events = await response.text();
+        assert.match(
+          events,
+          /event: response\.output_text\.delta\ndata: .*Synthetic output/u
+        );
+        assert.match(events, /event: response\.completed/u);
+        const id = /"id":"(?<id>resp_\d+)"/u.exec(events)?.groups?.id;
+        assert.ok(id !== undefined, events);
+        assert.partialDeepStrictEqual(requests.get(id), {
+          path: "/zai/responses",
+          body: { model: "glm-5.4", input, tools, stream: true }
+        });
       }
     );
     await t.test(
-      "the Claude Code custom model uses the global Z.AI route",
+      "Claude Code's configured GLM models use the Z.AI route",
       async () => {
         const settings: unknown = JSON.parse(
           await readFile(
@@ -344,26 +326,40 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
         assert.ok(isRecord(settings) && isRecord(settings.env));
         const model = settings.env.ANTHROPIC_CUSTOM_MODEL_OPTION;
         assert.equal(model, "zai/glm-5.4");
+        assert.equal(
+          settings.env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME,
+          "GLM-5.4"
+        );
         assert.equal(settings.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "292000");
         const { fallbackModel } = settings;
         assert.ok(Array.isArray(fallbackModel));
-        assert.ok(fallbackModel.includes("glm-5.3-flash"));
-        const response = await fetch(`${url}/messages`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          signal: AbortSignal.timeout(5000),
-          body: JSON.stringify({
-            model,
-            max_tokens: 100,
-            messages: [{ role: "user", content: "Synthetic input" }]
+        const fallbacks: unknown[] = fallbackModel;
+        const [fallback] = fallbacks;
+        assert.equal(fallback, "zai/glm-5.3-flash");
+        await Promise.all(
+          [
+            [model, "glm-5.4"],
+            [fallback, "glm-5.3-flash"]
+          ].map(async ([alias, upstreamModel]) => {
+            const response = await fetch(`${url}/messages`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              signal: AbortSignal.timeout(5000),
+              body: JSON.stringify({
+                model: alias,
+                max_tokens: 100,
+                messages: [{ role: "user", content: "Synthetic input" }]
+              })
+            });
+            assert.equal(response.status, 200);
+            const payload: unknown = await response.json();
+            assert.ok(isRecord(payload) && typeof payload.id === "string");
+            assert.partialDeepStrictEqual(requests.get(payload.id), {
+              path: "/zai/responses",
+              body: { model: upstreamModel }
+            });
           })
-        });
-        assert.equal(response.status, 200);
-        await response.json();
-        assert.partialDeepStrictEqual([...requests.values()].at(-1), {
-          path: "/zai/responses",
-          body: { model: "glm-5.4" }
-        });
+        );
       }
     );
     await t.test(

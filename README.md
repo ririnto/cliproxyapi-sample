@@ -16,7 +16,6 @@ cp -i config.example.yaml "$(brew --prefix)/etc/cliproxyapi.conf"
 Homebrew는 설치할 때 기본 설정 파일도 만든다.
 기존에 사용하던 설정이 있다면 복사 확인에 `n`을 입력하고 필요한 항목을 병합한다.
 GLM을 사용하려면 복사한 설정의 `__ZAI_API_KEY__`를 Z.ai 키로 교체한다.
-중국 Zhipu AI Coding Plan을 사용하려면 `__ZHIPUAI_API_KEY__`를 해당 플랜의 키로 교체한다.
 `server.host`는 `127.0.0.1`로 유지한다.
 
 ```sh
@@ -42,7 +41,7 @@ cp -i config.example.yaml config.yaml
 
 기본 bridge 네트워크에서는 `config.yaml`의 `server.host`를 `"0.0.0.0"`으로 바꾼다.
 [Compose 설정](compose.yaml)은 호스트의 `127.0.0.1:8317`만 컨테이너에 연결한다.
-사용할 GLM 공급자에 맞춰 이 파일에서 `__ZAI_API_KEY__` 또는 `__ZHIPUAI_API_KEY__`를 교체한다.
+GLM을 사용하려면 이 파일에서 `__ZAI_API_KEY__`를 Z.ai 키로 교체한다.
 
 ```sh
 docker compose up -d
@@ -83,7 +82,6 @@ GPT가 보이지 않으면 서비스를 실행한 환경에서 Codex 로그인�
 여기에 클라이언트 키를 추가했다면 요청에 `Authorization: Bearer <클라이언트 키>` 헤더를 보낸다.
 프록시는 모델 ID에 해당하는 공급자의 키를 사용한다.
 
-[Models.dev](https://models.dev/models/zhipuai/glm-5.4/)는 GLM-5.4의 컨텍스트를 1,000,000토큰, 출력 한도를 131,072토큰으로 표시한다.
 이 샘플의 클라이언트 컨텍스트 한도는 292,000토큰이다.
 GLM-5.4 경로는 텍스트와 이미지 입력, 함수 호출, 스트리밍을 지원한다.
 GLM-5.4와 GLM-5.3-Flash의 `low`, `high`, `max` 요청은 그대로 전달한다.
@@ -123,7 +121,7 @@ NODE_USE_SYSTEM_CA = "1"
 
 `model_providers.openai` 테이블은 비워 둔다.
 `shell_environment_policy.set`의 `NODE_USE_SYSTEM_CA`는 Codex가 실행한 셸 명령에서 Node.js가 시스템 CA 인증서를 사용하도록 설정한다.
-새 Codex 세션에서 `/model`을 열어 `gpt-6.2-sol`과 두 GLM-5.4 모델이 표시되는지 확인한다.
+새 Codex 세션에서 `/model`을 열어 `gpt-6.2-sol`, GLM-5.4, GLM-5.3-Flash가 표시되는지 확인한다.
 
 전체 파일을 적용하면 `approval_policy = "on-request"`와
 `sandbox_mode = "danger-full-access"`도 적용된다.

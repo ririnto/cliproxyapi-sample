@@ -734,17 +734,13 @@ client:
 api-keys:
   codex:
     - name: zai
+      prefix: zai
       base-url: https://api.z.ai/api/v1
       models:
         # @zai-models
       keys:
         - api-key: __ZAI_API_KEY__
-    - name: zai-cn
-      base-url: https://open.bigmodel.cn/api/v1
-      models:
-        # @zai-cn-models
-      keys:
-        - api-key: __ZHIPUAI_API_KEY__
+          prefix: ""
 
 # END API KEY EXAMPLES
 

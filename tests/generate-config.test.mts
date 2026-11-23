@@ -100,7 +100,7 @@ await test("generates configs and rejects drift or invalid input", async () => {
         );
         return (
           model.slug !== "zai/glm-5.4" &&
-          model.slug !== "zai/glm-5.4-cn" &&
+          model.slug !== "zai/glm-5.3-flash" &&
           model.slug !== "gpt-6.1-sol"
         );
       }),
@@ -153,6 +153,7 @@ await test("generates configs and rejects drift or invalid input", async () => {
       { slug: "gpt-6.1-sol", visibility: "hide" },
       {
         slug: "zai/glm-5.4",
+        display_name: "GLM-5.4",
         context_window: 292_000,
         max_context_window: 292_000,
         visibility: "list",
@@ -164,9 +165,8 @@ await test("generates configs and rejects drift or invalid input", async () => {
         ]
       },
       {
-        slug: "zai/glm-5.4-cn",
+        slug: "zai/glm-5.3-flash",
         context_window: 292_000,
-        max_context_window: 292_000,
         visibility: "list",
         input_modalities: ["text", "image"],
         supported_reasoning_levels: [

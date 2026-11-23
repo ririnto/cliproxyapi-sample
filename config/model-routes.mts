@@ -10,22 +10,13 @@ export const modelRoutes = {
   },
   glm: [
     {
-      marker: "zai-models",
       name: "glm-5.4",
       slug: "zai/glm-5.4",
-      displayName: "GLM-5.4 (Z.AI Coding Plan)"
+      displayName: "GLM-5.4"
     },
     {
-      marker: "zai-cn-models",
-      name: "glm-5.4",
-      slug: "zai/glm-5.4-cn",
-      displayName: "GLM-5.4 (Zhipu AI Coding Plan)"
-    },
-    {
-      marker: "zai-models",
       name: "glm-5.3-flash",
-      slug: "glm-5.3-flash",
-      additionalAliases: ["zai/glm-5.3-flash"],
+      slug: "zai/glm-5.3-flash",
       displayName: "GLM 5.3 Flash"
     }
   ]

@@ -286,14 +286,6 @@ requests:
             protocol: codex
             match:
               - reasoning.effort: xhigh
-          - name: zai/glm-5.4-cn
-            protocol: codex
-            match:
-              - reasoning.effort: xhigh
-          - name: glm-5.3-flash
-            protocol: codex
-            match:
-              - reasoning.effort: xhigh
           - name: zai/glm-5.3-flash
             protocol: codex
             match:
@@ -302,14 +294,6 @@ requests:
           reasoning.effort: max
       - models:
           - name: zai/glm-5.4
-            protocol: codex
-            match:
-              - reasoning.effort: medium
-          - name: zai/glm-5.4-cn
-            protocol: codex
-            match:
-              - reasoning.effort: medium
-          - name: glm-5.3-flash
             protocol: codex
             match:
               - reasoning.effort: medium
@@ -772,23 +756,12 @@ client:
 api-keys:
   codex:
     - name: zai
+      prefix: zai
       base-url: https://api.z.ai/api/v1
       models:
         - name: glm-5.4
           alias: zai/glm-5.4
-          display-name: GLM-5.4 (Z.AI Coding Plan)
-          max-context-length: 292000
-          is-compat: true
-          thinking:
-            levels:
-              - max
-              - xhigh
-              - high
-              - medium
-              - low
-        - name: glm-5.3-flash
-          alias: glm-5.3-flash
-          display-name: GLM 5.3 Flash
+          display-name: GLM-5.4
           max-context-length: 292000
           is-compat: true
           thinking:
@@ -812,23 +785,7 @@ api-keys:
               - low
       keys:
         - api-key: __ZAI_API_KEY__
-    - name: zai-cn
-      base-url: https://open.bigmodel.cn/api/v1
-      models:
-        - name: glm-5.4
-          alias: zai/glm-5.4-cn
-          display-name: GLM-5.4 (Zhipu AI Coding Plan)
-          max-context-length: 292000
-          is-compat: true
-          thinking:
-            levels:
-              - max
-              - xhigh
-              - high
-              - medium
-              - low
-      keys:
-        - api-key: __ZHIPUAI_API_KEY__
+          prefix: ""
 
 # END API KEY EXAMPLES
 

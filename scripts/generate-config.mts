@@ -196,52 +196,46 @@ const renderConfig = (
   for (const { alias } of aliases) {
     requireModel(catalog, alias);
   }
-  const glmRoutes = glm.map(
-    ({ marker, name, slug, additionalAliases = [], displayName }) => {
-      const { contextWindow, reasoningLevels } = requireModel(catalog, slug);
-      assert.ok(
-        Array.isArray(reasoningLevels),
-        `Missing reasoning levels for ${slug}`
-      );
-      const catalogLevels: unknown[] = reasoningLevels;
-      const supported = new Set(
-        catalogLevels.map((level) => {
-          assert.ok(
-            isRecord(level) &&
-              typeof level.effort === "string" &&
-              level.effort.length > 0,
-            `Invalid reasoning level for ${slug}`
-          );
-          return level.effort;
-        })
-      );
-      const highest = effortOrder.find((effort) => supported.has(effort));
-      assert.ok(
-        highest !== undefined,
-        `No usable reasoning effort for ${slug}`
-      );
-      return {
-        marker,
-        models: [slug, ...additionalAliases].map((alias) => ({
-          name,
-          alias,
-          "display-name": displayName,
-          "max-context-length": contextWindow,
-          "is-compat": true,
-          thinking: { levels: [...effortOrder] }
-        })),
-        supported,
-        highest
-      };
-    }
-  );
+  const glmRoutes = glm.map(({ name, slug, displayName }) => {
+    const { contextWindow, reasoningLevels } = requireModel(catalog, slug);
+    assert.ok(
+      Array.isArray(reasoningLevels),
+      `Missing reasoning levels for ${slug}`
+    );
+    const catalogLevels: unknown[] = reasoningLevels;
+    const supported = new Set(
+      catalogLevels.map((level) => {
+        assert.ok(
+          isRecord(level) &&
+            typeof level.effort === "string" &&
+            level.effort.length > 0,
+          `Invalid reasoning level for ${slug}`
+        );
+        return level.effort;
+      })
+    );
+    const highest = effortOrder.find((effort) => supported.has(effort));
+    assert.ok(highest !== undefined, `No usable reasoning effort for ${slug}`);
+    return {
+      model: {
+        name,
+        alias: slug,
+        "display-name": displayName,
+        "max-context-length": contextWindow,
+        "is-compat": true,
+        thinking: { levels: [...effortOrder] }
+      },
+      supported,
+      highest
+    };
+  });
   assertUnique(
-    glmRoutes.flatMap(({ models }) => models.map(({ alias }) => alias)),
+    glmRoutes.map(({ model }) => model.alias),
     "GLM model alias"
   );
   const glmOverrides = effortOrder.flatMap((requested, index) => {
     const byTarget = new Map<string, string[]>();
-    for (const { models, supported, highest } of glmRoutes) {
+    for (const { model, supported, highest } of glmRoutes) {
       if (supported.has(requested)) {
         continue;
       }
@@ -251,7 +245,7 @@ const renderConfig = (
           .findLast((effort) => supported.has(effort)) ?? highest;
       byTarget.set(forwarded, [
         ...(byTarget.get(forwarded) ?? []),
-        ...models.map(({ alias }) => alias)
+        model.alias
       ]);
     }
     return [...byTarget].map(([forwarded, models]) => ({
@@ -281,14 +275,12 @@ const renderConfig = (
 
   const sections = [
     { indent: 6, marker: "glm-overrides", entries: glmOverrides, quote: false },
-    ...[...new Set(glmRoutes.map(({ marker }) => marker))].map((marker) => ({
+    {
       indent: 8,
-      marker,
-      entries: glmRoutes
-        .filter((route) => route.marker === marker)
-        .flatMap(({ models }) => models),
+      marker: "zai-models",
+      entries: glmRoutes.map(({ model }) => model),
       quote: false
-    })),
+    },
     { indent: 6, marker: "codex-aliases", entries: aliases, quote: true },
     { indent: 6, marker: "codex-context", entries: codexContext, quote: true }
   ];
