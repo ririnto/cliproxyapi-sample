@@ -196,59 +196,79 @@ const renderConfig = (
   for (const { alias } of aliases) {
     requireModel(catalog, alias);
   }
-  const glmRoutes = glm.map(({ marker, name, slug, displayName }) => {
-    const { contextWindow, reasoningLevels } = requireModel(catalog, slug);
-    assert.ok(
-      Array.isArray(reasoningLevels),
-      `Missing reasoning levels for ${slug}`
-    );
-    const catalogLevels: unknown[] = reasoningLevels;
-    const supported = new Set(
-      catalogLevels.map((level) => {
-        assert.ok(
-          isRecord(level) &&
-            typeof level.effort === "string" &&
-            level.effort.length > 0,
-          `Invalid reasoning level for ${slug}`
-        );
-        return level.effort;
-      })
-    );
-    const highest = effortOrder.find((effort) => supported.has(effort));
-    assert.ok(highest !== undefined, `No usable reasoning effort for ${slug}`);
-    return {
+  const glmRoutes = glm.map(
+    ({
       marker,
-      model: {
-        name,
-        alias: slug,
-        "display-name": displayName,
-        "max-context-length": contextWindow,
-        "is-compat": true,
-        thinking: { levels: [...effortOrder] }
-      },
-      supported,
-      highest
-    };
-  });
+      name,
+      slug,
+      additionalAliases = [],
+      displayName,
+      promoteSupportedEfforts = false
+    }) => {
+      const { contextWindow, reasoningLevels } = requireModel(catalog, slug);
+      assert.ok(
+        Array.isArray(reasoningLevels),
+        `Missing reasoning levels for ${slug}`
+      );
+      const catalogLevels: unknown[] = reasoningLevels;
+      const supported = new Set(
+        catalogLevels.map((level) => {
+          assert.ok(
+            isRecord(level) &&
+              typeof level.effort === "string" &&
+              level.effort.length > 0,
+            `Invalid reasoning level for ${slug}`
+          );
+          return level.effort;
+        })
+      );
+      const highest = effortOrder.find((effort) => supported.has(effort));
+      assert.ok(
+        highest !== undefined,
+        `No usable reasoning effort for ${slug}`
+      );
+      return {
+        marker,
+        models: [slug, ...additionalAliases].map((alias) => ({
+          name,
+          alias,
+          "display-name": displayName,
+          "max-context-length": contextWindow,
+          "is-compat": true,
+          thinking: { levels: [...effortOrder] }
+        })),
+        supported,
+        highest,
+        promoteSupportedEfforts
+      };
+    }
+  );
   assertUnique(
-    glmRoutes.map(({ model }) => model.alias),
+    glmRoutes.flatMap(({ models }) => models.map(({ alias }) => alias)),
     "GLM model alias"
   );
   // The proxy applies overrides in order. Match higher efforts before promotion.
   const glmOverrides = effortOrder.flatMap((requested, index) => {
     const byTarget = new Map<string, string[]>();
-    for (const { model, supported, highest } of glmRoutes) {
-      if (supported.has(requested)) {
+    for (const {
+      models,
+      supported,
+      highest,
+      promoteSupportedEfforts
+    } of glmRoutes) {
+      if (!promoteSupportedEfforts && supported.has(requested)) {
         continue;
       }
       const forwarded =
         effortOrder
           .slice(0, index)
           .findLast((effort) => supported.has(effort)) ?? highest;
-      byTarget.set(forwarded, [
-        ...(byTarget.get(forwarded) ?? []),
-        model.alias
-      ]);
+      if (requested !== forwarded) {
+        byTarget.set(forwarded, [
+          ...(byTarget.get(forwarded) ?? []),
+          ...models.map(({ alias }) => alias)
+        ]);
+      }
     }
     return [...byTarget].map(([forwarded, models]) => ({
       models: models.map((name) => ({
@@ -277,10 +297,12 @@ const renderConfig = (
 
   const sections = [
     { indent: 6, marker: "glm-overrides", entries: glmOverrides, quote: false },
-    ...glmRoutes.map(({ marker, model }) => ({
+    ...[...new Set(glmRoutes.map(({ marker }) => marker))].map((marker) => ({
       indent: 8,
       marker,
-      entries: [model],
+      entries: glmRoutes
+        .filter((route) => route.marker === marker)
+        .flatMap(({ models }) => models),
       quote: false
     })),
     { indent: 6, marker: "codex-aliases", entries: aliases, quote: true },

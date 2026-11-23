@@ -290,6 +290,25 @@ requests:
             protocol: codex
             match:
               - reasoning.effort: xhigh
+          - name: glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: xhigh
+          - name: zai/glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: xhigh
+        params:
+          reasoning.effort: max
+      - models:
+          - name: glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: high
+          - name: zai/glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: high
         params:
           reasoning.effort: max
       - models:
@@ -301,6 +320,25 @@ requests:
             protocol: codex
             match:
               - reasoning.effort: medium
+          - name: glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: medium
+          - name: zai/glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: medium
+        params:
+          reasoning.effort: high
+      - models:
+          - name: glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: low
+          - name: zai/glm-5.3-flash
+            protocol: codex
+            match:
+              - reasoning.effort: low
         params:
           reasoning.effort: high
     filter:
@@ -761,6 +799,30 @@ api-keys:
         - name: glm-5.4
           alias: zai-coding-plan/glm-5.4
           display-name: GLM-5.4 (Z.AI Coding Plan)
+          max-context-length: 292000
+          is-compat: true
+          thinking:
+            levels:
+              - max
+              - xhigh
+              - high
+              - medium
+              - low
+        - name: glm-5.3-flash
+          alias: glm-5.3-flash
+          display-name: GLM 5.3 Flash
+          max-context-length: 292000
+          is-compat: true
+          thinking:
+            levels:
+              - max
+              - xhigh
+              - high
+              - medium
+              - low
+        - name: glm-5.3-flash
+          alias: zai/glm-5.3-flash
+          display-name: GLM 5.3 Flash
           max-context-length: 292000
           is-compat: true
           thinking:

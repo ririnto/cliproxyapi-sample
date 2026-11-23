@@ -27,19 +27,17 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const glmRoutes = [
-  { alias: "zai-coding-plan/glm-5.4", upstream: "zai" },
+  { alias: "zai-coding-plan/glm-5.4", model: "glm-5.4", upstream: "zai" },
   {
     alias: "zhipuai-coding-plan/glm-5.4",
+    model: "glm-5.4",
     upstream: "zhipuai-coding-plan"
-  }
+  },
+  { alias: "glm-5.3-flash", model: "glm-5.3-flash", upstream: "zai" },
+  { alias: "zai/glm-5.3-flash", model: "glm-5.3-flash", upstream: "zai" }
 ] as const;
 
-const retiredGlmIds = [
-  "glm-5.3",
-  "zai/glm-5.3",
-  "glm-5.3-flash",
-  "zai/glm-5.3-flash"
-];
+const retiredGlmIds = ["glm-5.3", "zai/glm-5.3"];
 
 await test("CLIProxyAPI routes the sample models", async (t) => {
   await using directory = await mkdtempDisposable(
@@ -203,11 +201,13 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
           const capabilities = models.get(alias);
           assert.ok(capabilities, alias);
           assert.equal(capabilities.context_window, 292_000, alias);
-          assert.deepEqual(
-            capabilities.input_modalities,
-            ["text", "image"],
-            alias
-          );
+          if (alias.endsWith("/glm-5.4")) {
+            assert.deepEqual(
+              capabilities.input_modalities,
+              ["text", "image"],
+              alias
+            );
+          }
           assert.ok(
             Array.isArray(capabilities.supported_reasoning_levels),
             alias
@@ -230,11 +230,11 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
       "GLM requests use only their configured provider and forward supported efforts",
       async () => {
         await Promise.all(
-          glmRoutes.flatMap(({ alias, upstream }) =>
+          glmRoutes.flatMap(({ alias, model, upstream }) =>
             [
-              ["low", "low"],
+              ["low", model === "glm-5.4" ? "low" : "high"],
               ["medium", "high"],
-              ["high", "high"],
+              ["high", model === "glm-5.4" ? "high" : "max"],
               ["xhigh", "max"],
               ["max", "max"]
             ].map(async ([input, expected]) => {
@@ -253,7 +253,7 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
               assert.ok(isRecord(payload) && typeof payload.id === "string");
               assert.partialDeepStrictEqual(requests.get(payload.id), {
                 path: `/${upstream}/responses`,
-                body: { model: "glm-5.4", reasoning: { effort: expected } }
+                body: { model, reasoning: { effort: expected } }
               });
             })
           )
@@ -285,36 +285,38 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
           }
         ];
         await Promise.all(
-          glmRoutes.map(async ({ alias, upstream }) => {
-            const response = await fetch(`${url}/responses`, {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              signal: AbortSignal.timeout(5000),
-              body: JSON.stringify({
-                model: alias,
-                input,
-                tools,
-                stream: true
-              })
-            });
-            assert.equal(response.status, 200);
-            assert.match(
-              response.headers.get("content-type") ?? "",
-              /^text\/event-stream/u
-            );
-            const events = await response.text();
-            assert.match(
-              events,
-              /event: response\.output_text\.delta\ndata: .*Synthetic output/u
-            );
-            assert.match(events, /event: response\.completed/u);
-            const id = /"id":"(?<id>resp_\d+)"/u.exec(events)?.groups?.id;
-            assert.ok(id !== undefined, events);
-            assert.partialDeepStrictEqual(requests.get(id), {
-              path: `/${upstream}/responses`,
-              body: { model: "glm-5.4", input, tools, stream: true }
-            });
-          })
+          glmRoutes
+            .filter(({ model }) => model === "glm-5.4")
+            .map(async ({ alias, upstream }) => {
+              const response = await fetch(`${url}/responses`, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                signal: AbortSignal.timeout(5000),
+                body: JSON.stringify({
+                  model: alias,
+                  input,
+                  tools,
+                  stream: true
+                })
+              });
+              assert.equal(response.status, 200);
+              assert.match(
+                response.headers.get("content-type") ?? "",
+                /^text\/event-stream/u
+              );
+              const events = await response.text();
+              assert.match(
+                events,
+                /event: response\.output_text\.delta\ndata: .*Synthetic output/u
+              );
+              assert.match(events, /event: response\.completed/u);
+              const id = /"id":"(?<id>resp_\d+)"/u.exec(events)?.groups?.id;
+              assert.ok(id !== undefined, events);
+              assert.partialDeepStrictEqual(requests.get(id), {
+                path: `/${upstream}/responses`,
+                body: { model: "glm-5.4", input, tools, stream: true }
+              });
+            })
         );
       }
     );
@@ -333,6 +335,7 @@ await test("CLIProxyAPI routes the sample models", async (t) => {
         assert.equal(settings.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, "292000");
         const { fallbackModel } = settings;
         assert.ok(Array.isArray(fallbackModel));
+        assert.ok(fallbackModel.includes("glm-5.3-flash"));
         assert.ok(retiredGlmIds.every((id) => !fallbackModel.includes(id)));
         const response = await fetch(`${url}/messages`, {
           method: "POST",

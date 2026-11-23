@@ -171,7 +171,7 @@
       }
     }
   },
-  "fallbackModel": ["claude-sonnet-5-5", "gpt-6.1-terra"],
+  "fallbackModel": ["glm-5.3-flash", "claude-sonnet-5-5", "gpt-6.1-terra"],
   "feedbackSurveyRate": 0,
   "includeGitInstructions": false,
   "language": "Korean",
@@ -189,6 +189,12 @@
         "cacheWrite": 0,
         "input": 2,
         "output": 10
+      },
+      "glm-5.3-flash": {
+        "cacheRead": 0.03,
+        "cacheWrite": 0,
+        "input": 0.15,
+        "output": 0.5
       },
       "gpt-6-luna": {
         "cacheRead": 0.01,
@@ -240,6 +246,11 @@
       "autoCompactWindow": 305000,
       "effortLevel": "medium",
       "maxEffortLevel": "high"
+    },
+    "glm-5.3-flash": {
+      "autoCompactWindow": 305000,
+      "effortLevel": "xhigh",
+      "maxEffortLevel": "max"
     },
     "gpt-6-luna": {
       "autoCompactWindow": 305000,
