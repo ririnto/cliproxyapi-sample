@@ -1,4 +1,12 @@
 {
+  "finalModels": [
+    "gpt-6.2-sol",
+    "gpt-6.2-astra",
+    "gpt-6.1-terra",
+    "gpt-6-luna",
+    "glm-5.4",
+    "glm-5.3-flash"
+  ],
   "codex": {
     "codex": {
       "referenceProviders": ["openai"],
@@ -12,12 +20,8 @@
     "zai": {
       "referenceProviders": ["zai", "zai-coding-plan"],
       "models": {
-        "glm-5.4": {
-          "supports_search_tool": true
-        },
-        "glm-5.3-flash": {
-          "supports_search_tool": true
-        }
+        "glm-5.4": {},
+        "glm-5.3-flash": {}
       }
     }
   }

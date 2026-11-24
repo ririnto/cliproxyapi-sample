@@ -170,10 +170,7 @@ await test("generation restores deferred search for both GLM models", async () =
   );
   const check = runGenerator(fixture.path, "--check");
   assert.equal(check.status, 1, check.stderr);
-  assert.match(
-    check.stderr,
-    /glm-5\.4 supports_search_tool: catalog value differs from config\/models\.json/u
-  );
+  assert.match(check.stderr, /glm-5\.4 supports_search_tool: expected true/u);
   const result = runGenerator(fixture.path);
   assert.equal(result.status, 0, result.stderr);
   const catalog = parseDocument(
@@ -190,7 +187,46 @@ await test("generation restores deferred search for both GLM models", async () =
   }
 });
 
-await test("generation omits the false search default and refresh preserves effective values", async () => {
+await test("the generated check identifies visibility and search policy violations", async () => {
+  await assertGeneratedCheckRejects(
+    {
+      [catalogFile]: (contents) => {
+        const catalog = parseDocument(contents);
+        const models: unknown = catalog.get("models");
+        assert.ok(isSeq(models));
+        const model: unknown = models.items.find(
+          (item) => isMap(item) && item.get("slug") === "gpt-6.1-sol"
+        );
+        assert.ok(isMap(model));
+        model.set("visibility", "list");
+        const edited: unknown = catalog.toJSON();
+        return JSON.stringify(edited);
+      }
+    },
+    "gpt-6.1-sol visibility",
+    [/expected hide/u]
+  );
+  await assertGeneratedCheckRejects(
+    {
+      [catalogFile]: (contents) => {
+        const catalog = parseDocument(contents);
+        const models: unknown = catalog.get("models");
+        assert.ok(isSeq(models));
+        models.add({
+          slug: "claude-sonnet-5",
+          context_window: 200_000,
+          visibility: "list"
+        });
+        const edited: unknown = catalog.toJSON();
+        return JSON.stringify(edited);
+      }
+    },
+    "claude-sonnet-5 supports_search_tool",
+    [/expected true/u]
+  );
+});
+
+await test("refresh keeps owner visibility and effective search values", async () => {
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
   );
@@ -208,6 +244,11 @@ await test("generation omits the false search default and refresh preserves effe
         assert.ok(isMap(model));
         model.set("supports_search_tool", false);
         models.add({ slug: "refresh-omitted", context_window: 100_000 });
+        models.add({
+          slug: "claude-opus-4-8",
+          context_window: 200_000,
+          visibility: "none"
+        });
         const edited: unknown = catalog.toJSON();
         return JSON.stringify(edited);
       }
@@ -221,13 +262,31 @@ await test("generation omits the false search default and refresh preserves effe
   );
   const official = {
     models: [
-      { slug: "gpt-5.5", context_window: 200_000, supports_search_tool: true },
       {
-        slug: "gpt-6.2-sol",
+        slug: "gpt-5.5",
         context_window: 200_000,
-        supports_search_tool: false,
+        supports_search_tool: true,
         visibility: "list"
       },
+      ...[
+        ["gpt-6.2-sol", "list"],
+        ["gpt-6.2-astra", "none"],
+        ["gpt-6.1-terra", "hide"],
+        ["gpt-6.1-sol", "list"],
+        ["gpt-7-sol", "list"],
+        ["gpt-daybreak-blue-latest", "hide"],
+        ["gpt-daybreak-red-latest", "none"],
+        ["codex-auto-review", "hide"],
+        ["glm-5.4", "none"],
+        ["glm-5.5", "list"],
+        ["glm-5.4-flash", "list"],
+        ["claude-sonnet-5", "list"]
+      ].map(([slug, visibility]) => ({
+        slug,
+        context_window: 200_000,
+        supports_search_tool: false,
+        visibility
+      })),
       {
         slug: "refresh-omitted",
         context_window: 200_000,
@@ -269,6 +328,12 @@ mock.method(globalThis, "fetch", (url) => {
   const models: unknown = catalog.get("models");
   assert.ok(isSeq(models));
   for (const [slug, expected] of [
+    ["claude-opus-4-8", true],
+    ["claude-sonnet-5", true],
+    ["glm-5.4", true],
+    ["glm-5.3-flash", true],
+    ["glm-5.5", true],
+    ["glm-5.4-flash", true],
     ["gpt-5.5", undefined],
     ["gpt-6.2-sol", true],
     ["refresh-omitted", undefined],
@@ -285,10 +350,45 @@ mock.method(globalThis, "fetch", (url) => {
       slug
     );
     assert.equal(model.get("supports_search_tool"), expected, slug);
-    if (slug !== "gpt-5.5") {
+    if (slug.startsWith("refresh-") || slug === "gpt-6.2-sol") {
       assert.equal(model.get("context_window"), 200_000, slug);
     }
   }
+  const visibility = new Map(
+    models.items.map((model) => {
+      assert.ok(isMap(model));
+      return [model.get("slug"), model.get("visibility")] as const;
+    })
+  );
+  assert.deepEqual(
+    visibility,
+    new Map([
+      ["gpt-6.2-sol", "list"],
+      ["gpt-6.2-astra", "list"],
+      ["gpt-6-astra", "hide"],
+      ["gpt-6.1-sol", "hide"],
+      ["gpt-6.1-terra", "hide"],
+      ["gpt-6-sol", "hide"],
+      ["gpt-6-luna", "list"],
+      ["gpt-5.6-sol", "hide"],
+      ["gpt-5.6-terra", "hide"],
+      ["gpt-5.6-luna", "hide"],
+      ["gpt-daybreak-blue-latest", "hide"],
+      ["gpt-daybreak-red-latest", "none"],
+      ["gpt-5.5", "hide"],
+      ["codex-auto-review", "hide"],
+      ["glm-5.4", "list"],
+      ["glm-5.3-flash", "list"],
+      ["gpt-7-sol", "hide"],
+      ["glm-5.5", "hide"],
+      ["glm-5.4-flash", "hide"],
+      ["claude-opus-4-8", "none"],
+      ["claude-sonnet-5", "list"],
+      ["refresh-omitted", undefined],
+      ["refresh-new-false", undefined],
+      ["refresh-new-true", undefined]
+    ])
+  );
   const canonical = runGenerator(fixture.path, "--check");
   assert.equal(canonical.status, 0, canonical.stderr);
 });
@@ -386,8 +486,8 @@ await test("the generated check rejects a hand-set reference field", async () =>
     {
       [settingsFile]: (contents) =>
         contents.replace(
-          '"glm-5.4": {',
-          '"glm-5.4": { "max_context_window": 1000000,'
+          '"glm-5.4": {}',
+          '"glm-5.4": { "max_context_window": 1000000 }'
         )
     },
     "glm-5.4",
@@ -434,9 +534,9 @@ await Promise.all(
         {
           [settingsFile]: (contents) =>
             contents.replace(
-              '"glm-5.4": {',
+              '"glm-5.4": {}',
               () =>
-                `"glm-5.4": { ${JSON.stringify(field)}: ${JSON.stringify(value)},`
+                `"glm-5.4": { ${JSON.stringify(field)}: ${JSON.stringify(value)} }`
             )
         },
         "glm-5.4",

@@ -47,7 +47,27 @@ const readModelSettings = (contents: string) => {
   );
   const { codex } = settings;
   for (const field of Object.keys(settings)) {
-    assert.equal(field, "codex", `Unknown model settings section: ${field}`);
+    assert.ok(
+      field === "codex" || field === "finalModels",
+      `Unknown model settings section: ${field}`
+    );
+  }
+  const { finalModels } = settings;
+  assert.ok(
+    Array.isArray(finalModels),
+    `Expected finalModels in ${settingsPath}`
+  );
+  const laneFinals = new Map<string, string>();
+  const finalSlugs: readonly unknown[] = finalModels;
+  for (const slug of finalSlugs) {
+    assert.ok(typeof slug === "string", "Expected a model slug in finalModels");
+    const lane = modelLane(slug);
+    assert.ok(lane !== undefined, `${slug} finalModels: model lane is unknown`);
+    assert.ok(
+      !laneFinals.has(lane),
+      `${slug} finalModels: duplicate lane ${lane}`
+    );
+    laneFinals.set(lane, slug);
   }
   for (const group of Object.keys(codex)) {
     assert.ok(
@@ -56,7 +76,7 @@ const readModelSettings = (contents: string) => {
     );
   }
   const slugs = new Set<string>();
-  return new Map(
+  const models = new Map(
     (["codex", "zai"] as const).flatMap((group) => {
       const section = codex[group];
       assert.ok(
@@ -81,12 +101,21 @@ const readModelSettings = (contents: string) => {
       });
       return Object.entries(section.models).map(([slug, overrides]) => {
         assert.ok(isRecord(overrides), `Invalid model settings for ${slug}`);
+        const { visibility } = overrides;
+        assert.ok(
+          visibility === undefined ||
+            visibility === "list" ||
+            visibility === "hide" ||
+            visibility === "none",
+          `${slug} visibility: expected list, hide, or none in ${settingsPath}`
+        );
         assert.ok(!slugs.has(slug), `Duplicate model settings for ${slug}`);
         slugs.add(slug);
         return [slug, { group, overrides, providers }] as const;
       });
     })
   );
+  return { laneFinals, models };
 };
 
 const readReferenceStrings = (
@@ -338,24 +367,10 @@ const mergeCatalog = (
         supports_search_tool: entry.supports_search_tool ?? false
       });
     } else {
-      merged.set(
-        entry.slug,
-        codexVersion(entry.slug) ? { ...entry, visibility: "hide" } : entry
-      );
+      merged.set(entry.slug, entry);
     }
   }
-  const entries = [...merged.values()];
-  const aliases = new Set(
-    deriveCodexAliases(
-      entries.map(({ slug, visibility }) => ({ slug, visibility }))
-    ).map(({ alias }) => alias)
-  );
-  return {
-    ...official,
-    models: entries.map((entry) =>
-      aliases.has(entry.slug) ? { ...entry, visibility: "hide" } : entry
-    )
-  };
+  return { ...official, models: [...merged.values()] };
 };
 
 const requireModel = (
@@ -379,6 +394,15 @@ const codexVersion = (slug: string) => {
         major: Number(version.major),
         minor: Number(version.minor ?? 0)
       };
+};
+
+const modelLane = (slug: string) => {
+  const codex = codexVersion(slug);
+  if (codex) {
+    return `gpt-${codex.lane}`;
+  }
+  const glm = /^glm-\d+(?:\.\d+)?(?<variant>-flash)?$/u.exec(slug)?.groups;
+  return glm === undefined ? undefined : `glm${glm.variant ?? ""}`;
 };
 
 const deriveCodexAliases = (
@@ -558,7 +582,8 @@ const [localContents, template, settingsContents, referenceContents] =
       ? fetchCatalog(referenceUrl)
       : readFile(referencePath, "utf-8")
   ]);
-const modelSettings = readModelSettings(settingsContents);
+const { laneFinals, models: modelSettings } =
+  readModelSettings(settingsContents);
 const reference: unknown = JSON.parse(referenceContents);
 assert.ok(isRecord(reference), "Expected models.dev providers");
 const referenceProviders = new Set(
@@ -606,8 +631,64 @@ for (const slug of modelSettings.keys()) {
     `Missing configured model in Codex catalog: ${slug}`
   );
 }
+for (const slug of laneFinals.values()) {
+  assert.ok(
+    catalogSlugs.has(slug),
+    `${slug} finalModels: missing from Codex catalog`
+  );
+}
+const applyCatalogPolicy = ({
+  entry,
+  derived,
+  updated,
+  visibilityOverride
+}: {
+  readonly entry: CatalogEntry;
+  readonly derived: ReadonlyMap<string, unknown>;
+  readonly updated: Record<string, unknown>;
+  readonly visibilityOverride: unknown;
+}) => {
+  const { slug } = entry;
+  if (visibilityOverride === undefined) {
+    const final = laneFinals.get(modelLane(slug) ?? "");
+    let { visibility } = entry;
+    if (visibility !== "hide" && final !== undefined) {
+      visibility = final === slug ? "list" : "hide";
+    }
+    assert.ok(
+      !derived.has("visibility") || derived.get("visibility") === visibility,
+      `${slug} visibility: models.dev conflicts with expected ${String(visibility)}`
+    );
+    if (visibility !== undefined) {
+      updated.visibility = visibility;
+    }
+  }
+  if (check && updated.visibility !== entry.visibility) {
+    assert.equal(
+      entry.visibility,
+      updated.visibility,
+      `${slug} visibility: expected ${String(updated.visibility)}`
+    );
+  }
+  if (slug.startsWith("claude-") || slug.startsWith("glm-")) {
+    assert.ok(
+      !derived.has("supports_search_tool") ||
+        derived.get("supports_search_tool") === true,
+      `${slug} supports_search_tool: models.dev conflicts with required true`
+    );
+    if (check) {
+      assert.equal(
+        entry.supports_search_tool,
+        true,
+        `${slug} supports_search_tool: expected true`
+      );
+    }
+    updated.supports_search_tool = true;
+  }
+};
 const clientModels = catalog.models.map((entry): CatalogEntry => {
-  const settings = modelSettings.get(entry.slug);
+  const { slug } = entry;
+  const settings = modelSettings.get(slug);
   const model = settings?.providers
     .map((provider) => snapshot.get(provider)?.models[entry.slug])
     .find((row) => row !== undefined);
@@ -659,6 +740,12 @@ const clientModels = catalog.models.map((entry): CatalogEntry => {
     }
     updated[field] = expected;
   }
+  applyCatalogPolicy({
+    entry,
+    derived,
+    updated,
+    visibilityOverride: settings?.overrides.visibility
+  });
   if (updated.supports_search_tool !== true) {
     delete updated.supports_search_tool;
   }
