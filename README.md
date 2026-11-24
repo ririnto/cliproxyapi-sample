@@ -83,7 +83,7 @@ GPT가 보이지 않으면 서비스를 실행한 환경에서 Codex 로그인�
 프록시는 모델 ID에 해당하는 공급자의 키를 사용한다.
 
 이 샘플의 클라이언트 컨텍스트 한도는 292,000토큰이다.
-프록시는 Z.AI의 [Codex용 Responses API](https://docs.z.ai/devpack/tool/codex)로 GLM 요청을 보낸다.
+프록시는 Z.AI의 [Anthropic Messages API](https://docs.z.ai/devpack/tool/claude)로 GLM 요청을 보낸다.
 GLM-5.4 경로는 텍스트와 이미지 입력, 함수 호출, 스트리밍을 지원한다.
 GLM-5.4와 GLM-5.3-Flash의 `low`, `high`, `max` 요청은 그대로 전달한다.
 `medium`은 `high`로, `xhigh`는 `max`로 변환한다.

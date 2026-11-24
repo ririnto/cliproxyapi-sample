@@ -1093,9 +1093,9 @@ upstream:
 #           alias: "claude-opus-4.66"
 
 api-keys:
-  codex:
+  claude:
     - name: zai
-      base-url: https://api.z.ai/api/v1
+      base-url: https://api.z.ai/api/anthropic
       models:
         # @zai-models
       keys:
