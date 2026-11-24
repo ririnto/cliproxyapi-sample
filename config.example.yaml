@@ -17,8 +17,7 @@ config-version: 8
 # Home mode never loads the general catalog, even when explicitly configured.
 models:
   catalog: ""
-  # codex-catalog: ""
-  codex-catalog: "https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/codex_client_models.json"
+  codex-catalog: ""
   devin-catalog: ""
 
 # Listener, TLS, network discovery, and server operation.
@@ -454,7 +453,7 @@ requests:
           - 'input.#(type=="function_call")#.id'
           - 'input.#(type=="custom_tool_call")#.id'
       - models:
-          - name: openai/gpt-*
+          - name: gpt-*
             protocol: codex
         params:
           - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"gAAAA*" && encrypted_content!%"rsn_*" && encrypted_content!%"smry_*")#'

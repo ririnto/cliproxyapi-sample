@@ -1,6 +1,3 @@
-- anchor: '  codex-catalog: ""'
-  replace: true
-  content: '  codex-catalog: "https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/codex_client_models.json"'
 - anchor: '  host: ""'
   replace: true
   content: '  host: "127.0.0.1"'
@@ -28,7 +25,7 @@
               - 'input.#(type=="function_call")#.id'
               - 'input.#(type=="custom_tool_call")#.id'
           - models:
-              - name: openai/gpt-*
+              - name: gpt-*
                 protocol: codex
             params:
               - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"gAAAA*" && encrypted_content!%"rsn_*" && encrypted_content!%"smry_*")#'
