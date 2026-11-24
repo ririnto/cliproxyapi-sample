@@ -160,7 +160,7 @@ await test("generation restores deferred search for both GLM models", async () =
             isMap(model) &&
             (slug === "glm-5.4" || slug === "glm-5.3-flash")
           ) {
-            model.set("supports_search_tool", false);
+            model.delete("supports_search_tool");
           }
         }
         const edited: unknown = catalog.toJSON();
@@ -188,6 +188,109 @@ await test("generation restores deferred search for both GLM models", async () =
     assert.ok(isMap(model), `Missing catalog model ${slug}`);
     assert.equal(model.get("supports_search_tool"), true, slug);
   }
+});
+
+await test("generation omits the false search default and refresh preserves effective values", async () => {
+  await using fixture = await mkdtempDisposable(
+    path.join(tmpdir(), "proxy-config-")
+  );
+  await copyFixtureFiles(
+    fixture.path,
+    [catalogFile, templateFile, configFile],
+    {
+      [catalogFile]: (contents) => {
+        const catalog = parseDocument(contents);
+        const models: unknown = catalog.get("models");
+        assert.ok(isSeq(models));
+        const model: unknown = models.items.find(
+          (item) => isMap(item) && item.get("slug") === "gpt-5.5"
+        );
+        assert.ok(isMap(model));
+        model.set("supports_search_tool", false);
+        models.add({ slug: "refresh-omitted", context_window: 100_000 });
+        const edited: unknown = catalog.toJSON();
+        return JSON.stringify(edited);
+      }
+    }
+  );
+  const check = runGenerator(fixture.path, "--check");
+  assert.equal(check.status, 1, check.stderr);
+  assert.match(
+    check.stderr,
+    /gpt-5\.5 supports_search_tool: omit the default false/u
+  );
+  const official = {
+    models: [
+      { slug: "gpt-5.5", context_window: 200_000, supports_search_tool: true },
+      {
+        slug: "gpt-6.2-sol",
+        context_window: 200_000,
+        supports_search_tool: false,
+        visibility: "list"
+      },
+      {
+        slug: "refresh-omitted",
+        context_window: 200_000,
+        supports_search_tool: true
+      },
+      {
+        slug: "refresh-new-false",
+        context_window: 200_000,
+        supports_search_tool: false
+      },
+      {
+        slug: "refresh-new-true",
+        context_window: 200_000,
+        supports_search_tool: true
+      }
+    ]
+  };
+  const preload = `import { mock } from "node:test";
+mock.method(globalThis, "fetch", (url) => {
+  if (url !== "https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json") {
+    throw new Error("Unexpected catalog URL: " + url);
+  }
+  return Promise.resolve(Response.json(${JSON.stringify(official)}));
+});`;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      `data:text/javascript,${encodeURIComponent(preload)}`,
+      fileURLToPath(new URL("generate-config.mts", import.meta.url)),
+      "--refresh"
+    ],
+    { cwd: fixture.path, encoding: "utf-8" }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const catalog = parseDocument(
+    await readFile(path.join(fixture.path, catalogFile), "utf-8")
+  );
+  const models: unknown = catalog.get("models");
+  assert.ok(isSeq(models));
+  for (const [slug, expected] of [
+    ["gpt-5.5", undefined],
+    ["gpt-6.2-sol", true],
+    ["refresh-omitted", undefined],
+    ["refresh-new-false", undefined],
+    ["refresh-new-true", true]
+  ] as const) {
+    const model: unknown = models.items.find(
+      (item) => isMap(item) && item.get("slug") === slug
+    );
+    assert.ok(isMap(model), slug);
+    assert.equal(
+      model.has("supports_search_tool"),
+      expected !== undefined,
+      slug
+    );
+    assert.equal(model.get("supports_search_tool"), expected, slug);
+    if (slug !== "gpt-5.5") {
+      assert.equal(model.get("context_window"), 200_000, slug);
+    }
+  }
+  const canonical = runGenerator(fixture.path, "--check");
+  assert.equal(canonical.status, 0, canonical.stderr);
 });
 
 await test("generated GLM rules remap only unsupported Claude effort levels", async () => {
@@ -363,6 +466,7 @@ await test("generation derives the Codex metadata supported by the reference", a
         [...referenceModel, "reasoning_options", 0, "values"],
         ["none", "minimal", "low", "medium", "high"]
       );
+      reference.setIn([...referenceModel, "supports_search_tool"], false);
       const edited: unknown = reference.toJSON();
       return JSON.stringify(edited);
     }
@@ -395,4 +499,7 @@ await test("generation derives the Codex metadata supported by the reference", a
   );
   assert.equal(gpt.get("context_window"), 292_000);
   assert.equal(gpt.get("max_context_window"), 1_050_000);
+  assert.equal(gpt.has("supports_search_tool"), false);
+  const check = runGenerator(fixture.path, "--check");
+  assert.equal(check.status, 0, check.stderr);
 });

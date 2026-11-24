@@ -14,6 +14,7 @@ interface CatalogModel {
 interface CatalogEntry extends Record<string, unknown> {
   readonly slug: string;
   readonly context_window: number;
+  readonly supports_search_tool?: boolean;
 }
 
 const clientContextCap = 292_000;
@@ -159,7 +160,7 @@ const deriveCatalogFields = (
       typeof model.supports_search_tool === "boolean",
     `${slug} supports_search_tool: expected a boolean in models.dev`
   );
-  return new Map(
+  const fields = new Map(
     Object.entries({
       context_window:
         context === undefined ? undefined : Math.min(context, clientContextCap),
@@ -173,10 +174,13 @@ const deriveCatalogFields = (
             ),
       max_context_window: context,
       supported_reasoning_levels: supportedLevels,
-      supports_search_tool: model.supports_search_tool,
       visibility: model.visibility
     }).filter(([, value]) => value !== undefined)
   );
+  if (model.supports_search_tool !== undefined) {
+    fields.set("supports_search_tool", model.supports_search_tool || undefined);
+  }
+  return fields;
 };
 
 const assertBareModelId = (id: string, field: "alias" | "name" | "slug") => {
@@ -274,7 +278,7 @@ const assertProxyConfig = (contents: string) => {
   }
 };
 
-const readCatalog = (contents: string, source: string) => {
+const readCatalog = (contents: string, source: string, check = false) => {
   const catalog: unknown = JSON.parse(contents);
   assert.ok(
     isRecord(catalog) && Array.isArray(catalog.models),
@@ -288,7 +292,7 @@ const readCatalog = (contents: string, source: string) => {
         isRecord(entry) && typeof entry.slug === "string" && entry.slug,
         "Expected a nonempty catalog model slug"
       );
-      const { slug, context_window } = entry;
+      const { slug, context_window, supports_search_tool } = entry;
       assertBareModelId(slug, "slug");
       assert.ok(!slugs.has(slug), `Duplicate catalog model: ${slug}`);
       assert.ok(
@@ -296,6 +300,15 @@ const readCatalog = (contents: string, source: string) => {
           Number.isSafeInteger(context_window) &&
           context_window > 0,
         `Invalid context window for ${slug}`
+      );
+      assert.ok(
+        supports_search_tool === undefined ||
+          typeof supports_search_tool === "boolean",
+        `${slug} supports_search_tool: expected a boolean in ${source}`
+      );
+      assert.ok(
+        !check || supports_search_tool !== false,
+        `${slug} supports_search_tool: omit the default false in ${source}`
       );
       slugs.add(slug);
       return { ...entry, slug, context_window };
@@ -318,7 +331,13 @@ const mergeCatalog = (
 ) => {
   const merged = new Map(official.models.map((entry) => [entry.slug, entry]));
   for (const entry of local.models) {
-    if (!merged.has(entry.slug)) {
+    const refreshed = merged.get(entry.slug);
+    if (refreshed) {
+      merged.set(entry.slug, {
+        ...refreshed,
+        supports_search_tool: entry.supports_search_tool ?? false
+      });
+    } else {
       merged.set(
         entry.slug,
         codexVersion(entry.slug) ? { ...entry, visibility: "hide" } : entry
@@ -573,7 +592,7 @@ const snapshot = new Map(
     ] as const;
   })
 );
-const localCatalog = readCatalog(localContents, clientCatalogPath);
+const localCatalog = readCatalog(localContents, clientCatalogPath, check);
 const catalog = refresh
   ? mergeCatalog(
       readCatalog(await fetchCatalog(officialCatalogUrl), officialCatalogUrl),
@@ -639,6 +658,9 @@ const clientModels = catalog.models.map((entry): CatalogEntry => {
       );
     }
     updated[field] = expected;
+  }
+  if (updated.supports_search_tool !== true) {
+    delete updated.supports_search_tool;
   }
   const contextWindow = updated.context_window;
   assert.ok(
