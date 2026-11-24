@@ -214,7 +214,9 @@ Codex CLI를 재시작한다.
 공식 카탈로그에 `supports_search_tool` 필드가 있으면 해당 값이 생략된 모델에는 `true`를 적용한다.
 모델에서 검색 도구를 끄려면 `supports_search_tool`을 `false`로 지정한다.
 프록시 예시는 [CLIProxyAPI 설정 예시](https://github.com/router-for-me/CLIProxyAPI/blob/85225381d89915595598ed13766cd79890c03a84/config.example.yaml)를 바탕으로 생성한다.
-[프록시 재정의 설정](config/proxy.overrides.yaml)의 `anchor`는 업스트림에서 일치하는 텍스트 블록을 지정한다.
+[프록시 재정의 설정](config/proxy.overrides.yaml)의 `anchor`는 일치시킬 텍스트 블록을 지정한다.
+`after`를 지정하면 해당 텍스트 바로 뒤에 있는 `anchor`만 일치한다.
+`after-generation: true`를 지정하면 카탈로그에서 모델 행을 생성한 뒤 재정의를 적용한다.
 `replace: true`를 지정하면 원래 블록을 주석으로 남기고 바로 아래에 `content`를 추가한다.
 `replace`를 생략하면 원래 블록을 유지한 채 바로 아래에 `content`를 추가한다.
 업스트림 설정 사본은 원본을 그대로 저장하고 프록시 예시는 저장소의 YAML 서식을 적용한다.

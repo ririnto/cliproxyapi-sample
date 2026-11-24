@@ -134,6 +134,8 @@ await test("generation applies local settings to the official catalog and proxy 
         finalModels: [
           "gpt-6.2-sol",
           "gpt-6.2-astra",
+          "gpt-6.1-terra",
+          "gpt-6-luna",
           "glm-5.4",
           "glm-5.3-flash"
         ],
@@ -162,12 +164,23 @@ await test("generation applies local settings to the official catalog and proxy 
     supports_search_tool: true,
     upstream_only: { retained: true }
   };
+  const astra = {
+    ...first,
+    slug: "gpt-6.2-astra",
+    context_window: 272_000,
+    max_context_window: 872_000
+  };
+  const luna = { ...astra, slug: "gpt-6-luna" };
   const upstream = {
     models: [
       first,
       { ...first, slug: "gpt-6.1-sol", visibility: "hide" },
       { ...first, slug: "gpt-7-sol" },
-      { ...first, slug: "gpt-6.2-astra", visibility: "hide" },
+      astra,
+      { ...astra, slug: "gpt-6-astra" },
+      luna,
+      { ...luna, slug: "gpt-5.6-luna" },
+      { ...first, slug: "gpt-6.1-terra", visibility: "hide" },
       { ...first, slug: "gpt-5.5" },
       { ...first, slug: "codex-auto-review", visibility: "hide" },
       { ...first, slug: "glm-5.3" },
@@ -215,7 +228,11 @@ mock.method(globalThis, "fetch", (url) => {
       { ...first, context_window: 292_000, supports_search_tool: false },
       { ...first, slug: "gpt-6.1-sol" },
       { ...first, slug: "gpt-7-sol", visibility: "hide" },
-      { ...first, slug: "gpt-6.2-astra", visibility: "hide" },
+      astra,
+      { ...astra, slug: "gpt-6-astra", visibility: "hide" },
+      luna,
+      { ...luna, slug: "gpt-5.6-luna", visibility: "hide" },
+      { ...first, slug: "gpt-6.1-terra", visibility: "hide" },
       { ...first, slug: "gpt-5.5", visibility: "hide" },
       { ...first, slug: "codex-auto-review", visibility: "hide" },
       { ...first, slug: "glm-5.3", visibility: "hide" },
@@ -239,6 +256,30 @@ mock.method(globalThis, "fetch", (url) => {
   const proxy = await readFile(path.join(fixture.path, configFile), "utf-8");
   const proxyDocument = parseDocument(proxy);
   assert.equal(proxyDocument.getIn(["models", "codex-catalog"]), "");
+  const oauthSettings: unknown = proxyDocument.getIn([
+    "oauth",
+    "settings",
+    "codex"
+  ]);
+  assert.ok(isSeq(oauthSettings));
+  for (const name of [
+    "gpt-6.2-astra",
+    "gpt-6-astra",
+    "gpt-6-luna",
+    "gpt-5.6-luna"
+  ]) {
+    const row: unknown = oauthSettings.items.find(
+      (entry) => isMap(entry) && entry.get("name") === name
+    );
+    assert.ok(isMap(row), `Missing OAuth settings for ${name}`);
+    assert.equal(row.get("max-context-length"), 292_000);
+    assert.ok(
+      proxy.includes(
+        `      - name: "${name}"\n        # max-context-length: 272000\n        max-context-length: 292000\n`
+      ),
+      `Missing original context directly above the override for ${name}`
+    );
+  }
   const filters: unknown = proxyDocument.getIn([
     "requests",
     "payload",

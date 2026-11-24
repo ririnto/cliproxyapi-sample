@@ -5,6 +5,7 @@
       "style": "fenced"
     },
     "docs/no-box-drawing": true,
+    "docs/one-sentence-per-line": true,
     "line-length": false,
     "no-duplicate-heading": {
       "siblings_only": true
@@ -21,7 +22,7 @@
       "style": "compact"
     }
   },
-  "customRules": ["rules/no-box-drawing.ts"],
+  "customRules": ["rules/no-box-drawing.ts", "rules/one-sentence-per-line.ts"],
   "globs": ["**/*.md"],
   "gitignore": true,
   "ignores": ["**/rules/**"]
