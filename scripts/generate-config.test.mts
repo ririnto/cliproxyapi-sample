@@ -14,7 +14,8 @@ import { fileURLToPath } from "node:url";
 import { isMap, isSeq, parseDocument } from "yaml";
 
 const catalogFile = ".codex/model_catalog.json";
-const templateFile = "config/proxy.template.yaml";
+const upstreamFile = "config/proxy.upstream.yaml.txt";
+const overridesFile = "config/proxy.overrides.yaml";
 const configFile = "config.example.yaml";
 const settingsFile = "config/models.json";
 
@@ -28,7 +29,7 @@ const copyFixtureFiles = async (
   edits: FixtureEdits = {}
 ) =>
   await Promise.all(
-    [...files, settingsFile].map(async (file) => {
+    [...files, settingsFile, upstreamFile, overridesFile].map(async (file) => {
       const destination = path.join(directory, file);
       await mkdir(path.dirname(destination), { recursive: true });
       const contents = await readFile(file, "utf-8");
@@ -51,11 +52,7 @@ const assertGeneratedCheckRejects = async (
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
   );
-  await copyFixtureFiles(
-    fixture.path,
-    [catalogFile, templateFile, configFile],
-    edits
-  );
+  await copyFixtureFiles(fixture.path, [catalogFile, configFile], edits);
   const result = runGenerator(fixture.path, "--check");
   assert.equal(result.status, 1, result.stderr);
   const diagnostic = result.stderr
@@ -78,7 +75,6 @@ await test("the generated config check rejects a zai/ model alias", async () => 
   };
   await assertGeneratedCheckRejects(
     {
-      [templateFile]: insertModel("        # @zai-models\n"),
       [configFile]: insertModel("        - name: glm-5.4\n          alias:")
     },
     id,
@@ -120,24 +116,14 @@ await test("the generated check rejects violations of the GLM route rules", asyn
       );
     })
   );
-  await assertGeneratedCheckRejects(
-    {
-      [templateFile]: (contents) =>
-        contents.replace(
-          "    # When true, inject Anthropic server-side refusal fallbacks",
-          "    tool-search: false\n\n    # When true, inject Anthropic server-side refusal fallbacks"
-        )
-    },
-    "upstream.claude.tool-search",
-    [/omit the default false/u]
-  );
 });
 
-await test("generation applies local settings to the official Codex catalog", async () => {
+await test("generation applies local settings to the official catalog and proxy example", async () => {
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
   );
-  await copyFixtureFiles(fixture.path, [catalogFile, templateFile], {
+  await copyFixtureFiles(fixture.path, [catalogFile], {
+    [upstreamFile]: () => "stale: true\n",
     [catalogFile]: () =>
       JSON.stringify({
         sourceVisibility: { "gpt-6.2-sol": "hide" },
@@ -194,8 +180,18 @@ await test("generation applies local settings to the official Codex catalog", as
       }
     ]
   };
-  const preload = `import { mock } from "node:test";
+  const proxySource = await readFile(upstreamFile, "utf-8");
+  const upstreamNote = "# An upstream example comment\n";
+  await writeFile(
+    path.join(fixture.path, "upstream.yaml"),
+    proxySource + upstreamNote
+  );
+  const preload = `import { readFileSync } from "node:fs";
+import { mock } from "node:test";
 mock.method(globalThis, "fetch", (url) => {
+  if (url === "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI/85225381d89915595598ed13766cd79890c03a84/config.example.yaml") {
+    return Promise.resolve(new Response(readFileSync("upstream.yaml", "utf-8")));
+  }
   if (url !== "https://raw.githubusercontent.com/openai/codex/refs/heads/main/codex-rs/models-manager/models.json") {
     throw new Error("Unexpected catalog URL: " + url);
   }
@@ -240,6 +236,18 @@ mock.method(globalThis, "fetch", (url) => {
       { ...first, slug: "glm-5.3-flash", display_name: "GLM-5.3-Flash" }
     ]
   });
+  const proxy = await readFile(path.join(fixture.path, configFile), "utf-8");
+  assert.equal(
+    await readFile(path.join(fixture.path, upstreamFile), "utf-8"),
+    proxySource + upstreamNote
+  );
+  assert.ok(proxy.includes('  # host: ""\n  host: "127.0.0.1"\n'));
+  assert.ok(
+    proxy.includes(
+      '  # api-keys:\n  #   - "your-api-key-1"\n  #   - "your-api-key-2"\n  #   - "your-api-key-3"\n  api-keys: []\n'
+    )
+  );
+  assert.ok(proxy.endsWith(upstreamNote));
   const check = runGenerator(fixture.path, "--check");
   assert.equal(check.status, 0, check.stderr);
 });
@@ -248,7 +256,7 @@ await test("generated GLM rules remap only unsupported Claude effort levels", as
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
   );
-  await copyFixtureFiles(fixture.path, [catalogFile, templateFile, configFile]);
+  await copyFixtureFiles(fixture.path, [catalogFile, configFile]);
   const result = runGenerator(fixture.path, "--check");
   assert.equal(result.status, 0, result.stderr);
   const [config, catalog] = await Promise.all(
