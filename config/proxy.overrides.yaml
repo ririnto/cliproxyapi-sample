@@ -1,0 +1,62 @@
+- anchor: '  codex-catalog: ""'
+  replace: true
+  content: '  codex-catalog: "https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/codex_client_models.json"'
+- anchor: '  host: ""'
+  replace: true
+  content: '  host: "127.0.0.1"'
+- anchor: |2-
+      api-keys:
+        - "your-api-key-1"
+        - "your-api-key-2"
+        - "your-api-key-3"
+  replace: true
+  content: "  api-keys: []"
+- anchor: "    disable-cooling: false"
+  replace: true
+  content: "    disable-cooling: true"
+- anchor: '  #         - ''input.#(type=="additional_tools")#.tools.#(name=="functions")#.tools.#(name=="apply_patch")#'''
+  content: |2-
+      payload:
+        override:
+          # @glm-overrides
+        filter:
+          - models:
+              - name: github_copilot/gpt-*
+                protocol: codex
+            params:
+              - 'input.#(type=="reasoning" && encrypted_content%"gAAAA*")#'
+              - 'input.#(type=="reasoning" && encrypted_content%"rsn_*")#'
+              - 'input.#(type=="reasoning" && encrypted_content%"smry_*")#'
+              - 'input.#(type=="message")#.id'
+              - 'input.#(type=="function_call")#.id'
+              - 'input.#(type=="custom_tool_call")#.id'
+          - models:
+              - name: openai/gpt-*
+                protocol: codex
+            params:
+              - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"gAAAA*" && encrypted_content!%"rsn_*" && encrypted_content!%"smry_*")#'
+- anchor: "    optimize-multi-agent-v2: false"
+  replace: true
+  content: "    optimize-multi-agent-v2: true"
+- anchor: |-
+    #         - name: "kimi-k2.5"
+    #           alias: "claude-opus-4.66"
+  content: |-
+    api-keys:
+      claude:
+        - name: zai
+          base-url: https://api.z.ai/api/anthropic
+          models:
+            # @zai-models
+          keys:
+            - api-key: __ZAI_API_KEY__
+- anchor: '  #       alias: "sample-latest"'
+  content: |2-
+      model-alias:
+        codex:
+          # @codex-aliases
+- anchor: "  #       max-context-length: 1048576"
+  content: |2-
+      settings:
+        codex:
+          # @codex-context

@@ -205,21 +205,21 @@ Codex CLI를 재시작한다.
 
 `pnpm run generate`는 카탈로그와 pstack 에이전트 설정을 병렬로 갱신한다.
 
-`pnpm run generate:config`는 [공식 Codex 카탈로그](https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json)를 새로 받는다.
-`models[].slug`를 기준으로 병합하면서 공식 카탈로그에 없는 로컬 모델 항목을 유지한다.
-`config/models.json`은 프로토콜과 공급자별로 모델 ID와 `referenceProviders` 조회 순서를 지정한다.
-`zai`에 모델이 없으면 같은 ID를 `zai-coding-plan`에서 조회한다.
-모델의 표시 이름, 설명, 최대 컨텍스트, 입력 형식, 추론 수준은 [models.dev 스냅샷](config/models.dev.json)에서 가져온다.
-Codex 카탈로그의 입력 형식은 텍스트, 이미지, 오디오 중 스냅샷이 지원하는 형식으로 제한한다.
-클라이언트 컨텍스트는 최대 292,000토큰으로 제한한다.
-`config/models.json`에서는 스냅샷에 없는 지원 필드만 지정할 수 있다.
-병합 결과로 `.codex/model_catalog.json`과 `config.example.yaml`을 다시 생성하고 두 파일을 함께 커밋한다.
-`node scripts/generate-config.mts --refresh-models-dev`를 실행하면
-[models.dev API](https://models.dev/api.json)에서 설정된 모델의 전체 항목을 받아 스냅샷과 생성물을 갱신한다.
-갱신 후 `pnpm exec ultracite fix .codex/model_catalog.json config/models.dev.json`을 실행한다.
-[모델 설정](config/models.json)이나 [프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤
-`node scripts/generate-config.mts`를 실행하면 저장된 카탈로그와 스냅샷으로 오프라인에서 다시 생성한다.
-`pnpm run check:generated`도 같은 입력으로 생성물의 차이를 확인한다.
+`pnpm run generate:config`는 [공식 Codex 카탈로그](https://raw.githubusercontent.com/openai/codex/refs/heads/main/codex-rs/models-manager/models.json)를 받아 `.codex/model_catalog.json`과 `config.example.yaml`을 다시 생성한다.
+[모델 설정](config/models.json)의 `finalModels`는 계열별로 표시할 모델을 지정한다.
+같은 계열의 나머지 모델은 숨긴다.
+공식 카탈로그에서 숨긴 모델은 `visibility`를 명시적으로 재정의할 때만 표시할 수 있다.
+`codex`와 `zai`의 항목은 모델 ID를 키로 사용하고, 해당 모델의 기존 필드에 지정한 값만 덮어쓴다.
+공식 카탈로그에 없는 모델은 첫 항목을 복제한 뒤 설정을 적용한다.
+공식 카탈로그에 `supports_search_tool` 필드가 있으면 해당 값이 생략된 모델에는 `true`를 적용한다.
+모델에서 검색 도구를 끄려면 `supports_search_tool`을 `false`로 지정한다.
+프록시 예시는 [CLIProxyAPI 설정 예시](https://github.com/router-for-me/CLIProxyAPI/blob/85225381d89915595598ed13766cd79890c03a84/config.example.yaml)를 바탕으로 생성한다.
+[프록시 재정의 설정](config/proxy.overrides.yaml)의 `anchor`는 업스트림에서 일치하는 텍스트 블록을 지정한다.
+`replace: true`를 지정하면 원래 블록을 주석으로 남기고 바로 아래에 `content`를 추가한다.
+`replace`를 생략하면 원래 블록을 유지한 채 바로 아래에 `content`를 추가한다.
+업스트림 설정 사본은 원본을 그대로 저장하고 프록시 예시는 저장소의 YAML 서식을 적용한다.
+모델 설정이나 프록시 재정의 설정을 수정하면 `pnpm run generate:config`를 실행한다.
+`pnpm run check:generated`는 커밋된 카탈로그와 [업스트림 설정 사본](config/proxy.upstream.yaml.txt)을 사용해 생성물을 오프라인에서 확인한다.
 `gpt-6.2-sol`처럼 `gpt-`로 시작하고 숫자 버전과 영문 계열명으로 끝나는 모델 ID에서 계열을 추출한다.
 각 계열에서 가장 높은 공개 버전이 직접 경로가 되고, 알려진 이전 버전은 자동으로 그 모델을 가리키는 별칭이 된다.
 

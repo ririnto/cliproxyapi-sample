@@ -14,10 +14,10 @@ import { fileURLToPath } from "node:url";
 import { isMap, isSeq, parseDocument } from "yaml";
 
 const catalogFile = ".codex/model_catalog.json";
-const templateFile = "config/proxy.template.yaml";
+const upstreamFile = "config/proxy.upstream.yaml.txt";
+const overridesFile = "config/proxy.overrides.yaml";
 const configFile = "config.example.yaml";
 const settingsFile = "config/models.json";
-const referenceFile = "config/models.dev.json";
 
 type FixtureEdits = Readonly<
   Partial<Record<string, (contents: string) => string>>
@@ -29,7 +29,7 @@ const copyFixtureFiles = async (
   edits: FixtureEdits = {}
 ) =>
   await Promise.all(
-    [...files, settingsFile, referenceFile].map(async (file) => {
+    [...files, settingsFile, upstreamFile, overridesFile].map(async (file) => {
       const destination = path.join(directory, file);
       await mkdir(path.dirname(destination), { recursive: true });
       const contents = await readFile(file, "utf-8");
@@ -52,11 +52,7 @@ const assertGeneratedCheckRejects = async (
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
   );
-  await copyFixtureFiles(
-    fixture.path,
-    [catalogFile, templateFile, configFile],
-    edits
-  );
+  await copyFixtureFiles(fixture.path, [catalogFile, configFile], edits);
   const result = runGenerator(fixture.path, "--check");
   assert.equal(result.status, 1, result.stderr);
   const diagnostic = result.stderr
@@ -79,7 +75,6 @@ await test("the generated config check rejects a zai/ model alias", async () => 
   };
   await assertGeneratedCheckRejects(
     {
-      [templateFile]: insertModel("        # @zai-models\n"),
       [configFile]: insertModel("        - name: glm-5.4\n          alias:")
     },
     id,
@@ -121,319 +116,160 @@ await test("the generated check rejects violations of the GLM route rules", asyn
       );
     })
   );
-  await assertGeneratedCheckRejects(
-    {
-      [templateFile]: (contents) =>
-        contents.replace(
-          "    # When true, inject Anthropic server-side refusal fallbacks",
-          "    tool-search: false\n\n    # When true, inject Anthropic server-side refusal fallbacks"
-        )
-    },
-    "upstream.claude.tool-search",
-    [/omit the default false/u]
-  );
-  await assertGeneratedCheckRejects(
-    {
-      [settingsFile]: (contents) =>
-        contents.replace('"zai", "zai-coding-plan"', '"zai"')
-    },
-    "glm-5.4 referenceProviders",
-    [/missing models\.dev model in zai/u]
-  );
 });
 
-await test("generation restores deferred search for both GLM models", async () => {
+await test("generation applies local settings to the official catalog and proxy example", async () => {
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
   );
-  await copyFixtureFiles(
-    fixture.path,
-    [catalogFile, templateFile, configFile],
-    {
-      [catalogFile]: (contents) => {
-        const catalog = parseDocument(contents);
-        const models: unknown = catalog.get("models");
-        assert.ok(isSeq(models));
-        for (const model of models.items) {
-          const slug: unknown = isMap(model) ? model.get("slug") : undefined;
-          if (
-            isMap(model) &&
-            (slug === "glm-5.4" || slug === "glm-5.3-flash")
-          ) {
-            model.delete("supports_search_tool");
-          }
+  await copyFixtureFiles(fixture.path, [catalogFile], {
+    [upstreamFile]: () => "stale: true\n",
+    [catalogFile]: () =>
+      JSON.stringify({
+        sourceVisibility: { "gpt-6.2-sol": "hide" },
+        models: [{ slug: "old-local-model", context_window: 100_000 }]
+      }),
+    [settingsFile]: () =>
+      JSON.stringify({
+        finalModels: [
+          "gpt-6.2-sol",
+          "gpt-6.2-astra",
+          "glm-5.4",
+          "glm-5.3-flash"
+        ],
+        codex: {
+          "gpt-5.5": { visibility: "hide" },
+          "gpt-6.2-sol": {
+            context_window: 292_000,
+            supports_search_tool: false,
+            local_only: true
+          },
+          "gpt-6.1-sol": { visibility: "list" },
+          "claude-opus-5": { display_name: "Claude Opus 5" }
+        },
+        zai: {
+          "glm-5.4": { display_name: "GLM-5.4", local_only: true },
+          "glm-5.3-flash": { display_name: "GLM-5.3-Flash" }
         }
-        const edited: unknown = catalog.toJSON();
-        return JSON.stringify(edited);
-      }
-    }
-  );
-  const check = runGenerator(fixture.path, "--check");
-  assert.equal(check.status, 1, check.stderr);
-  assert.match(check.stderr, /glm-5\.4 supports_search_tool: expected true/u);
-  const result = runGenerator(fixture.path);
-  assert.equal(result.status, 0, result.stderr);
-  const catalog = parseDocument(
-    await readFile(path.join(fixture.path, catalogFile), "utf-8")
-  );
-  const models: unknown = catalog.get("models");
-  assert.ok(isSeq(models));
-  for (const slug of ["glm-5.4", "glm-5.3-flash"]) {
-    const model: unknown = models.items.find(
-      (item) => isMap(item) && item.get("slug") === slug
-    );
-    assert.ok(isMap(model), `Missing catalog model ${slug}`);
-    assert.equal(model.get("supports_search_tool"), true, slug);
-  }
-});
-
-await test("the generated check identifies visibility and search policy violations", async () => {
-  await assertGeneratedCheckRejects(
-    {
-      [catalogFile]: (contents) => {
-        const catalog = parseDocument(contents);
-        const models: unknown = catalog.get("models");
-        assert.ok(isSeq(models));
-        const model: unknown = models.items.find(
-          (item) => isMap(item) && item.get("slug") === "gpt-6.1-sol"
-        );
-        assert.ok(isMap(model));
-        model.set("visibility", "list");
-        const edited: unknown = catalog.toJSON();
-        return JSON.stringify(edited);
-      }
-    },
-    "gpt-6.1-sol visibility",
-    [/expected hide/u]
-  );
-  await assertGeneratedCheckRejects(
-    {
-      [catalogFile]: (contents) => {
-        const catalog = parseDocument(contents);
-        const models: unknown = catalog.get("models");
-        assert.ok(isSeq(models));
-        models.add({
-          slug: "claude-sonnet-5",
-          context_window: 200_000,
-          visibility: "list"
-        });
-        const edited: unknown = catalog.toJSON();
-        return JSON.stringify(edited);
-      }
-    },
-    "claude-sonnet-5 supports_search_tool",
-    [/expected true/u]
-  );
-});
-
-await test("offline generation restores visibility when the final model changes", async () => {
-  await using fixture = await mkdtempDisposable(
-    path.join(tmpdir(), "proxy-config-")
-  );
-  await copyFixtureFiles(
-    fixture.path,
-    [catalogFile, templateFile, configFile],
-    {
-      [settingsFile]: (contents) =>
-        contents.replace('"gpt-6.2-sol"', '"gpt-6.1-sol"')
-    }
-  );
-  const result = runGenerator(fixture.path);
-  assert.equal(result.status, 0, result.stderr);
-  const check = runGenerator(fixture.path, "--check");
-  assert.equal(check.status, 0, check.stderr);
-  const catalog = parseDocument(
-    await readFile(path.join(fixture.path, catalogFile), "utf-8")
-  );
-  const models: unknown = catalog.get("models");
-  assert.ok(isSeq(models));
-  for (const [slug, visibility] of [
-    ["gpt-6.1-sol", "list"],
-    ["gpt-6.2-sol", "hide"],
-    ["codex-auto-review", "hide"],
-    ["gpt-5.5", "hide"]
-  ]) {
-    const model: unknown = models.items.find(
-      (item) => isMap(item) && item.get("slug") === slug
-    );
-    assert.ok(isMap(model), slug);
-    assert.equal(model.get("visibility"), visibility, slug);
-  }
-});
-
-await test("refresh keeps owner visibility and effective search values", async () => {
-  await using fixture = await mkdtempDisposable(
-    path.join(tmpdir(), "proxy-config-")
-  );
-  await copyFixtureFiles(
-    fixture.path,
-    [catalogFile, templateFile, configFile],
-    {
-      [catalogFile]: (contents) => {
-        const catalog = parseDocument(contents);
-        const models: unknown = catalog.get("models");
-        assert.ok(isSeq(models));
-        const model: unknown = models.items.find(
-          (item) => isMap(item) && item.get("slug") === "gpt-5.5"
-        );
-        assert.ok(isMap(model));
-        model.set("supports_search_tool", false);
-        models.add({ slug: "refresh-omitted", context_window: 100_000 });
-        models.add({
-          slug: "claude-opus-4-8",
-          context_window: 200_000,
-          visibility: "none"
-        });
-        const edited: unknown = catalog.toJSON();
-        return JSON.stringify(edited);
-      }
-    }
-  );
-  const check = runGenerator(fixture.path, "--check");
-  assert.equal(check.status, 1, check.stderr);
-  assert.match(
-    check.stderr,
-    /gpt-5\.5 supports_search_tool: omit the default false/u
-  );
-  const official = {
+      })
+  });
+  const first = {
+    slug: "gpt-6.2-sol",
+    visibility: "list",
+    context_window: 500_000,
+    display_name: "Original",
+    supported_reasoning_levels: [{ effort: "low", description: "Low" }],
+    supports_search_tool: true,
+    upstream_only: { retained: true }
+  };
+  const upstream = {
     models: [
+      first,
+      { ...first, slug: "gpt-6.1-sol", visibility: "hide" },
+      { ...first, slug: "gpt-7-sol" },
+      { ...first, slug: "gpt-6.2-astra", visibility: "hide" },
+      { ...first, slug: "gpt-5.5" },
+      { ...first, slug: "codex-auto-review", visibility: "hide" },
+      { ...first, slug: "glm-5.3" },
+      { ...first, slug: "glm-5.2-flash" },
+      { slug: "claude-sonnet-5", context_window: 200_000, visibility: "none" },
       {
-        slug: "gpt-5.5",
-        context_window: 200_000,
-        supports_search_tool: true,
-        visibility: "list"
-      },
-      ...[
-        ["gpt-6.2-sol", "list"],
-        ["gpt-6.2-astra", "none"],
-        ["gpt-6.1-terra", "hide"],
-        ["gpt-6.1-sol", "list"],
-        ["gpt-7-sol", "list"],
-        ["gpt-daybreak-blue-latest", "hide"],
-        ["gpt-daybreak-red-latest", "none"],
-        ["codex-auto-review", "hide"],
-        ["glm-5.4", "none"],
-        ["glm-5.5", "list"],
-        ["glm-5.4-flash", "list"],
-        ["claude-sonnet-5", "list"]
-      ].map(([slug, visibility]) => ({
-        slug,
-        context_window: 200_000,
-        supports_search_tool: false,
-        visibility
-      })),
-      {
-        slug: "refresh-omitted",
-        context_window: 200_000,
-        supports_search_tool: true
-      },
-      {
-        slug: "refresh-new-false",
-        context_window: 200_000,
+        ...first,
+        slug: "upstream-search-disabled",
         supports_search_tool: false
-      },
-      {
-        slug: "refresh-new-true",
-        context_window: 200_000,
-        supports_search_tool: true
       }
     ]
   };
-  const preload = `import { mock } from "node:test";
+  const proxySource = await readFile(upstreamFile, "utf-8");
+  const upstreamNote = "# An upstream example comment\n";
+  await writeFile(
+    path.join(fixture.path, "upstream.yaml"),
+    proxySource + upstreamNote
+  );
+  const preload = `import { readFileSync } from "node:fs";
+import { mock } from "node:test";
 mock.method(globalThis, "fetch", (url) => {
-  if (url !== "https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json") {
+  if (url === "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI/85225381d89915595598ed13766cd79890c03a84/config.example.yaml") {
+    return Promise.resolve(new Response(readFileSync("upstream.yaml", "utf-8")));
+  }
+  if (url !== "https://raw.githubusercontent.com/openai/codex/refs/heads/main/codex-rs/models-manager/models.json") {
     throw new Error("Unexpected catalog URL: " + url);
   }
-  return Promise.resolve(Response.json(${JSON.stringify(official)}));
+  return Promise.resolve(Response.json(${JSON.stringify(upstream)}));
 });`;
   const result = spawnSync(
     process.execPath,
     [
       "--import",
       `data:text/javascript,${encodeURIComponent(preload)}`,
-      fileURLToPath(new URL("generate-config.mts", import.meta.url)),
-      "--refresh"
+      fileURLToPath(new URL("generate-config.mts", import.meta.url))
     ],
     { cwd: fixture.path, encoding: "utf-8" }
   );
   assert.equal(result.status, 0, result.stderr);
-  const catalog = parseDocument(
+  const actual: unknown = JSON.parse(
     await readFile(path.join(fixture.path, catalogFile), "utf-8")
   );
-  const models: unknown = catalog.get("models");
-  assert.ok(isSeq(models));
-  for (const [slug, expected] of [
-    ["claude-opus-4-8", true],
-    ["claude-sonnet-5", true],
-    ["glm-5.4", true],
-    ["glm-5.3-flash", true],
-    ["glm-5.5", true],
-    ["glm-5.4-flash", true],
-    ["gpt-5.5", undefined],
-    ["gpt-6.2-sol", true],
-    ["refresh-omitted", undefined],
-    ["refresh-new-false", undefined],
-    ["refresh-new-true", true]
-  ] as const) {
-    const model: unknown = models.items.find(
-      (item) => isMap(item) && item.get("slug") === slug
-    );
-    assert.ok(isMap(model), slug);
-    assert.equal(
-      model.has("supports_search_tool"),
-      expected !== undefined,
-      slug
-    );
-    assert.equal(model.get("supports_search_tool"), expected, slug);
-    if (slug.startsWith("refresh-") || slug === "gpt-6.2-sol") {
-      assert.equal(model.get("context_window"), 200_000, slug);
-    }
-  }
-  const visibility = new Map(
-    models.items.map((model) => {
-      assert.ok(isMap(model));
-      return [model.get("slug"), model.get("visibility")] as const;
-    })
+  assert.deepEqual(actual, {
+    models: [
+      { ...first, context_window: 292_000, supports_search_tool: false },
+      { ...first, slug: "gpt-6.1-sol" },
+      { ...first, slug: "gpt-7-sol", visibility: "hide" },
+      { ...first, slug: "gpt-6.2-astra", visibility: "hide" },
+      { ...first, slug: "gpt-5.5", visibility: "hide" },
+      { ...first, slug: "codex-auto-review", visibility: "hide" },
+      { ...first, slug: "glm-5.3", visibility: "hide" },
+      { ...first, slug: "glm-5.2-flash", visibility: "hide" },
+      {
+        slug: "claude-sonnet-5",
+        context_window: 200_000,
+        visibility: "none",
+        supports_search_tool: true
+      },
+      {
+        ...first,
+        slug: "upstream-search-disabled",
+        supports_search_tool: false
+      },
+      { ...first, slug: "claude-opus-5", display_name: "Claude Opus 5" },
+      { ...first, slug: "glm-5.4", display_name: "GLM-5.4" },
+      { ...first, slug: "glm-5.3-flash", display_name: "GLM-5.3-Flash" }
+    ]
+  });
+  const proxy = await readFile(path.join(fixture.path, configFile), "utf-8");
+  assert.equal(
+    await readFile(path.join(fixture.path, upstreamFile), "utf-8"),
+    proxySource + upstreamNote
   );
-  assert.deepEqual(
-    visibility,
-    new Map([
-      ["gpt-6.2-sol", "list"],
-      ["gpt-6.2-astra", "list"],
-      ["gpt-6-astra", "hide"],
-      ["gpt-6.1-sol", "hide"],
-      ["gpt-6.1-terra", "hide"],
-      ["gpt-6-sol", "hide"],
-      ["gpt-6-luna", "list"],
-      ["gpt-5.6-sol", "hide"],
-      ["gpt-5.6-terra", "hide"],
-      ["gpt-5.6-luna", "hide"],
-      ["gpt-daybreak-blue-latest", "hide"],
-      ["gpt-daybreak-red-latest", "none"],
-      ["gpt-5.5", "hide"],
-      ["codex-auto-review", "hide"],
-      ["glm-5.4", "list"],
-      ["glm-5.3-flash", "list"],
-      ["gpt-7-sol", "hide"],
-      ["glm-5.5", "hide"],
-      ["glm-5.4-flash", "hide"],
-      ["claude-opus-4-8", "none"],
-      ["claude-sonnet-5", "list"],
-      ["refresh-omitted", undefined],
-      ["refresh-new-false", undefined],
-      ["refresh-new-true", undefined]
-    ])
+  assert.ok(proxy.includes('  # host: ""\n  host: "127.0.0.1"\n'));
+  assert.ok(
+    proxy.includes(
+      '  # api-keys:\n  #   - "your-api-key-1"\n  #   - "your-api-key-2"\n  #   - "your-api-key-3"\n  api-keys: []\n'
+    )
   );
-  const canonical = runGenerator(fixture.path, "--check");
-  assert.equal(canonical.status, 0, canonical.stderr);
+  assert.ok(
+    proxy.includes(
+      `  #         - 'input.#(type=="additional_tools")#.tools.#(name=="functions")#.tools.#(name=="apply_patch")#'\n  payload:\n`
+    ),
+    "Expected requests.payload immediately after the upstream payload example"
+  );
+  assert.ok(
+    proxy.includes(
+      '#         - name: "kimi-k2.5"\n#           alias: "claude-opus-4.66"\napi-keys:\n'
+    ),
+    "Expected top-level api-keys immediately after the upstream API key examples"
+  );
+  assert.ok(proxy.endsWith(upstreamNote));
+  const check = runGenerator(fixture.path, "--check");
+  assert.equal(check.status, 0, check.stderr);
 });
 
 await test("generated GLM rules remap only unsupported Claude effort levels", async () => {
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
   );
-  await copyFixtureFiles(fixture.path, [catalogFile, templateFile]);
-  const result = runGenerator(fixture.path);
+  await copyFixtureFiles(fixture.path, [catalogFile, configFile]);
+  const result = runGenerator(fixture.path, "--check");
   assert.equal(result.status, 0, result.stderr);
   const [config, catalog] = await Promise.all(
     [configFile, catalogFile].map(async (file) =>
@@ -516,125 +352,13 @@ await test("the generated config check rejects a zai/ catalog slug", async () =>
   );
 });
 
-await test("the generated check rejects a hand-set reference field", async () => {
+await test("the generated check rejects a stale catalog override", async () => {
   await assertGeneratedCheckRejects(
     {
       [settingsFile]: (contents) =>
-        contents.replace(
-          '"glm-5.4": {}',
-          '"glm-5.4": { "max_context_window": 1000000 }'
-        )
+        contents.replace('"visibility": "hide"', '"visibility": "none"')
     },
-    "glm-5.4",
-    [
-      /\bmax_context_window\b/u,
-      /\bhand[- ]set\b/u,
-      /\bconflict\w*\b/u,
-      /\bmodels\.dev\b/u
-    ]
+    catalogFile,
+    [/stale/u]
   );
-});
-
-await test("the generated check rejects a mismatched reference value", async () => {
-  await assertGeneratedCheckRejects(
-    {
-      [catalogFile]: (contents) =>
-        contents.replace(
-          '"max_context_window": 1050000',
-          '"max_context_window": 1049999'
-        )
-    },
-    "gpt-5.5",
-    [
-      /\bmax_context_window\b/u,
-      /\b(?:differs?|mismatch)\b/u,
-      /\bmodels\.dev\b/u
-    ]
-  );
-});
-
-const referenceConflict = [/\bconflict\w*\b/u, /\bmodels\.dev\b/u];
-await Promise.all(
-  (
-    [
-      ["description", "Local GLM description", referenceConflict],
-      ["input_modalities", ["text"], referenceConflict],
-      ["supported_reasoning_levels", [], referenceConflict],
-      ["cost", {}, referenceConflict],
-      ["misspelled_setting", true, [/\bunknown\b/u]]
-    ] as const
-  ).map(async ([field, value, diagnostic]) => {
-    await test(`the generated check rejects a hand-set ${field}`, async () => {
-      await assertGeneratedCheckRejects(
-        {
-          [settingsFile]: (contents) =>
-            contents.replace(
-              '"glm-5.4": {}',
-              () =>
-                `"glm-5.4": { ${JSON.stringify(field)}: ${JSON.stringify(value)} }`
-            )
-        },
-        "glm-5.4",
-        [new RegExp(`\\b${field}\\b`, "u"), ...diagnostic]
-      );
-    });
-  })
-);
-
-await test("generation derives the Codex metadata supported by the reference", async () => {
-  await using fixture = await mkdtempDisposable(
-    path.join(tmpdir(), "proxy-config-")
-  );
-  const referenceModel = ["openai", "models", "gpt-5.5"];
-  await copyFixtureFiles(fixture.path, [catalogFile, templateFile], {
-    [referenceFile]: (contents) => {
-      const reference = parseDocument(contents);
-      reference.setIn(
-        [...referenceModel, "description"],
-        "Reference description"
-      );
-      reference.setIn(
-        [...referenceModel, "modalities", "input"],
-        ["text", "audio", "video", "pdf"]
-      );
-      reference.setIn(
-        [...referenceModel, "reasoning_options", 0, "values"],
-        ["none", "minimal", "low", "medium", "high"]
-      );
-      reference.setIn([...referenceModel, "supports_search_tool"], false);
-      const edited: unknown = reference.toJSON();
-      return JSON.stringify(edited);
-    }
-  });
-  const result = runGenerator(fixture.path);
-  assert.equal(result.status, 0, result.stderr);
-  const [catalog, reference] = await Promise.all(
-    [catalogFile, referenceFile].map(async (file) =>
-      parseDocument(await readFile(path.join(fixture.path, file), "utf-8"))
-    )
-  );
-  const models: unknown = catalog.get("models");
-  assert.ok(isSeq(models));
-  const gpt: unknown = models.items.find(
-    (item) => isMap(item) && item.get("slug") === "gpt-5.5"
-  );
-  assert.ok(isMap(gpt));
-  assert.equal(
-    gpt.get("description"),
-    reference.getIn([...referenceModel, "description"])
-  );
-  const modalities: unknown = gpt.get("input_modalities");
-  assert.ok(isSeq(modalities));
-  assert.deepEqual(modalities.toJSON(), ["text", "audio"]);
-  const levels: unknown = gpt.get("supported_reasoning_levels");
-  assert.ok(isSeq(levels));
-  assert.deepEqual(
-    levels.items.map((level) => isMap(level) && level.get("effort")),
-    ["none", "minimal", "low", "medium", "high"]
-  );
-  assert.equal(gpt.get("context_window"), 292_000);
-  assert.equal(gpt.get("max_context_window"), 1_050_000);
-  assert.equal(gpt.has("supports_search_tool"), false);
-  const check = runGenerator(fixture.path, "--check");
-  assert.equal(check.status, 0, check.stderr);
 });

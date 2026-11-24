@@ -17,7 +17,7 @@ config-version: 8
 # Home mode never loads the general catalog, even when explicitly configured.
 models:
   catalog: ""
-  codex-catalog: "https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/codex_client_models.json"
+  codex-catalog: ""
   devin-catalog: ""
 
 # Listener, TLS, network discovery, and server operation.
@@ -29,7 +29,7 @@ server:
 
   # Server host/interface to bind to. Default is empty ("") to bind all interfaces (IPv4 + IPv6).
   # Use "127.0.0.1" or "localhost" to restrict access to local machine only.
-  host: "127.0.0.1"
+  host: ""
 
   # Server port
   port: 8317
@@ -139,9 +139,9 @@ management:
 access:
   # API keys for authentication
   api-keys:
-    # - "your-api-key-1"
-    # - "your-api-key-2"
-    # - "your-api-key-3"
+    - "your-api-key-1"
+    - "your-api-key-2"
+    - "your-api-key-3"
 
 # Optional credential concurrency and observation contracts.
 
@@ -263,7 +263,7 @@ routing:
   cooldown:
     # When true, disable auth/model cooldown scheduling globally (prevents blackout windows after failure states).
     # A credential/provider disable-cooling value, when present, overrides this global value.
-    disable-cooling: true
+    disable-cooling: false
 
     # When true, persist per-auth cooldown status as .cds files next to auth files.
     # Default is false; when false, cooldown status is kept in memory only.
@@ -416,26 +416,6 @@ requests:
   #         # Nested additional_tools structure in input[] (Codex CLI >= 0.154 "Responses Lite"):
   #         - 'input.#(type=="additional_tools")#.tools.#(name=="functions")#.tools.#(name=="apply_patch")#'
 
-  payload:
-    override:
-      # @glm-overrides
-    filter:
-      - models:
-          - name: github_copilot/gpt-*
-            protocol: codex
-        params:
-          - 'input.#(type=="reasoning" && encrypted_content%"gAAAA*")#'
-          - 'input.#(type=="reasoning" && encrypted_content%"rsn_*")#'
-          - 'input.#(type=="reasoning" && encrypted_content%"smry_*")#'
-          - 'input.#(type=="message")#.id'
-          - 'input.#(type=="function_call")#.id'
-          - 'input.#(type=="custom_tool_call")#.id'
-      - models:
-          - name: openai/gpt-*
-            protocol: codex
-        params:
-          - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"gAAAA*" && encrypted_content!%"rsn_*" && encrypted_content!%"smry_*")#'
-
 # Client-facing compatibility settings apply to both OAuth and API-key routes.
 client:
   codex:
@@ -448,7 +428,7 @@ client:
     # into standard user messages for non-Codex upstream protocols.
     # Default false. Applies to both OAuth and API-key credentials across providers.
     # Legacy provider paths migrate here; this path wins conflicts, including explicit false.
-    optimize-multi-agent-v2: true
+    optimize-multi-agent-v2: false
     # Cache upstream web search results per session so replayed Codex web_search_call items
     # that omit results still retain search results in later turns.
     web-search-result-cache:
@@ -567,6 +547,7 @@ upstream:
     # model catalog advertises supports_search_tool for a Claude model only when every
     # credential serving it supports native tool search.
     # Default false keeps the translation and catalog behavior that predate tool_search support.
+    tool-search: false
 
     # When true, inject Anthropic server-side refusal fallbacks on cloaked Claude requests
     # when the request body does not already specify fallbacks (claude-opus-5-5 -> claude-opus-4-8,
@@ -1091,15 +1072,6 @@ upstream:
 #         - name: "kimi-k2.5"
 #           alias: "claude-opus-4.66"
 
-api-keys:
-  claude:
-    - name: zai
-      base-url: https://api.z.ai/api/anthropic
-      models:
-        # @zai-models
-      keys:
-        - api-key: __ZAI_API_KEY__
-
 # END API KEY EXAMPLES
 
 # OAuth/file-backed credentials. Token material stays in the credential store.
@@ -1172,9 +1144,6 @@ oauth:
   #   sample-provider:                  # plugin provider keys are supported for OAuth plugins
   #     - name: "sample-model-latest"
   #       alias: "sample-latest"
-  model-alias:
-    codex:
-      # @codex-aliases
 
   # OAuth provider model settings (per channel)
   # Allows overriding model-level capabilities (such as context window) for OAuth credentials.
@@ -1191,9 +1160,6 @@ oauth:
   #       max-context-length: 524288 # overrides context window advertised to Codex clients
   #     - name: "gpt-6-astra"
   #       max-context-length: 1048576
-  settings:
-    codex:
-      # @codex-context
 
   # OAuth provider excluded models
   # Applies to OAuth/file-backed credentials of each provider.
@@ -1347,7 +1313,7 @@ oauth:
       #   idle-conn-timeout: "30s"    # idle keep-alive timeout (default: 30s, capped at 210s)
       #   max-idle-conns-per-host: 2  # max idle connections per host per credential (default: 2; <= 0 disables idle pooling)
       # tos-pause-window: "0"         # optional: pool-wide protective pause after the first 403 TOS_VIOLATION
-      # (default "0" = disabled; set a positive duration such as "6h" to enable pool-wide pause)
+                                    # (default "0" = disabled; set a positive duration such as "6h" to enable pool-wide pause)
       # Use credits as a last resort after free-tier Claude quota is exhausted.
       antigravity-credits: true
 

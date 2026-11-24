@@ -13,9 +13,7 @@
     "fix:ultracite": "ultracite fix",
     "generate": "run-p generate:*",
     "generate:agents": "node scripts/generate-agents.mts",
-    "generate:config": "run-s generate:config:refresh generate:config:format",
-    "generate:config:format": "ultracite fix",
-    "generate:config:refresh": "node scripts/generate-config.mts --refresh",
+    "generate:config": "node scripts/generate-config.mts && oxfmt .codex/model_catalog.json",
     "pre-commit": "run-p check:markdownlint-cli2 check:ultracite",
     "pre-push": "pnpm run check",
     "prepare": "husky"
