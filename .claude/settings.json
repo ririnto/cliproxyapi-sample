@@ -228,12 +228,7 @@
   },
   "permissions": {
     "defaultMode": "bypassPermissions",
-    "deny": [
-      "Agent(claude)",
-      "AskUserQuestion",
-      "Bash(sleep*)",
-      "EnterPlanMode"
-    ]
+    "deny": ["Agent(claude)", "AskUserQuestion", "EnterPlanMode"]
   },
   "pluginConfigs": {
     "cc-plugin-agents-md@builtin": {
