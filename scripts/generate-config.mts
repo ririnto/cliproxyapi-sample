@@ -234,10 +234,10 @@ const renderConfig = (
     return [...byTarget].map(([forwarded, names]) => ({
       models: names.map((name) => ({
         name,
-        protocol: "codex",
-        match: [{ "reasoning.effort": requested }]
+        protocol: "claude",
+        match: [{ "output_config.effort": requested }]
       })),
-      params: { "reasoning.effort": forwarded }
+      params: { "output_config.effort": forwarded }
     }));
   });
   const contextTargets = new Map<string, string>();

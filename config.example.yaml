@@ -421,26 +421,26 @@ requests:
     override:
       - models:
           - name: glm-5.4
-            protocol: codex
+            protocol: claude
             match:
-              - reasoning.effort: xhigh
+              - output_config.effort: xhigh
           - name: glm-5.3-flash
-            protocol: codex
+            protocol: claude
             match:
-              - reasoning.effort: xhigh
+              - output_config.effort: xhigh
         params:
-          reasoning.effort: max
+          output_config.effort: max
       - models:
           - name: glm-5.4
-            protocol: codex
+            protocol: claude
             match:
-              - reasoning.effort: medium
+              - output_config.effort: medium
           - name: glm-5.3-flash
-            protocol: codex
+            protocol: claude
             match:
-              - reasoning.effort: medium
+              - output_config.effort: medium
         params:
-          reasoning.effort: high
+          output_config.effort: high
     filter:
       - models:
           - name: github_copilot/gpt-*
@@ -1115,9 +1115,9 @@ upstream:
 #           alias: "claude-opus-4.66"
 
 api-keys:
-  codex:
+  claude:
     - name: zai
-      base-url: https://api.z.ai/api/v1
+      base-url: https://api.z.ai/api/anthropic
       models:
         - name: glm-5.4
           alias: glm-5.4
