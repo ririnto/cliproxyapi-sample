@@ -237,6 +237,20 @@ mock.method(globalThis, "fetch", (url) => {
     ]
   });
   const proxy = await readFile(path.join(fixture.path, configFile), "utf-8");
+  const proxyDocument = parseDocument(proxy);
+  assert.equal(proxyDocument.getIn(["models", "codex-catalog"]), "");
+  const filters: unknown = proxyDocument.getIn([
+    "requests",
+    "payload",
+    "filter"
+  ]);
+  assert.ok(isSeq(filters));
+  assert.ok(
+    filters.items.some(
+      (filter) =>
+        isMap(filter) && filter.getIn(["models", 0, "name"]) === "gpt-*"
+    )
+  );
   assert.equal(
     await readFile(path.join(fixture.path, upstreamFile), "utf-8"),
     proxySource + upstreamNote

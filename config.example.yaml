@@ -17,8 +17,7 @@ config-version: 8
 # Home mode never loads the general catalog, even when explicitly configured.
 models:
   catalog: ""
-  # codex-catalog: ""
-  codex-catalog: "https://raw.githubusercontent.com/router-for-me/models/refs/heads/main/codex_client_models.json"
+  codex-catalog: ""
   devin-catalog: ""
 
 # Listener, TLS, network discovery, and server operation.
@@ -266,8 +265,7 @@ routing:
   cooldown:
     # When true, disable auth/model cooldown scheduling globally (prevents blackout windows after failure states).
     # A credential/provider disable-cooling value, when present, overrides this global value.
-    # disable-cooling: false
-    disable-cooling: true
+    disable-cooling: false
 
     # When true, persist per-auth cooldown status as .cds files next to auth files.
     # Default is false; when false, cooldown status is kept in memory only.
@@ -455,7 +453,7 @@ requests:
           - 'input.#(type=="function_call")#.id'
           - 'input.#(type=="custom_tool_call")#.id'
       - models:
-          - name: openai/gpt-*
+          - name: gpt-*
             protocol: codex
         params:
           - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"gAAAA*" && encrypted_content!%"rsn_*" && encrypted_content!%"smry_*")#'
@@ -472,8 +470,7 @@ client:
     # into standard user messages for non-Codex upstream protocols.
     # Default false. Applies to both OAuth and API-key credentials across providers.
     # Legacy provider paths migrate here; this path wins conflicts, including explicit false.
-    # optimize-multi-agent-v2: false
-    optimize-multi-agent-v2: true
+    optimize-multi-agent-v2: false
     # Cache upstream web search results per session so replayed Codex web_search_call items
     # that omit results still retain search results in later turns.
     web-search-result-cache:
