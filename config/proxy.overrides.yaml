@@ -11,9 +11,6 @@
         - "your-api-key-3"
   replace: true
   content: "  api-keys: []"
-- anchor: "    disable-cooling: false"
-  replace: true
-  content: "    disable-cooling: true"
 - anchor: '  #         - ''input.#(type=="additional_tools")#.tools.#(name=="functions")#.tools.#(name=="apply_patch")#'''
   content: |2-
       payload:
@@ -35,9 +32,6 @@
                 protocol: codex
             params:
               - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"gAAAA*" && encrypted_content!%"rsn_*" && encrypted_content!%"smry_*")#'
-- anchor: "    optimize-multi-agent-v2: false"
-  replace: true
-  content: "    optimize-multi-agent-v2: true"
 - anchor: |-
     #         - name: "kimi-k2.5"
     #           alias: "claude-opus-4.66"
