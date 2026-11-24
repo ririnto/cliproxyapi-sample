@@ -3,17 +3,9 @@ import { readFile, writeFile } from "node:fs/promises";
 
 import { parse, stringify } from "yaml";
 
-import models from "../config/models.json" with { type: "json" };
-
-interface ModelSettings {
-  readonly context_window?: number;
-  readonly max_context_window?: number;
-  readonly visibility?: string;
-  readonly displayName?: string;
-}
-
 interface CatalogModel {
   readonly contextWindow: number;
+  readonly displayName: unknown;
   readonly reasoningLevels: unknown;
   readonly visibility: unknown;
 }
@@ -23,19 +15,53 @@ interface CatalogEntry extends Record<string, unknown> {
   readonly context_window: number;
 }
 
-const maxContextWindow = 292_000;
-const codexModels: Readonly<Record<string, ModelSettings>> = models.codex.codex;
-const zai: Readonly<Record<string, ModelSettings>> = models.codex.zai;
-const modelSettings = new Map([
-  ...Object.entries(codexModels),
-  ...Object.entries(zai)
-]);
+const clientContextCap = 292_000;
+const settingsPath = "config/models.json";
+const referencePath = "config/models.dev.json";
+const referenceUrl = "https://models.dev/api.json";
+const clientFields = {
+  context_window: "context_window",
+  displayName: "display_name",
+  max_context_window: "max_context_window",
+  visibility: "visibility"
+} as const;
 const clientCatalogPath = ".codex/model_catalog.json";
 const officialCatalogUrl =
   "https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readModelSettings = (contents: string) => {
+  const settings: unknown = JSON.parse(contents);
+  assert.ok(
+    isRecord(settings) && isRecord(settings.codex),
+    `Expected Codex model settings in ${settingsPath}`
+  );
+  const { codex } = settings;
+  return new Map(
+    (["codex", "zai"] as const).flatMap((group) => {
+      const section = codex[group];
+      assert.ok(
+        isRecord(section) &&
+          Array.isArray(section.referenceProviders) &&
+          isRecord(section.models),
+        `Expected referenceProviders and models for ${group} in ${settingsPath}`
+      );
+      const providers = section.referenceProviders.map((id: unknown) => {
+        assert.ok(
+          typeof id === "string",
+          `Invalid reference provider for ${group}`
+        );
+        return id;
+      });
+      return Object.entries(section.models).map(([slug, overrides]) => {
+        assert.ok(isRecord(overrides), `Invalid model settings for ${slug}`);
+        return [slug, { group, overrides, providers }] as const;
+      });
+    })
+  );
+};
 
 const assertBareModelId = (id: string, field: "alias" | "name" | "slug") => {
   assert.ok(
@@ -116,15 +142,12 @@ const readCatalog = (contents: string, source: string) => {
   };
 };
 
-const fetchOfficialCatalog = async () => {
-  const response = await fetch(officialCatalogUrl, {
+const fetchCatalog = async (url: string) => {
+  const response = await fetch(url, {
     headers: { accept: "application/json" },
     signal: AbortSignal.timeout(20_000)
   });
-  assert.ok(
-    response.ok,
-    `Could not refresh official Codex catalog: HTTP ${response.status}`
-  );
+  assert.ok(response.ok, `Could not refresh ${url}: HTTP ${response.status}`);
   return await response.text();
 };
 
@@ -224,13 +247,10 @@ const renderConfig = (
     [...catalog].map(([slug, { visibility }]) => ({ slug, visibility }))
   );
   const glmRoutes = [...catalog].flatMap(([name, model]) => {
-    const settings = Object.hasOwn(zai, name)
-      ? modelSettings.get(name)
-      : undefined;
-    if (settings === undefined) {
+    if (modelSettings.get(name)?.group !== "zai") {
       return [];
     }
-    const { contextWindow, reasoningLevels } = model;
+    const { contextWindow, displayName, reasoningLevels } = model;
     assert.ok(
       Array.isArray(reasoningLevels),
       `Missing reasoning levels for ${name}`
@@ -253,7 +273,7 @@ const renderConfig = (
         model: {
           name,
           alias: name,
-          "display-name": settings.displayName,
+          "display-name": displayName,
           "max-context-length": contextWindow,
           "is-compat": true,
           thinking: { levels: [...effortOrder] }
@@ -263,11 +283,6 @@ const renderConfig = (
       }
     ];
   });
-  assert.equal(
-    glmRoutes.length,
-    Object.keys(zai).length,
-    "Missing ZAI model in Codex catalog"
-  );
   const glmOverrides = effortOrder.flatMap((requested, index) => {
     const byTarget = new Map<string, string[]>();
     for (const { model, supported, highest } of glmRoutes) {
@@ -298,7 +313,7 @@ const renderConfig = (
   }
   const codexContext = [...catalog].flatMap(([name, { contextWindow }]) => {
     const target = contextTargets.get(name);
-    if (target === undefined && !Object.hasOwn(codexModels, name)) {
+    if (target === undefined && modelSettings.get(name)?.group !== "codex") {
       return [];
     }
     return [
@@ -345,52 +360,141 @@ const renderConfig = (
 const args = process.argv.slice(2);
 assert.ok(
   args.length === 0 ||
-    (args.length === 1 && (args[0] === "--check" || args[0] === "--refresh")),
-  "Usage: node scripts/generate-config.mts [--check|--refresh]"
+    (args.length === 1 &&
+      (args[0] === "--check" ||
+        args[0] === "--refresh" ||
+        args[0] === "--refresh-models-dev")),
+  "Usage: node scripts/generate-config.mts [--check|--refresh|--refresh-models-dev]"
 );
 const check = args[0] === "--check";
 const refresh = args[0] === "--refresh";
-const [localContents, template] = await Promise.all([
-  readFile(clientCatalogPath, "utf-8"),
-  readFile("config/proxy.template.yaml", "utf-8")
-]);
+const refreshReference = args[0] === "--refresh-models-dev";
+const [localContents, template, settingsContents, referenceContents] =
+  await Promise.all([
+    readFile(clientCatalogPath, "utf-8"),
+    readFile("config/proxy.template.yaml", "utf-8"),
+    readFile(settingsPath, "utf-8"),
+    refreshReference
+      ? fetchCatalog(referenceUrl)
+      : readFile(referencePath, "utf-8")
+  ]);
+const modelSettings = readModelSettings(settingsContents);
+const reference: unknown = JSON.parse(referenceContents);
+assert.ok(isRecord(reference), "Expected models.dev providers");
+const referenceProviders = new Set(
+  [...modelSettings.values()].flatMap(({ providers }) => providers)
+);
+const snapshot = new Map(
+  [...referenceProviders].map((provider) => {
+    const entry = reference[provider];
+    assert.ok(
+      isRecord(entry) && isRecord(entry.models),
+      `Missing models.dev provider: ${provider}`
+    );
+    const rows = entry.models;
+    return [
+      provider,
+      {
+        models: Object.fromEntries(
+          [...modelSettings].flatMap(([slug, { providers }]) => {
+            if (!providers.includes(provider) || !Object.hasOwn(rows, slug)) {
+              return [];
+            }
+            const model = rows[slug];
+            assert.ok(
+              isRecord(model) && model.id === slug,
+              `Invalid models.dev model: ${provider}/${slug}`
+            );
+            return [[slug, model]];
+          })
+        )
+      }
+    ] as const;
+  })
+);
 const localCatalog = readCatalog(localContents, clientCatalogPath);
 const catalog = refresh
   ? mergeCatalog(
-      readCatalog(await fetchOfficialCatalog(), officialCatalogUrl),
+      readCatalog(await fetchCatalog(officialCatalogUrl), officialCatalogUrl),
       localCatalog
     )
   : localCatalog;
+const catalogSlugs = new Set(catalog.models.map(({ slug }) => slug));
+for (const slug of modelSettings.keys()) {
+  assert.ok(
+    catalogSlugs.has(slug),
+    `Missing configured model in Codex catalog: ${slug}`
+  );
+}
 const clientModels = catalog.models.map((entry): CatalogEntry => {
   const settings = modelSettings.get(entry.slug);
-  const contextWindow = Math.min(
-    settings?.context_window ?? entry.context_window,
-    maxContextWindow
+  const model = settings?.providers
+    .map((provider) => snapshot.get(provider)?.models[entry.slug])
+    .find((row) => row !== undefined);
+  const context = isRecord(model?.limit) ? model.limit.context : undefined;
+  assert.ok(
+    context === undefined ||
+      (typeof context === "number" &&
+        Number.isSafeInteger(context) &&
+        context > 0),
+    `${entry.slug} limit.context: expected a positive integer in models.dev`
   );
-  const maxWindow = settings?.max_context_window ?? entry.max_context_window;
-  const displayName = settings?.displayName ?? entry.display_name;
-  const visibility = settings?.visibility ?? entry.visibility;
-  return contextWindow === entry.context_window &&
-    maxWindow === entry.max_context_window &&
-    displayName === entry.display_name &&
-    visibility === entry.visibility
-    ? entry
-    : {
-        ...entry,
-        display_name: displayName,
-        context_window: contextWindow,
-        max_context_window: maxWindow,
-        visibility
-      };
+  const derived = {
+    context_window:
+      context === undefined ? undefined : Math.min(context, clientContextCap),
+    display_name: model?.name,
+    max_context_window: context,
+    visibility: model?.visibility
+  };
+  const overrides = settings?.overrides ?? {};
+  const updated: Record<string, unknown> = { ...entry };
+  for (const [field, catalogField] of Object.entries(clientFields)) {
+    const expected = derived[catalogField];
+    if (expected !== undefined) {
+      assert.ok(
+        !Object.hasOwn(overrides, field),
+        `${entry.slug} ${field}: hand-set value conflicts with models.dev`
+      );
+      if (check) {
+        assert.equal(
+          entry[catalogField],
+          expected,
+          `${entry.slug} ${catalogField}: derived value differs from models.dev`
+        );
+      }
+    }
+    updated[catalogField] = expected ?? overrides[field] ?? entry[catalogField];
+  }
+  const contextWindow = updated.context_window;
+  assert.ok(
+    typeof contextWindow === "number" &&
+      Number.isSafeInteger(contextWindow) &&
+      contextWindow > 0,
+    `Invalid context window for ${entry.slug}`
+  );
+  const cappedContextWindow = Math.min(contextWindow, clientContextCap);
+  updated.context_window = cappedContextWindow;
+  return Object.values(clientFields).some(
+    (field) => updated[field] !== entry[field]
+  )
+    ? { ...updated, slug: entry.slug, context_window: cappedContextWindow }
+    : entry;
 });
 const config = renderConfig(
   template,
   new Map(
     clientModels.map(
-      ({ slug, context_window, supported_reasoning_levels, visibility }) => [
+      ({
+        slug,
+        context_window,
+        display_name,
+        supported_reasoning_levels,
+        visibility
+      }) => [
         slug,
         {
           contextWindow: context_window,
+          displayName: display_name,
           reasoningLevels: supported_reasoning_levels,
           visibility
         }
@@ -414,6 +518,12 @@ const outputs = [
         : localContents
   }
 ];
+if (refreshReference) {
+  outputs.push({
+    path: referencePath,
+    contents: `${JSON.stringify(Object.fromEntries(snapshot), null, 2)}\n`
+  });
+}
 await Promise.all(
   outputs.map(async ({ path, contents }) => {
     if (check) {

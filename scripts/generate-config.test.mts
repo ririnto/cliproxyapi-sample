@@ -16,6 +16,8 @@ import { isMap, isSeq, parseDocument } from "yaml";
 const catalogFile = ".codex/model_catalog.json";
 const templateFile = "config/proxy.template.yaml";
 const configFile = "config.example.yaml";
+const settingsFile = "config/models.json";
+const referenceFile = "config/models.dev.json";
 
 type FixtureEdits = Readonly<
   Partial<Record<string, (contents: string) => string>>
@@ -27,7 +29,7 @@ const copyFixtureFiles = async (
   edits: FixtureEdits = {}
 ) =>
   await Promise.all(
-    files.map(async (file) => {
+    [...files, settingsFile, referenceFile].map(async (file) => {
       const destination = path.join(directory, file);
       await mkdir(path.dirname(destination), { recursive: true });
       const contents = await readFile(file, "utf-8");
@@ -42,7 +44,10 @@ const runGenerator = (cwd: string, ...args: readonly string[]) =>
     { cwd, encoding: "utf-8" }
   );
 
-const assertGeneratedCheckRejects = async (id: string, edits: FixtureEdits) => {
+const assertGeneratedCheckRejects = async (
+  edits: FixtureEdits,
+  diagnostic: string
+) => {
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
   );
@@ -53,12 +58,7 @@ const assertGeneratedCheckRejects = async (id: string, edits: FixtureEdits) => {
   );
   const result = runGenerator(fixture.path, "--check");
   assert.equal(result.status, 1, result.stderr);
-  const diagnostic = result.stderr
-    .split("\n")
-    .find((line) => line.includes(id));
-  assert.ok(diagnostic !== undefined, result.stderr);
-  assert.match(diagnostic, /\bprefix\b/u);
-  assert.match(diagnostic, /["'`]zai\/["'`]/u);
+  assert.ok(result.stderr.includes(diagnostic), result.stderr);
 };
 
 await test("the generated config check rejects a zai/ model alias", async () => {
@@ -68,10 +68,13 @@ await test("the generated config check rejects a zai/ model alias", async () => 
     assert.ok(contents.includes(anchor), `Missing model rows at ${anchor}`);
     return contents.replace(anchor, () => `${model}${anchor}`);
   };
-  await assertGeneratedCheckRejects(id, {
-    [templateFile]: insertModel("        # @zai-models\n"),
-    [configFile]: insertModel("        - name: glm-5.4\n          alias:")
-  });
+  await assertGeneratedCheckRejects(
+    {
+      [templateFile]: insertModel("        # @zai-models\n"),
+      [configFile]: insertModel("        - name: glm-5.4\n          alias:")
+    },
+    `Model alias "${id}" cannot start with the "zai/" prefix.`
+  );
 });
 
 await test("generated GLM rules remap only unsupported Claude effort levels", async () => {
@@ -138,22 +141,51 @@ await test("generated GLM rules remap only unsupported Claude effort levels", as
 
 await test("the generated config check rejects a zai/ catalog slug", async () => {
   const id = "zai/review-probe";
-  await assertGeneratedCheckRejects(id, {
-    [catalogFile]: (contents) => {
-      const catalog: unknown = JSON.parse(contents);
-      assert.ok(
-        typeof catalog === "object" &&
-          catalog !== null &&
-          "models" in catalog &&
-          Array.isArray(catalog.models)
-      );
-      const rows: readonly unknown[] = catalog.models;
-      const [row] = rows;
-      assert.ok(typeof row === "object" && row !== null);
-      return JSON.stringify({
-        ...catalog,
-        models: [...rows, { ...row, slug: id }]
-      });
-    }
-  });
+  await assertGeneratedCheckRejects(
+    {
+      [catalogFile]: (contents) => {
+        const catalog: unknown = JSON.parse(contents);
+        assert.ok(
+          typeof catalog === "object" &&
+            catalog !== null &&
+            "models" in catalog &&
+            Array.isArray(catalog.models)
+        );
+        const rows: readonly unknown[] = catalog.models;
+        const [row] = rows;
+        assert.ok(typeof row === "object" && row !== null);
+        return JSON.stringify({
+          ...catalog,
+          models: [...rows, { ...row, slug: id }]
+        });
+      }
+    },
+    `Model slug "${id}" cannot start with the "zai/" prefix.`
+  );
+});
+
+await test("the generated check rejects a hand-set reference field", async () => {
+  await assertGeneratedCheckRejects(
+    {
+      [settingsFile]: (contents) =>
+        contents.replace(
+          '"glm-5.4": {}',
+          '"glm-5.4": { "max_context_window": 1000000 }'
+        )
+    },
+    "glm-5.4 max_context_window: hand-set value conflicts with models.dev"
+  );
+});
+
+await test("the generated check rejects a mismatched reference value", async () => {
+  await assertGeneratedCheckRejects(
+    {
+      [catalogFile]: (contents) =>
+        contents.replace(
+          '"max_context_window": 1050000',
+          '"max_context_window": 1049999'
+        )
+    },
+    "gpt-5.5 max_context_window: derived value differs from models.dev"
+  );
 });

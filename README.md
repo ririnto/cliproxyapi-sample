@@ -207,11 +207,17 @@ Codex CLI를 재시작한다.
 
 `pnpm run generate:config`는 [공식 Codex 카탈로그](https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json)를 새로 받는다.
 `models[].slug`를 기준으로 병합하면서 공식 카탈로그에 없는 로컬 모델 항목을 유지한다.
-`config/models.json`은 모델 설정을 프로토콜, 공급자, 모델 ID 순으로 묶는다.
-병합된 모델에 이 파일의 표시 이름, 컨텍스트, 노출 설정을 적용한다.
+`config/models.json`은 프로토콜과 공급자별로 모델 ID와 `referenceProviders` 조회 순서를 지정한다.
+`zai`에 모델이 없으면 같은 ID를 `zai-coding-plan`에서 조회한다.
+모델의 표시 이름과 최대 컨텍스트는 [models.dev 스냅샷](config/models.dev.json)에서 가져온다.
+클라이언트 컨텍스트는 최대 292,000토큰으로 제한한다.
+스냅샷에 해당 필드가 없을 때만 `config/models.json`에서 값을 지정한다.
 병합 결과로 `.codex/model_catalog.json`과 `config.example.yaml`을 다시 생성하고 두 파일을 함께 커밋한다.
+`node scripts/generate-config.mts --refresh-models-dev`를 실행하면
+[models.dev API](https://models.dev/api.json)에서 설정된 모델의 전체 항목을 받아 스냅샷과 생성물을 갱신한다.
+갱신 후 `pnpm exec ultracite fix .codex/model_catalog.json config/models.dev.json`을 실행한다.
 [모델 설정](config/models.json)이나 [프록시 템플릿](config/proxy.template.yaml)을 수정한 뒤
-`node scripts/generate-config.mts`를 실행하면 기존 클라이언트 카탈로그로 오프라인에서 다시 생성한다.
+`node scripts/generate-config.mts`를 실행하면 저장된 카탈로그와 스냅샷으로 오프라인에서 다시 생성한다.
 `pnpm run check:generated`도 같은 입력으로 생성물의 차이를 확인한다.
 `gpt-6.2-sol`처럼 `gpt-`로 시작하고 숫자 버전과 영문 계열명으로 끝나는 모델 ID에서 계열을 추출한다.
 각 계열에서 가장 높은 공개 버전이 직접 경로가 되고, 알려진 이전 버전은 자동으로 그 모델을 가리키는 별칭이 된다.
