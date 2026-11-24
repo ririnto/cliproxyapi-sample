@@ -209,9 +209,10 @@ Codex CLI를 재시작한다.
 `models[].slug`를 기준으로 병합하면서 공식 카탈로그에 없는 로컬 모델 항목을 유지한다.
 `config/models.json`은 프로토콜과 공급자별로 모델 ID와 `referenceProviders` 조회 순서를 지정한다.
 `zai`에 모델이 없으면 같은 ID를 `zai-coding-plan`에서 조회한다.
-모델의 표시 이름과 최대 컨텍스트는 [models.dev 스냅샷](config/models.dev.json)에서 가져온다.
+모델의 표시 이름, 설명, 최대 컨텍스트, 입력 형식, 추론 수준은 [models.dev 스냅샷](config/models.dev.json)에서 가져온다.
+Codex 카탈로그의 입력 형식은 텍스트, 이미지, 오디오 중 스냅샷이 지원하는 형식으로 제한한다.
 클라이언트 컨텍스트는 최대 292,000토큰으로 제한한다.
-스냅샷에 해당 필드가 없을 때만 `config/models.json`에서 값을 지정한다.
+`config/models.json`에서는 스냅샷에 없는 지원 필드만 지정할 수 있다.
 병합 결과로 `.codex/model_catalog.json`과 `config.example.yaml`을 다시 생성하고 두 파일을 함께 커밋한다.
 `node scripts/generate-config.mts --refresh-models-dev`를 실행하면
 [models.dev API](https://models.dev/api.json)에서 설정된 모델의 전체 항목을 받아 스냅샷과 생성물을 갱신한다.

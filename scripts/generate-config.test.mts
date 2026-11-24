@@ -211,3 +211,84 @@ await test("the generated check rejects a mismatched reference value", async () 
     ]
   );
 });
+
+const referenceConflict = [/\bconflict\w*\b/u, /\bmodels\.dev\b/u];
+await Promise.all(
+  (
+    [
+      ["description", "Local GLM description", referenceConflict],
+      ["input_modalities", ["text"], referenceConflict],
+      ["supported_reasoning_levels", [], referenceConflict],
+      ["cost", {}, referenceConflict],
+      ["misspelled_setting", true, [/\bunknown\b/u]]
+    ] as const
+  ).map(async ([field, value, diagnostic]) => {
+    await test(`the generated check rejects a hand-set ${field}`, async () => {
+      await assertGeneratedCheckRejects(
+        {
+          [settingsFile]: (contents) =>
+            contents.replace(
+              '"glm-5.4": {}',
+              () => `"glm-5.4": ${JSON.stringify({ [field]: value })}`
+            )
+        },
+        "glm-5.4",
+        [new RegExp(`\\b${field}\\b`, "u"), ...diagnostic]
+      );
+    });
+  })
+);
+
+await test("generation derives the Codex metadata supported by the reference", async () => {
+  await using fixture = await mkdtempDisposable(
+    path.join(tmpdir(), "proxy-config-")
+  );
+  const referenceModel = ["openai", "models", "gpt-5.5"];
+  await copyFixtureFiles(fixture.path, [catalogFile, templateFile], {
+    [referenceFile]: (contents) => {
+      const reference = parseDocument(contents);
+      reference.setIn(
+        [...referenceModel, "description"],
+        "Reference description"
+      );
+      reference.setIn(
+        [...referenceModel, "modalities", "input"],
+        ["text", "audio", "video", "pdf"]
+      );
+      reference.setIn(
+        [...referenceModel, "reasoning_options", 0, "values"],
+        ["none", "minimal", "low", "medium", "high"]
+      );
+      const edited: unknown = reference.toJSON();
+      return JSON.stringify(edited);
+    }
+  });
+  const result = runGenerator(fixture.path);
+  assert.equal(result.status, 0, result.stderr);
+  const [catalog, reference] = await Promise.all(
+    [catalogFile, referenceFile].map(async (file) =>
+      parseDocument(await readFile(path.join(fixture.path, file), "utf-8"))
+    )
+  );
+  const models: unknown = catalog.get("models");
+  assert.ok(isSeq(models));
+  const gpt: unknown = models.items.find(
+    (item) => isMap(item) && item.get("slug") === "gpt-5.5"
+  );
+  assert.ok(isMap(gpt));
+  assert.equal(
+    gpt.get("description"),
+    reference.getIn([...referenceModel, "description"])
+  );
+  const modalities: unknown = gpt.get("input_modalities");
+  assert.ok(isSeq(modalities));
+  assert.deepEqual(modalities.toJSON(), ["text", "audio"]);
+  const levels: unknown = gpt.get("supported_reasoning_levels");
+  assert.ok(isSeq(levels));
+  assert.deepEqual(
+    levels.items.map((level) => isMap(level) && level.get("effort")),
+    ["none", "minimal", "low", "medium", "high"]
+  );
+  assert.equal(gpt.get("context_window"), 292_000);
+  assert.equal(gpt.get("max_context_window"), 1_050_000);
+});

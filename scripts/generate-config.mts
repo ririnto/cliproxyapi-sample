@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
 
 import { parse, stringify } from "yaml";
 
@@ -19,12 +20,16 @@ const clientContextCap = 292_000;
 const settingsPath = "config/models.json";
 const referencePath = "config/models.dev.json";
 const referenceUrl = "https://models.dev/api.json";
-const clientFields = {
-  context_window: "context_window",
-  displayName: "display_name",
-  max_context_window: "max_context_window",
-  visibility: "visibility"
-} as const;
+const clientFields = new Map([
+  ["context_window", "context_window"],
+  ["description", "description"],
+  ["displayName", "display_name"],
+  ["input_modalities", "input_modalities"],
+  ["max_context_window", "max_context_window"],
+  ["supported_reasoning_levels", "supported_reasoning_levels"],
+  ["visibility", "visibility"]
+]);
+const codexInputModalities = new Set(["text", "image", "audio"]);
 const clientCatalogPath = ".codex/model_catalog.json";
 const officialCatalogUrl =
   "https://raw.githubusercontent.com/openai/codex/main/codex-rs/models-manager/models.json";
@@ -39,27 +44,131 @@ const readModelSettings = (contents: string) => {
     `Expected Codex model settings in ${settingsPath}`
   );
   const { codex } = settings;
+  for (const field of Object.keys(settings)) {
+    assert.equal(field, "codex", `Unknown model settings section: ${field}`);
+  }
+  for (const group of Object.keys(codex)) {
+    assert.ok(
+      group === "codex" || group === "zai",
+      `Unknown Codex model group: ${group}`
+    );
+  }
+  const slugs = new Set<string>();
   return new Map(
     (["codex", "zai"] as const).flatMap((group) => {
       const section = codex[group];
       assert.ok(
         isRecord(section) &&
           Array.isArray(section.referenceProviders) &&
+          section.referenceProviders.length > 0 &&
           isRecord(section.models),
         `Expected referenceProviders and models for ${group} in ${settingsPath}`
       );
+      for (const field of Object.keys(section)) {
+        assert.ok(
+          field === "referenceProviders" || field === "models",
+          `${group} ${field}: unknown model group setting`
+        );
+      }
       const providers = section.referenceProviders.map((id: unknown) => {
         assert.ok(
-          typeof id === "string",
+          typeof id === "string" && id.length > 0,
           `Invalid reference provider for ${group}`
         );
         return id;
       });
       return Object.entries(section.models).map(([slug, overrides]) => {
         assert.ok(isRecord(overrides), `Invalid model settings for ${slug}`);
+        assert.ok(!slugs.has(slug), `Duplicate model settings for ${slug}`);
+        slugs.add(slug);
         return [slug, { group, overrides, providers }] as const;
       });
     })
+  );
+};
+
+const readReferenceStrings = (
+  value: unknown,
+  source: string
+): readonly string[] => {
+  const items: readonly unknown[] | undefined = Array.isArray(value)
+    ? value
+    : undefined;
+  assert.ok(
+    items !== undefined && items.every((item) => typeof item === "string"),
+    `${source}: expected a list of strings in models.dev`
+  );
+  return items;
+};
+
+const deriveCatalogFields = (
+  entry: CatalogEntry,
+  model: Record<string, unknown>
+) => {
+  const { slug } = entry;
+  const context = isRecord(model.limit) ? model.limit.context : undefined;
+  assert.ok(
+    context === undefined ||
+      (typeof context === "number" &&
+        Number.isSafeInteger(context) &&
+        context > 0),
+    `${slug} limit.context: expected a positive integer in models.dev`
+  );
+  const input = isRecord(model.modalities) ? model.modalities.input : undefined;
+  const { reasoning_options: options } = model;
+  assert.ok(
+    options === undefined || Array.isArray(options),
+    `${slug} reasoning_options: expected a list in models.dev`
+  );
+  const effortOption: unknown = options?.find(
+    (option: unknown) => isRecord(option) && option.type === "effort"
+  );
+  const currentLevels: readonly unknown[] = Array.isArray(
+    entry.supported_reasoning_levels
+  )
+    ? entry.supported_reasoning_levels
+    : [];
+  const supportedLevels = isRecord(effortOption)
+    ? readReferenceStrings(
+        effortOption.values,
+        `${slug} reasoning_options.effort`
+      ).map((effort) => {
+        const current = currentLevels.find(
+          (level) => isRecord(level) && level.effort === effort
+        );
+        return {
+          effort,
+          description:
+            isRecord(current) && typeof current.description === "string"
+              ? current.description
+              : ""
+        };
+      })
+    : undefined;
+  if (supportedLevels && typeof entry.default_reasoning_level === "string") {
+    assert.ok(
+      supportedLevels.some(
+        ({ effort }) => effort === entry.default_reasoning_level
+      ),
+      `${slug} default_reasoning_level: default effort is absent from models.dev`
+    );
+  }
+  return new Map(
+    Object.entries({
+      context_window:
+        context === undefined ? undefined : Math.min(context, clientContextCap),
+      description: model.description,
+      display_name: model.name,
+      input_modalities:
+        input === undefined
+          ? undefined
+          : readReferenceStrings(input, `${slug} modalities.input`).filter(
+              (modality) => codexInputModalities.has(modality)
+            ),
+      max_context_window: context,
+      supported_reasoning_levels: supportedLevels,
+      visibility: model.visibility
+    }).filter(([, value]) => value !== undefined)
   );
 };
 
@@ -431,39 +540,33 @@ const clientModels = catalog.models.map((entry): CatalogEntry => {
   const model = settings?.providers
     .map((provider) => snapshot.get(provider)?.models[entry.slug])
     .find((row) => row !== undefined);
-  const context = isRecord(model?.limit) ? model.limit.context : undefined;
-  assert.ok(
-    context === undefined ||
-      (typeof context === "number" &&
-        Number.isSafeInteger(context) &&
-        context > 0),
-    `${entry.slug} limit.context: expected a positive integer in models.dev`
-  );
-  const derived = {
-    context_window:
-      context === undefined ? undefined : Math.min(context, clientContextCap),
-    display_name: model?.name,
-    max_context_window: context,
-    visibility: model?.visibility
-  };
-  const overrides = settings?.overrides ?? {};
+  const derived =
+    model === undefined
+      ? new Map<string, unknown>()
+      : deriveCatalogFields(entry, model);
   const updated: Record<string, unknown> = { ...entry };
-  for (const [field, catalogField] of Object.entries(clientFields)) {
-    const expected = derived[catalogField];
-    if (expected !== undefined) {
-      assert.ok(
-        !Object.hasOwn(overrides, field),
-        `${entry.slug} ${field}: hand-set value conflicts with models.dev`
+  for (const [field, value] of Object.entries(settings?.overrides ?? {})) {
+    const catalogField = clientFields.get(field);
+    assert.ok(
+      !(model && Object.hasOwn(model, field)) &&
+        !derived.has(catalogField ?? field),
+      `${entry.slug} ${field}: hand-set value conflicts with models.dev`
+    );
+    assert.ok(
+      catalogField !== undefined,
+      `${entry.slug} ${field}: unknown model setting`
+    );
+    updated[catalogField] = value;
+  }
+  for (const [field, expected] of derived) {
+    if (check) {
+      assert.deepEqual(
+        entry[field],
+        expected,
+        `${entry.slug} ${field}: derived value differs from models.dev`
       );
-      if (check) {
-        assert.equal(
-          entry[catalogField],
-          expected,
-          `${entry.slug} ${catalogField}: derived value differs from models.dev`
-        );
-      }
     }
-    updated[catalogField] = expected ?? overrides[field] ?? entry[catalogField];
+    updated[field] = expected;
   }
   const contextWindow = updated.context_window;
   assert.ok(
@@ -474,11 +577,9 @@ const clientModels = catalog.models.map((entry): CatalogEntry => {
   );
   const cappedContextWindow = Math.min(contextWindow, clientContextCap);
   updated.context_window = cappedContextWindow;
-  return Object.values(clientFields).some(
-    (field) => updated[field] !== entry[field]
-  )
-    ? { ...updated, slug: entry.slug, context_window: cappedContextWindow }
-    : entry;
+  return isDeepStrictEqual(updated, entry)
+    ? entry
+    : { ...updated, slug: entry.slug, context_window: cappedContextWindow };
 });
 const config = renderConfig(
   template,
