@@ -247,6 +247,18 @@ mock.method(globalThis, "fetch", (url) => {
       '  # api-keys:\n  #   - "your-api-key-1"\n  #   - "your-api-key-2"\n  #   - "your-api-key-3"\n  api-keys: []\n'
     )
   );
+  assert.ok(
+    proxy.includes(
+      `  #         - 'input.#(type=="additional_tools")#.tools.#(name=="functions")#.tools.#(name=="apply_patch")#'\n  payload:\n`
+    ),
+    "Expected requests.payload immediately after the upstream payload example"
+  );
+  assert.ok(
+    proxy.includes(
+      '#         - name: "kimi-k2.5"\n#           alias: "claude-opus-4.66"\napi-keys:\n'
+    ),
+    "Expected top-level api-keys immediately after the upstream API key examples"
+  );
   assert.ok(proxy.endsWith(upstreamNote));
   const check = runGenerator(fixture.path, "--check");
   assert.equal(check.status, 0, check.stderr);

@@ -419,7 +419,6 @@ requests:
   #         - 'tools.#(name=="apply_patch")'
   #         # Nested additional_tools structure in input[] (Codex CLI >= 0.154 "Responses Lite"):
   #         - 'input.#(type=="additional_tools")#.tools.#(name=="functions")#.tools.#(name=="apply_patch")#'
-
   payload:
     override:
       - models:
@@ -1117,7 +1116,6 @@ upstream:
 #           alias: "claude-opus-4.66"
 #         - name: "kimi-k2.5"
 #           alias: "claude-opus-4.66"
-
 api-keys:
   claude:
     - name: zai

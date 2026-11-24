@@ -16,7 +16,6 @@
   content: "    disable-cooling: true"
 - anchor: '  #         - ''input.#(type=="additional_tools")#.tools.#(name=="functions")#.tools.#(name=="apply_patch")#'''
   content: |2-
-
       payload:
         override:
           # @glm-overrides
@@ -43,7 +42,6 @@
     #         - name: "kimi-k2.5"
     #           alias: "claude-opus-4.66"
   content: |-
-
     api-keys:
       claude:
         - name: zai
