@@ -1133,7 +1133,7 @@ api-keys:
               - low
         - name: glm-5.3-flash
           alias: glm-5.3-flash
-          display-name: GLM 5.3 Flash
+          display-name: GLM-5.3-Flash
           max-context-length: 292000
           is-compat: true
           thinking:
@@ -1277,7 +1277,7 @@ oauth:
       - name: "gpt-5.6-luna"
         max-context-length: 272000
       - name: "gpt-5.5"
-        max-context-length: 272000
+        max-context-length: 292000
       - name: "codex-auto-review"
         max-context-length: 272000
 

@@ -1814,15 +1814,19 @@
       "requires_sandboxed_review": false,
       "auto_review_model_override": null,
       "model_specialty": null,
-      "context_window": 272000,
-      "max_context_window": 272000,
+      "context_window": 292000,
+      "max_context_window": 1050000,
       "auto_compact_token_limit": null,
       "comp_hash": "2911",
       "default_reasoning_summary": "none",
       "display_name": "GPT-5.5",
-      "description": "Legacy coding model.",
+      "description": "Default frontier GPT for coding, computer use, research, and knowledge work",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
+        {
+          "effort": "none",
+          "description": ""
+        },
         {
           "effort": "low",
           "description": "Fast responses with lighter reasoning"
@@ -2042,7 +2046,7 @@
       "slug": "glm-5.4",
       "tool_mode": "code_mode_only",
       "display_name": "GLM-5.4",
-      "description": "GLM-5.4 for coding and agent workflows.",
+      "description": "Multimodal GLM flagship model for coding, agents, and complex project delivery",
       "default_reasoning_level": "max",
       "supported_reasoning_levels": [
         {
@@ -2100,8 +2104,8 @@
     {
       "slug": "glm-5.3-flash",
       "tool_mode": "code_mode_only",
-      "display_name": "GLM 5.3 Flash",
-      "description": "GLM-5.3-Flash is a native multimodal model in the GLM-5 series.",
+      "display_name": "GLM-5.3-Flash",
+      "description": "Native multimodal GLM model for efficient coding and long-horizon agent tasks",
       "default_reasoning_level": "max",
       "supported_reasoning_levels": [
         {
