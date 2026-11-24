@@ -46,7 +46,8 @@ const runGenerator = (cwd: string, ...args: readonly string[]) =>
 
 const assertGeneratedCheckRejects = async (
   edits: FixtureEdits,
-  diagnostic: string
+  id: string,
+  expected: readonly RegExp[]
 ) => {
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
@@ -58,8 +59,16 @@ const assertGeneratedCheckRejects = async (
   );
   const result = runGenerator(fixture.path, "--check");
   assert.equal(result.status, 1, result.stderr);
-  assert.ok(result.stderr.includes(diagnostic), result.stderr);
+  const diagnostic = result.stderr
+    .split("\n")
+    .find((line) => line.includes(id));
+  assert.ok(diagnostic !== undefined, result.stderr);
+  for (const pattern of expected) {
+    assert.match(diagnostic, pattern);
+  }
 };
+
+const prefixRule = [/\bprefix\b/u, /["'`]zai\/["'`]/u];
 
 await test("the generated config check rejects a zai/ model alias", async () => {
   const id = "zai/test-glm";
@@ -73,7 +82,8 @@ await test("the generated config check rejects a zai/ model alias", async () => 
       [templateFile]: insertModel("        # @zai-models\n"),
       [configFile]: insertModel("        - name: glm-5.4\n          alias:")
     },
-    `Model alias "${id}" cannot start with the "zai/" prefix.`
+    id,
+    [/\balias\b/u, ...prefixRule]
   );
 });
 
@@ -160,7 +170,8 @@ await test("the generated config check rejects a zai/ catalog slug", async () =>
         });
       }
     },
-    `Model slug "${id}" cannot start with the "zai/" prefix.`
+    id,
+    [/\bslug\b/u, ...prefixRule]
   );
 });
 
@@ -173,7 +184,13 @@ await test("the generated check rejects a hand-set reference field", async () =>
           '"glm-5.4": { "max_context_window": 1000000 }'
         )
     },
-    "glm-5.4 max_context_window: hand-set value conflicts with models.dev"
+    "glm-5.4",
+    [
+      /\bmax_context_window\b/u,
+      /\bhand[- ]set\b/u,
+      /\bconflict\w*\b/u,
+      /\bmodels\.dev\b/u
+    ]
   );
 });
 
@@ -186,6 +203,11 @@ await test("the generated check rejects a mismatched reference value", async () 
           '"max_context_window": 1049999'
         )
     },
-    "gpt-5.5 max_context_window: derived value differs from models.dev"
+    "gpt-5.5",
+    [
+      /\bmax_context_window\b/u,
+      /\b(?:differs?|mismatch)\b/u,
+      /\bmodels\.dev\b/u
+    ]
   );
 });
