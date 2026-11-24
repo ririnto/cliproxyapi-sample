@@ -27,6 +27,7 @@ const clientFields = new Map([
   ["input_modalities", "input_modalities"],
   ["max_context_window", "max_context_window"],
   ["supported_reasoning_levels", "supported_reasoning_levels"],
+  ["supports_search_tool", "supports_search_tool"],
   ["visibility", "visibility"]
 ]);
 const codexInputModalities = new Set(["text", "image", "audio"]);
@@ -153,6 +154,11 @@ const deriveCatalogFields = (
       `${slug} default_reasoning_level: default effort is absent from models.dev`
     );
   }
+  assert.ok(
+    model.supports_search_tool === undefined ||
+      typeof model.supports_search_tool === "boolean",
+    `${slug} supports_search_tool: expected a boolean in models.dev`
+  );
   return new Map(
     Object.entries({
       context_window:
@@ -167,6 +173,7 @@ const deriveCatalogFields = (
             ),
       max_context_window: context,
       supported_reasoning_levels: supportedLevels,
+      supports_search_tool: model.supports_search_tool,
       visibility: model.visibility
     }).filter(([, value]) => value !== undefined)
   );
@@ -179,9 +186,7 @@ const assertBareModelId = (id: string, field: "alias" | "name" | "slug") => {
   );
 };
 
-const assertBareModelIds = (contents: string) => {
-  const config: unknown = parse(contents, { merge: true });
-  assert.ok(isRecord(config), "Expected a proxy configuration mapping");
+const assertBareModelIds = (config: Record<string, unknown>) => {
   const modelLists: unknown[] = [];
   if (isRecord(config.oauth)) {
     for (const section of [
@@ -219,6 +224,53 @@ const assertBareModelIds = (contents: string) => {
         }
       }
     }
+  }
+};
+
+const assertProxyConfig = (contents: string) => {
+  const config: unknown = parse(contents, { merge: true });
+  assert.ok(isRecord(config), "Expected a proxy configuration mapping");
+  assertBareModelIds(config);
+  const providers = isRecord(config["api-keys"])
+    ? config["api-keys"].claude
+    : undefined;
+  const zai = Array.isArray(providers)
+    ? providers.filter(isRecord).find(({ name }) => name === "zai")
+    : undefined;
+  assert.ok(
+    zai?.["base-url"] === "https://api.z.ai/api/anthropic",
+    "zai base-url: expected the direct Claude endpoint https://api.z.ai/api/anthropic"
+  );
+  assert.ok(
+    Array.isArray(zai.models),
+    "zai models: expected Claude model rows"
+  );
+  const zaiModels: readonly unknown[] = zai.models;
+  for (const model of zaiModels) {
+    assert.ok(
+      isRecord(model) && typeof model.name === "string" && model.name,
+      "zai models: expected a bare model name"
+    );
+    assert.ok(
+      !model.name.includes("/"),
+      `zai ${model.name} name: expected a bare model name`
+    );
+    assert.equal(
+      model.alias,
+      model.name,
+      `zai ${model.name} alias: expected the bare model name`
+    );
+    assert.ok(
+      !JSON.stringify(model).includes("${"),
+      `zai ${model.name}: model rows cannot use environment placeholders`
+    );
+  }
+  if (isRecord(config.upstream) && isRecord(config.upstream.claude)) {
+    const toolSearch = config.upstream.claude["tool-search"];
+    assert.ok(
+      toolSearch === undefined || toolSearch === true,
+      "upstream.claude.tool-search: omit the default false and use literal true to enable"
+    );
   }
 };
 
@@ -540,6 +592,12 @@ const clientModels = catalog.models.map((entry): CatalogEntry => {
   const model = settings?.providers
     .map((provider) => snapshot.get(provider)?.models[entry.slug])
     .find((row) => row !== undefined);
+  if (settings?.group === "zai") {
+    assert.ok(
+      model !== undefined,
+      `${entry.slug} referenceProviders: missing models.dev model in ${settings.providers.join(", ")}`
+    );
+  }
   const derived =
     model === undefined
       ? new Map<string, unknown>()
@@ -556,6 +614,20 @@ const clientModels = catalog.models.map((entry): CatalogEntry => {
       catalogField !== undefined,
       `${entry.slug} ${field}: unknown model setting`
     );
+    if (field === "supports_search_tool") {
+      assert.equal(
+        value,
+        true,
+        `${entry.slug} ${field}: omit the default false and use literal true to enable`
+      );
+      if (check) {
+        assert.equal(
+          entry[catalogField],
+          value,
+          `${entry.slug} ${field}: catalog value differs from config/models.json`
+        );
+      }
+    }
     updated[catalogField] = value;
   }
   for (const [field, expected] of derived) {
@@ -603,7 +675,7 @@ const config = renderConfig(
     )
   )
 );
-assertBareModelIds(config);
+assertProxyConfig(config);
 const proxyConfigPath = "config.example.yaml";
 const outputs = [
   {
@@ -630,7 +702,7 @@ await Promise.all(
     if (check) {
       const existing = await readFile(path, "utf-8");
       if (path === proxyConfigPath && existing !== contents) {
-        assertBareModelIds(existing);
+        assertProxyConfig(existing);
       }
       assert.ok(
         existing === contents,

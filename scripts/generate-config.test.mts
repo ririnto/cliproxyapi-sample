@@ -87,6 +87,109 @@ await test("the generated config check rejects a zai/ model alias", async () => 
   );
 });
 
+await test("the generated check rejects violations of the GLM route rules", async () => {
+  await Promise.all(
+    (
+      [
+        [
+          "base-url: https://api.z.ai/api/anthropic",
+          "base-url: https://api.z.ai/api/paas/v4",
+          "zai base-url",
+          /expected the direct Claude endpoint/u
+        ],
+        [
+          "alias: glm-5.4",
+          "alias: glm",
+          "zai glm-5.4 alias",
+          /expected the bare model name/u
+        ],
+        [
+          "max-context-length: 292000\n          is-compat: true",
+          `max-context-length: \${GLM_CONTEXT}\n          is-compat: true`,
+          "zai glm-5.4",
+          /cannot use environment placeholders/u
+        ]
+      ] as const
+    ).map(async ([source, replacement, id, diagnostic]) => {
+      await assertGeneratedCheckRejects(
+        {
+          [configFile]: (contents) =>
+            contents.replace(source, () => replacement)
+        },
+        id,
+        [diagnostic]
+      );
+    })
+  );
+  await assertGeneratedCheckRejects(
+    {
+      [templateFile]: (contents) =>
+        contents.replace(
+          "    # When true, inject Anthropic server-side refusal fallbacks",
+          "    tool-search: false\n\n    # When true, inject Anthropic server-side refusal fallbacks"
+        )
+    },
+    "upstream.claude.tool-search",
+    [/omit the default false/u]
+  );
+  await assertGeneratedCheckRejects(
+    {
+      [settingsFile]: (contents) =>
+        contents.replace('"zai", "zai-coding-plan"', '"zai"')
+    },
+    "glm-5.4 referenceProviders",
+    [/missing models\.dev model in zai/u]
+  );
+});
+
+await test("generation restores deferred search for both GLM models", async () => {
+  await using fixture = await mkdtempDisposable(
+    path.join(tmpdir(), "proxy-config-")
+  );
+  await copyFixtureFiles(
+    fixture.path,
+    [catalogFile, templateFile, configFile],
+    {
+      [catalogFile]: (contents) => {
+        const catalog = parseDocument(contents);
+        const models: unknown = catalog.get("models");
+        assert.ok(isSeq(models));
+        for (const model of models.items) {
+          const slug: unknown = isMap(model) ? model.get("slug") : undefined;
+          if (
+            isMap(model) &&
+            (slug === "glm-5.4" || slug === "glm-5.3-flash")
+          ) {
+            model.set("supports_search_tool", false);
+          }
+        }
+        const edited: unknown = catalog.toJSON();
+        return JSON.stringify(edited);
+      }
+    }
+  );
+  const check = runGenerator(fixture.path, "--check");
+  assert.equal(check.status, 1, check.stderr);
+  assert.match(
+    check.stderr,
+    /glm-5\.4 supports_search_tool: catalog value differs from config\/models\.json/u
+  );
+  const result = runGenerator(fixture.path);
+  assert.equal(result.status, 0, result.stderr);
+  const catalog = parseDocument(
+    await readFile(path.join(fixture.path, catalogFile), "utf-8")
+  );
+  const models: unknown = catalog.get("models");
+  assert.ok(isSeq(models));
+  for (const slug of ["glm-5.4", "glm-5.3-flash"]) {
+    const model: unknown = models.items.find(
+      (item) => isMap(item) && item.get("slug") === slug
+    );
+    assert.ok(isMap(model), `Missing catalog model ${slug}`);
+    assert.equal(model.get("supports_search_tool"), true, slug);
+  }
+});
+
 await test("generated GLM rules remap only unsupported Claude effort levels", async () => {
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
@@ -180,8 +283,8 @@ await test("the generated check rejects a hand-set reference field", async () =>
     {
       [settingsFile]: (contents) =>
         contents.replace(
-          '"glm-5.4": {}',
-          '"glm-5.4": { "max_context_window": 1000000 }'
+          '"glm-5.4": {',
+          '"glm-5.4": { "max_context_window": 1000000,'
         )
     },
     "glm-5.4",
@@ -228,8 +331,9 @@ await Promise.all(
         {
           [settingsFile]: (contents) =>
             contents.replace(
-              '"glm-5.4": {}',
-              () => `"glm-5.4": ${JSON.stringify({ [field]: value })}`
+              '"glm-5.4": {',
+              () =>
+                `"glm-5.4": { ${JSON.stringify(field)}: ${JSON.stringify(value)},`
             )
         },
         "glm-5.4",
