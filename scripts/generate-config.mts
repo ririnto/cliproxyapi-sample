@@ -4,6 +4,8 @@ import { isDeepStrictEqual } from "node:util";
 
 import { parse, stringify } from "yaml";
 
+type CatalogVisibility = "list" | "hide" | "none";
+
 interface CatalogModel {
   readonly contextWindow: number;
   readonly displayName: unknown;
@@ -15,6 +17,7 @@ interface CatalogEntry extends Record<string, unknown> {
   readonly slug: string;
   readonly context_window: number;
   readonly supports_search_tool?: boolean;
+  readonly visibility?: CatalogVisibility;
 }
 
 const clientContextCap = 292_000;
@@ -38,6 +41,9 @@ const officialCatalogUrl =
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const isCatalogVisibility = (value: unknown): value is CatalogVisibility =>
+  value === "list" || value === "hide" || value === "none";
 
 const readModelSettings = (contents: string) => {
   const settings: unknown = JSON.parse(contents);
@@ -103,10 +109,7 @@ const readModelSettings = (contents: string) => {
         assert.ok(isRecord(overrides), `Invalid model settings for ${slug}`);
         const { visibility } = overrides;
         assert.ok(
-          visibility === undefined ||
-            visibility === "list" ||
-            visibility === "hide" ||
-            visibility === "none",
+          visibility === undefined || isCatalogVisibility(visibility),
           `${slug} visibility: expected list, hide, or none in ${settingsPath}`
         );
         assert.ok(!slugs.has(slug), `Duplicate model settings for ${slug}`);
@@ -313,15 +316,21 @@ const readCatalog = (contents: string, source: string, check = false) => {
     isRecord(catalog) && Array.isArray(catalog.models),
     `Expected a models array in ${source}`
   );
+  const { sourceVisibility } = catalog;
+  assert.ok(
+    sourceVisibility === undefined || isRecord(sourceVisibility),
+    `Expected a sourceVisibility object in ${source}`
+  );
   const slugs = new Set<string>();
   return {
     ...catalog,
+    sourceVisibility,
     models: catalog.models.map((entry: unknown): CatalogEntry => {
       assert.ok(
         isRecord(entry) && typeof entry.slug === "string" && entry.slug,
         "Expected a nonempty catalog model slug"
       );
-      const { slug, context_window, supports_search_tool } = entry;
+      const { slug, context_window, supports_search_tool, visibility } = entry;
       assertBareModelId(slug, "slug");
       assert.ok(!slugs.has(slug), `Duplicate catalog model: ${slug}`);
       assert.ok(
@@ -338,6 +347,10 @@ const readCatalog = (contents: string, source: string, check = false) => {
       assert.ok(
         !check || supports_search_tool !== false,
         `${slug} supports_search_tool: omit the default false in ${source}`
+      );
+      assert.ok(
+        visibility === undefined || isCatalogVisibility(visibility),
+        `${slug} visibility: expected list, hide, or none in ${source}`
       );
       slugs.add(slug);
       return { ...entry, slug, context_window };
@@ -370,7 +383,19 @@ const mergeCatalog = (
       merged.set(entry.slug, entry);
     }
   }
-  return { ...official, models: [...merged.values()] };
+  return {
+    ...official,
+    models: [...merged.values()],
+    sourceVisibility: {
+      ...local.sourceVisibility,
+      ...Object.fromEntries(
+        official.models.map(({ slug, visibility }) => [
+          slug,
+          visibility ?? null
+        ])
+      )
+    }
+  };
 };
 
 const requireModel = (
@@ -624,6 +649,23 @@ const catalog = refresh
       localCatalog
     )
   : localCatalog;
+const { sourceVisibility: savedVisibility } = catalog;
+assert.ok(
+  savedVisibility !== undefined,
+  `${clientCatalogPath} is missing sourceVisibility. Run node scripts/generate-config.mts --refresh.`
+);
+const sourceVisibility = Object.fromEntries<CatalogVisibility | null>(
+  catalog.models.map(({ slug, visibility }) => {
+    const original = Object.hasOwn(savedVisibility, slug)
+      ? savedVisibility[slug]
+      : (visibility ?? null);
+    assert.ok(
+      original === null || isCatalogVisibility(original),
+      `${slug} sourceVisibility: expected list, hide, none, or null`
+    );
+    return [slug, original];
+  })
+);
 const catalogSlugs = new Set(catalog.models.map(({ slug }) => slug));
 for (const slug of modelSettings.keys()) {
   assert.ok(
@@ -651,7 +693,7 @@ const applyCatalogPolicy = ({
   const { slug } = entry;
   if (visibilityOverride === undefined) {
     const final = laneFinals.get(modelLane(slug) ?? "");
-    let { visibility } = entry;
+    let visibility = sourceVisibility[slug] ?? null;
     if (visibility !== "hide" && final !== undefined) {
       visibility = final === slug ? "list" : "hide";
     }
@@ -659,7 +701,9 @@ const applyCatalogPolicy = ({
       !derived.has("visibility") || derived.get("visibility") === visibility,
       `${slug} visibility: models.dev conflicts with expected ${String(visibility)}`
     );
-    if (visibility !== undefined) {
+    if (visibility === null) {
+      delete updated.visibility;
+    } else {
       updated.visibility = visibility;
     }
   }
@@ -795,8 +839,9 @@ const outputs = [
     path: clientCatalogPath,
     contents:
       refresh ||
+      !isDeepStrictEqual(sourceVisibility, savedVisibility) ||
       clientModels.some((entry, index) => entry !== catalog.models[index])
-        ? `${JSON.stringify({ ...catalog, models: clientModels }, null, 2)}\n`
+        ? `${JSON.stringify({ ...catalog, models: clientModels, sourceVisibility }, null, 2)}\n`
         : localContents
   }
 ];

@@ -226,6 +226,41 @@ await test("the generated check identifies visibility and search policy violatio
   );
 });
 
+await test("offline generation restores visibility when the final model changes", async () => {
+  await using fixture = await mkdtempDisposable(
+    path.join(tmpdir(), "proxy-config-")
+  );
+  await copyFixtureFiles(
+    fixture.path,
+    [catalogFile, templateFile, configFile],
+    {
+      [settingsFile]: (contents) =>
+        contents.replace('"gpt-6.2-sol"', '"gpt-6.1-sol"')
+    }
+  );
+  const result = runGenerator(fixture.path);
+  assert.equal(result.status, 0, result.stderr);
+  const check = runGenerator(fixture.path, "--check");
+  assert.equal(check.status, 0, check.stderr);
+  const catalog = parseDocument(
+    await readFile(path.join(fixture.path, catalogFile), "utf-8")
+  );
+  const models: unknown = catalog.get("models");
+  assert.ok(isSeq(models));
+  for (const [slug, visibility] of [
+    ["gpt-6.1-sol", "list"],
+    ["gpt-6.2-sol", "hide"],
+    ["codex-auto-review", "hide"],
+    ["gpt-5.5", "hide"]
+  ]) {
+    const model: unknown = models.items.find(
+      (item) => isMap(item) && item.get("slug") === slug
+    );
+    assert.ok(isMap(model), slug);
+    assert.equal(model.get("visibility"), visibility, slug);
+  }
+});
+
 await test("refresh keeps owner visibility and effective search values", async () => {
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")

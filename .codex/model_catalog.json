@@ -2160,5 +2160,23 @@
       "node_repl_disabled": false,
       "supports_reasoning_summary_parameter": false
     }
-  ]
+  ],
+  "sourceVisibility": {
+    "gpt-6.2-sol": "list",
+    "gpt-6.2-astra": "list",
+    "gpt-6-astra": "list",
+    "gpt-6.1-sol": "list",
+    "gpt-6.1-terra": "list",
+    "gpt-6-sol": "list",
+    "gpt-6-luna": "list",
+    "gpt-5.6-sol": "list",
+    "gpt-5.6-terra": "list",
+    "gpt-5.6-luna": "list",
+    "gpt-daybreak-blue-latest": "hide",
+    "gpt-daybreak-red-latest": "hide",
+    "gpt-5.5": "list",
+    "codex-auto-review": "hide",
+    "glm-5.4": "list",
+    "glm-5.3-flash": "list"
+  }
 }
