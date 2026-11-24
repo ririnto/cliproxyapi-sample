@@ -589,7 +589,6 @@ upstream:
     # model catalog advertises supports_search_tool for a Claude model only when every
     # credential serving it supports native tool search.
     # Default false keeps the translation and catalog behavior that predate tool_search support.
-    tool-search: false
 
     # When true, inject Anthropic server-side refusal fallbacks on cloaked Claude requests
     # when the request body does not already specify fallbacks (claude-opus-5-5 -> claude-opus-4-8,

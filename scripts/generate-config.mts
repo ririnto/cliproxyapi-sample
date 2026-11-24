@@ -14,6 +14,7 @@ interface CatalogModel {
 interface CatalogEntry extends Record<string, unknown> {
   readonly slug: string;
   readonly context_window: number;
+  readonly supports_search_tool?: boolean;
 }
 
 const clientContextCap = 292_000;
@@ -27,6 +28,7 @@ const clientFields = new Map([
   ["input_modalities", "input_modalities"],
   ["max_context_window", "max_context_window"],
   ["supported_reasoning_levels", "supported_reasoning_levels"],
+  ["supports_search_tool", "supports_search_tool"],
   ["visibility", "visibility"]
 ]);
 const codexInputModalities = new Set(["text", "image", "audio"]);
@@ -153,7 +155,12 @@ const deriveCatalogFields = (
       `${slug} default_reasoning_level: default effort is absent from models.dev`
     );
   }
-  return new Map(
+  assert.ok(
+    model.supports_search_tool === undefined ||
+      typeof model.supports_search_tool === "boolean",
+    `${slug} supports_search_tool: expected a boolean in models.dev`
+  );
+  const fields = new Map(
     Object.entries({
       context_window:
         context === undefined ? undefined : Math.min(context, clientContextCap),
@@ -170,6 +177,10 @@ const deriveCatalogFields = (
       visibility: model.visibility
     }).filter(([, value]) => value !== undefined)
   );
+  if (model.supports_search_tool !== undefined) {
+    fields.set("supports_search_tool", model.supports_search_tool || undefined);
+  }
+  return fields;
 };
 
 const assertBareModelId = (id: string, field: "alias" | "name" | "slug") => {
@@ -179,9 +190,7 @@ const assertBareModelId = (id: string, field: "alias" | "name" | "slug") => {
   );
 };
 
-const assertBareModelIds = (contents: string) => {
-  const config: unknown = parse(contents, { merge: true });
-  assert.ok(isRecord(config), "Expected a proxy configuration mapping");
+const assertBareModelIds = (config: Record<string, unknown>) => {
   const modelLists: unknown[] = [];
   if (isRecord(config.oauth)) {
     for (const section of [
@@ -222,7 +231,54 @@ const assertBareModelIds = (contents: string) => {
   }
 };
 
-const readCatalog = (contents: string, source: string) => {
+const assertProxyConfig = (contents: string) => {
+  const config: unknown = parse(contents, { merge: true });
+  assert.ok(isRecord(config), "Expected a proxy configuration mapping");
+  assertBareModelIds(config);
+  const providers = isRecord(config["api-keys"])
+    ? config["api-keys"].claude
+    : undefined;
+  const zai = Array.isArray(providers)
+    ? providers.filter(isRecord).find(({ name }) => name === "zai")
+    : undefined;
+  assert.ok(
+    zai?.["base-url"] === "https://api.z.ai/api/anthropic",
+    "zai base-url: expected the direct Claude endpoint https://api.z.ai/api/anthropic"
+  );
+  assert.ok(
+    Array.isArray(zai.models),
+    "zai models: expected Claude model rows"
+  );
+  const zaiModels: readonly unknown[] = zai.models;
+  for (const model of zaiModels) {
+    assert.ok(
+      isRecord(model) && typeof model.name === "string" && model.name,
+      "zai models: expected a bare model name"
+    );
+    assert.ok(
+      !model.name.includes("/"),
+      `zai ${model.name} name: expected a bare model name`
+    );
+    assert.equal(
+      model.alias,
+      model.name,
+      `zai ${model.name} alias: expected the bare model name`
+    );
+    assert.ok(
+      !JSON.stringify(model).includes("${"),
+      `zai ${model.name}: model rows cannot use environment placeholders`
+    );
+  }
+  if (isRecord(config.upstream) && isRecord(config.upstream.claude)) {
+    const toolSearch = config.upstream.claude["tool-search"];
+    assert.ok(
+      toolSearch === undefined || toolSearch === true,
+      "upstream.claude.tool-search: omit the default false and use literal true to enable"
+    );
+  }
+};
+
+const readCatalog = (contents: string, source: string, check = false) => {
   const catalog: unknown = JSON.parse(contents);
   assert.ok(
     isRecord(catalog) && Array.isArray(catalog.models),
@@ -236,7 +292,7 @@ const readCatalog = (contents: string, source: string) => {
         isRecord(entry) && typeof entry.slug === "string" && entry.slug,
         "Expected a nonempty catalog model slug"
       );
-      const { slug, context_window } = entry;
+      const { slug, context_window, supports_search_tool } = entry;
       assertBareModelId(slug, "slug");
       assert.ok(!slugs.has(slug), `Duplicate catalog model: ${slug}`);
       assert.ok(
@@ -244,6 +300,15 @@ const readCatalog = (contents: string, source: string) => {
           Number.isSafeInteger(context_window) &&
           context_window > 0,
         `Invalid context window for ${slug}`
+      );
+      assert.ok(
+        supports_search_tool === undefined ||
+          typeof supports_search_tool === "boolean",
+        `${slug} supports_search_tool: expected a boolean in ${source}`
+      );
+      assert.ok(
+        !check || supports_search_tool !== false,
+        `${slug} supports_search_tool: omit the default false in ${source}`
       );
       slugs.add(slug);
       return { ...entry, slug, context_window };
@@ -266,7 +331,13 @@ const mergeCatalog = (
 ) => {
   const merged = new Map(official.models.map((entry) => [entry.slug, entry]));
   for (const entry of local.models) {
-    if (!merged.has(entry.slug)) {
+    const refreshed = merged.get(entry.slug);
+    if (refreshed) {
+      merged.set(entry.slug, {
+        ...refreshed,
+        supports_search_tool: entry.supports_search_tool ?? false
+      });
+    } else {
       merged.set(
         entry.slug,
         codexVersion(entry.slug) ? { ...entry, visibility: "hide" } : entry
@@ -521,7 +592,7 @@ const snapshot = new Map(
     ] as const;
   })
 );
-const localCatalog = readCatalog(localContents, clientCatalogPath);
+const localCatalog = readCatalog(localContents, clientCatalogPath, check);
 const catalog = refresh
   ? mergeCatalog(
       readCatalog(await fetchCatalog(officialCatalogUrl), officialCatalogUrl),
@@ -540,6 +611,12 @@ const clientModels = catalog.models.map((entry): CatalogEntry => {
   const model = settings?.providers
     .map((provider) => snapshot.get(provider)?.models[entry.slug])
     .find((row) => row !== undefined);
+  if (settings?.group === "zai") {
+    assert.ok(
+      model !== undefined,
+      `${entry.slug} referenceProviders: missing models.dev model in ${settings.providers.join(", ")}`
+    );
+  }
   const derived =
     model === undefined
       ? new Map<string, unknown>()
@@ -556,6 +633,20 @@ const clientModels = catalog.models.map((entry): CatalogEntry => {
       catalogField !== undefined,
       `${entry.slug} ${field}: unknown model setting`
     );
+    if (field === "supports_search_tool") {
+      assert.equal(
+        value,
+        true,
+        `${entry.slug} ${field}: omit the default false and use literal true to enable`
+      );
+      if (check) {
+        assert.equal(
+          entry[catalogField],
+          value,
+          `${entry.slug} ${field}: catalog value differs from config/models.json`
+        );
+      }
+    }
     updated[catalogField] = value;
   }
   for (const [field, expected] of derived) {
@@ -567,6 +658,9 @@ const clientModels = catalog.models.map((entry): CatalogEntry => {
       );
     }
     updated[field] = expected;
+  }
+  if (updated.supports_search_tool !== true) {
+    delete updated.supports_search_tool;
   }
   const contextWindow = updated.context_window;
   assert.ok(
@@ -603,7 +697,7 @@ const config = renderConfig(
     )
   )
 );
-assertBareModelIds(config);
+assertProxyConfig(config);
 const proxyConfigPath = "config.example.yaml";
 const outputs = [
   {
@@ -630,7 +724,7 @@ await Promise.all(
     if (check) {
       const existing = await readFile(path, "utf-8");
       if (path === proxyConfigPath && existing !== contents) {
-        assertBareModelIds(existing);
+        assertProxyConfig(existing);
       }
       assert.ok(
         existing === contents,

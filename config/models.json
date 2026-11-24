@@ -12,8 +12,12 @@
     "zai": {
       "referenceProviders": ["zai", "zai-coding-plan"],
       "models": {
-        "glm-5.4": {},
-        "glm-5.3-flash": {}
+        "glm-5.4": {
+          "supports_search_tool": true
+        },
+        "glm-5.3-flash": {
+          "supports_search_tool": true
+        }
       }
     }
   }
