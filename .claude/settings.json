@@ -81,88 +81,88 @@
       "autoUpdate": true,
       "source": {
         "ref": "main",
-        "repo": "anthropics/skills",
-        "source": "github"
+        "url": "https://github.com/anthropics/skills.git",
+        "source": "git"
       }
     },
     "astryx": {
       "autoUpdate": true,
       "source": {
         "ref": "main",
-        "repo": "meta/astryx",
-        "source": "github"
+        "url": "https://github.com/meta/astryx.git",
+        "source": "git"
       }
     },
     "claude-plugins-official": {
       "autoUpdate": true,
       "source": {
         "ref": "main",
-        "repo": "anthropics/claude-plugins-official",
-        "source": "github"
+        "url": "https://github.com/anthropics/claude-plugins-official.git",
+        "source": "git"
       }
     },
     "cursor-plugins": {
       "autoUpdate": true,
       "source": {
         "ref": "main",
-        "repo": "cursor/plugins",
-        "source": "github"
+        "url": "https://github.com/cursor/plugins.git",
+        "source": "git"
       }
     },
     "googlechrome": {
       "autoUpdate": true,
       "source": {
         "ref": "main",
-        "repo": "GoogleChrome/modern-web-guidance",
-        "source": "github"
+        "url": "https://github.com/GoogleChrome/modern-web-guidance.git",
+        "source": "git"
       }
     },
     "grafana-skills": {
       "autoUpdate": true,
       "source": {
         "ref": "main",
-        "repo": "grafana/skills",
-        "source": "github"
+        "url": "https://github.com/grafana/skills.git",
+        "source": "git"
       }
     },
     "i-have-adhd": {
       "autoUpdate": true,
       "source": {
         "ref": "main",
-        "repo": "ayghri/i-have-adhd",
-        "source": "github"
+        "url": "https://github.com/ayghri/i-have-adhd.git",
+        "source": "git"
       }
     },
     "kotest": {
       "autoUpdate": true,
       "source": {
         "ref": "master",
-        "repo": "kotest/kotest",
-        "source": "github"
+        "url": "https://github.com/kotest/kotest.git",
+        "source": "git"
       }
     },
     "rea": {
       "autoUpdate": true,
       "source": {
         "ref": "main",
-        "repo": "morluto/rea",
-        "source": "github"
+        "url": "https://github.com/morluto/rea.git",
+        "source": "git"
       }
     },
     "sinon": {
       "autoUpdate": true,
       "source": {
         "ref": "main",
-        "repo": "ririnto/sinon",
-        "source": "github"
+        "url": "https://github.com/ririnto/sinon.git",
+        "source": "git"
       }
     },
     "superpowers-marketplace": {
       "autoUpdate": true,
       "source": {
         "ref": "main",
-        "repo": "obra/superpowers-marketplace",
-        "source": "github"
+        "url": "https://github.com/obra/superpowers-marketplace.git",
+        "source": "git"
       }
     }
   },
