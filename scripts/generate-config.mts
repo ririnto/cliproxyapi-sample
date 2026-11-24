@@ -37,6 +37,13 @@ const officialCatalogUrl =
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const assertBareModelId = (id: string, field: "alias" | "name" | "slug") => {
+  assert.ok(
+    !id.startsWith("zai/"),
+    `Model ${field} ${JSON.stringify(id)} cannot start with the "zai/" prefix.`
+  );
+};
+
 const assertBareModelIds = (contents: string) => {
   const config: unknown = parse(contents, { merge: true });
   assert.ok(isRecord(config), "Expected a proxy configuration mapping");
@@ -68,12 +75,11 @@ const assertBareModelIds = (contents: string) => {
     if (Array.isArray(list)) {
       for (const row of list) {
         if (isRecord(row)) {
-          for (const field of ["name", "alias"]) {
+          for (const field of ["name", "alias"] as const) {
             const id = row[field];
-            assert.ok(
-              typeof id !== "string" || !id.startsWith("zai/"),
-              `Model ${field} ${JSON.stringify(id)} cannot start with the "zai/" prefix.`
-            );
+            if (typeof id === "string") {
+              assertBareModelId(id, field);
+            }
           }
         }
       }
@@ -96,6 +102,7 @@ const readCatalog = (contents: string, source: string) => {
         "Expected a nonempty catalog model slug"
       );
       const { slug, context_window } = entry;
+      assertBareModelId(slug, "slug");
       assert.ok(!slugs.has(slug), `Duplicate catalog model: ${slug}`);
       assert.ok(
         typeof context_window === "number" &&
