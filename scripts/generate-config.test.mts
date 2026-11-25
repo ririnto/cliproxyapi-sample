@@ -3,7 +3,10 @@ import { spawnSync } from "node:child_process";
 import {
   mkdir,
   mkdtempDisposable,
+  readdir,
   readFile,
+  stat,
+  utimes,
   writeFile
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -18,6 +21,12 @@ const upstreamFile = "config/proxy.upstream.yaml.txt";
 const overridesFile = "config/proxy.overrides.yaml";
 const configFile = "config.example.yaml";
 const settingsFile = "config/models.json";
+const overriddenModels = [
+  "gpt-6.2-astra",
+  "gpt-6-astra",
+  "gpt-6-luna",
+  "gpt-5.6-luna"
+] as const;
 
 type FixtureEdits = Readonly<
   Partial<Record<string, (contents: string) => string>>
@@ -122,6 +131,7 @@ await test("generation applies local settings to the official catalog and proxy 
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
   );
+  const astraOverride = 293_000;
   await copyFixtureFiles(fixture.path, [catalogFile], {
     [upstreamFile]: () => "stale: true\n",
     [catalogFile]: () =>
@@ -129,11 +139,24 @@ await test("generation applies local settings to the official catalog and proxy 
         sourceVisibility: { "gpt-6.2-sol": "hide" },
         models: [{ slug: "old-local-model", context_window: 100_000 }]
       }),
+    [overridesFile]: (contents) => {
+      const overrides = parseDocument(contents);
+      assert.ok(isSeq(overrides.contents));
+      const astraEdit: unknown = overrides.contents.items.find(
+        (entry: unknown) =>
+          isMap(entry) && entry.get("after") === '      - name: "gpt-6.2-astra"'
+      );
+      assert.ok(isMap(astraEdit));
+      astraEdit.set("content", `        max-context-length: ${astraOverride}`);
+      return overrides.toString();
+    },
     [settingsFile]: () =>
       JSON.stringify({
         finalModels: [
           "gpt-6.2-sol",
           "gpt-6.2-astra",
+          "gpt-6.1-terra",
+          "gpt-6-luna",
           "glm-5.4",
           "glm-5.3-flash"
         ],
@@ -162,12 +185,23 @@ await test("generation applies local settings to the official catalog and proxy 
     supports_search_tool: true,
     upstream_only: { retained: true }
   };
+  const astra = {
+    ...first,
+    slug: "gpt-6.2-astra",
+    context_window: 272_000,
+    max_context_window: 872_000
+  };
+  const luna = { ...astra, slug: "gpt-6-luna" };
   const upstream = {
     models: [
       first,
       { ...first, slug: "gpt-6.1-sol", visibility: "hide" },
       { ...first, slug: "gpt-7-sol" },
-      { ...first, slug: "gpt-6.2-astra", visibility: "hide" },
+      astra,
+      { ...astra, slug: "gpt-6-astra" },
+      luna,
+      { ...luna, slug: "gpt-5.6-luna" },
+      { ...first, slug: "gpt-6.1-terra", visibility: "hide" },
       { ...first, slug: "gpt-5.5" },
       { ...first, slug: "codex-auto-review", visibility: "hide" },
       { ...first, slug: "glm-5.3" },
@@ -215,7 +249,11 @@ mock.method(globalThis, "fetch", (url) => {
       { ...first, context_window: 292_000, supports_search_tool: false },
       { ...first, slug: "gpt-6.1-sol" },
       { ...first, slug: "gpt-7-sol", visibility: "hide" },
-      { ...first, slug: "gpt-6.2-astra", visibility: "hide" },
+      astra,
+      { ...astra, slug: "gpt-6-astra", visibility: "hide" },
+      luna,
+      { ...luna, slug: "gpt-5.6-luna", visibility: "hide" },
+      { ...first, slug: "gpt-6.1-terra", visibility: "hide" },
       { ...first, slug: "gpt-5.5", visibility: "hide" },
       { ...first, slug: "codex-auto-review", visibility: "hide" },
       { ...first, slug: "glm-5.3", visibility: "hide" },
@@ -239,6 +277,26 @@ mock.method(globalThis, "fetch", (url) => {
   const proxy = await readFile(path.join(fixture.path, configFile), "utf-8");
   const proxyDocument = parseDocument(proxy);
   assert.equal(proxyDocument.getIn(["models", "codex-catalog"]), "");
+  const oauthSettings: unknown = proxyDocument.getIn([
+    "oauth",
+    "settings",
+    "codex"
+  ]);
+  assert.ok(isSeq(oauthSettings));
+  for (const name of overriddenModels) {
+    const expected = name === "gpt-6.2-astra" ? astraOverride : 292_000;
+    const row: unknown = oauthSettings.items.find(
+      (entry) => isMap(entry) && entry.get("name") === name
+    );
+    assert.ok(isMap(row), `Missing OAuth settings for ${name}`);
+    assert.equal(row.get("max-context-length"), expected);
+    assert.ok(
+      proxy.includes(
+        `      - name: "${name}"\n        # max-context-length: 272000\n        max-context-length: ${expected}\n`
+      ),
+      `Missing original context directly above the override for ${name}`
+    );
+  }
   const filters: unknown = proxyDocument.getIn([
     "requests",
     "payload",
@@ -276,6 +334,85 @@ mock.method(globalThis, "fetch", (url) => {
   assert.ok(proxy.endsWith(upstreamNote));
   const check = runGenerator(fixture.path, "--check");
   assert.equal(check.status, 0, check.stderr);
+});
+
+await test("the generated overrides change only the four targeted OAuth settings", async () => {
+  await using fixture = await mkdtempDisposable(
+    path.join(tmpdir(), "proxy-config-")
+  );
+  await copyFixtureFiles(fixture.path, [catalogFile, configFile]);
+  const withOverrides = runGenerator(fixture.path, "--check");
+  assert.equal(withOverrides.status, 0, withOverrides.stderr);
+
+  const overridesPath = path.join(fixture.path, overridesFile);
+  const overrides = parseDocument(await readFile(overridesPath, "utf-8"));
+  assert.ok(isSeq(overrides.contents));
+  overrides.contents.items = overrides.contents.items.filter(
+    (entry: unknown) => !isMap(entry) || entry.get("after-generation") !== true
+  );
+  await writeFile(overridesPath, overrides.toString());
+
+  const samplePath = path.join(fixture.path, configFile);
+  let expected = await readFile(samplePath, "utf-8");
+  for (const name of overriddenModels) {
+    const row = `      - name: "${name}"\n`;
+    const overridden = `${row}        # max-context-length: 272000\n        max-context-length: 292000\n`;
+    assert.ok(expected.includes(overridden), `Missing override for ${name}`);
+    expected = expected.replace(
+      overridden,
+      `${row}        max-context-length: 272000\n`
+    );
+  }
+  await writeFile(samplePath, expected);
+  const withoutOverrides = runGenerator(fixture.path, "--check");
+  assert.equal(withoutOverrides.status, 0, withoutOverrides.stderr);
+});
+
+await test("the generated check rejects stale or unformatted samples without changing files", async () => {
+  const original = await readFile(configFile, "utf-8");
+  const samples = [
+    original.replace('  host: "127.0.0.1"\n', '  host: "0.0.0.0"\n'),
+    original.replaceAll("\n", "\r\n")
+  ];
+  await Promise.all(
+    samples.map(async (sample) => {
+      assert.notEqual(sample, original);
+      await using fixture = await mkdtempDisposable(
+        path.join(tmpdir(), "proxy-config-")
+      );
+      await copyFixtureFiles(fixture.path, [catalogFile, configFile], {
+        [configFile]: () => sample
+      });
+      const entries = await readdir(fixture.path, { recursive: true });
+      const files = await Promise.all(
+        [
+          catalogFile,
+          configFile,
+          overridesFile,
+          settingsFile,
+          upstreamFile
+        ].map(async (name) => {
+          const file = path.join(fixture.path, name);
+          await utimes(file, 0, 0);
+          const { mtimeMs } = await stat(file);
+          return { contents: await readFile(file), file, mtimeMs };
+        })
+      );
+
+      const result = runGenerator(fixture.path, "--check");
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, /config\.example\.yaml is stale/u);
+      const remaining = await readdir(fixture.path, { recursive: true });
+      assert.deepEqual(remaining.toSorted(), entries.toSorted());
+      await Promise.all(
+        files.map(async ({ contents, file, mtimeMs }) => {
+          assert.deepEqual(await readFile(file), contents, file);
+          const current = await stat(file);
+          assert.equal(current.mtimeMs, mtimeMs, file);
+        })
+      );
+    })
+  );
 });
 
 await test("generated GLM rules remap only unsupported Claude effort levels", async () => {

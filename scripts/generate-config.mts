@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdtempDisposable, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { format } from "oxfmt";
 import { parse, stringify } from "yaml";
-
-import formatConfig from "../oxfmt.config.ts";
 
 interface CatalogEntry extends Record<string, unknown> {
   readonly slug: string;
@@ -214,35 +214,54 @@ const deriveCodexAliases = (entries: Iterable<CatalogModel>) => {
 
 const effortOrder = ["max", "xhigh", "high", "medium", "low"];
 
-const applyProxyOverrides = (upstream: string, contents: string) => {
+const readProxyOverrides = (contents: string) => {
   const overrides: unknown = parse(contents);
   assert.ok(Array.isArray(overrides), "Expected a list of proxy overrides");
-  let result = upstream;
   const edits: readonly unknown[] = overrides;
-  for (const edit of edits) {
+  return edits.map((edit) => {
     assert.ok(
       isRecord(edit) &&
         typeof edit.anchor === "string" &&
         edit.anchor &&
         typeof edit.content === "string" &&
-        (edit.replace === undefined || edit.replace === true),
+        (edit.after === undefined ||
+          (typeof edit.after === "string" && edit.after.length > 0)) &&
+        (edit.replace === undefined || edit.replace === true) &&
+        (edit["after-generation"] === undefined ||
+          edit["after-generation"] === true),
       "Expected a proxy override with an anchor and content"
     );
-    const { anchor, content } = edit;
-    const block = `\n${anchor}\n`;
+    return {
+      anchor: edit.anchor,
+      after: edit.after ?? null,
+      content: edit.content,
+      replace: edit.replace === true,
+      stage: edit["after-generation"] === true ? "generated" : "upstream"
+    } as const;
+  });
+};
+
+const applyProxyOverrides = (
+  upstream: string,
+  edits: Readonly<ReturnType<typeof readProxyOverrides>>
+) => {
+  let result = upstream;
+  for (const { anchor, after, content, replace } of edits) {
+    const prefix = after === null ? "\n" : `\n${after}\n`;
+    const block = `${prefix}${anchor}\n`;
     assert.equal(
       result.split(block).length,
       2,
-      `Expected one upstream block: ${anchor}`
+      `Expected one upstream block: ${block.slice(1, -1)}`
     );
     const indent = anchor.length - anchor.trimStart().length;
-    const original = edit.replace
+    const original = replace
       ? anchor
           .split("\n")
           .map((line) => `${" ".repeat(indent)}# ${line.slice(indent)}`)
           .join("\n")
       : anchor;
-    result = result.replace(block, () => `\n${original}\n${content}\n`);
+    result = result.replace(block, () => `${prefix}${original}\n${content}\n`);
   }
   return result;
 };
@@ -441,12 +460,28 @@ for (const [slug, entry] of entries) {
 }
 
 const proxyConfigPath = "config.example.yaml";
-const { code: config, errors } = await format(
-  proxyConfigPath,
-  renderConfig(applyProxyOverrides(upstreamProxy, proxyOverrides), models),
-  formatConfig
+const overrides = Object.groupBy(
+  readProxyOverrides(proxyOverrides),
+  ({ stage }) => stage
 );
-assert.deepEqual(errors, [], `Could not format ${proxyConfigPath}`);
+await using staging = await mkdtempDisposable(
+  path.join(tmpdir(), "proxy-format-")
+);
+const stagedConfig = path.join(staging.path, proxyConfigPath);
+await writeFile(
+  stagedConfig,
+  applyProxyOverrides(
+    renderConfig(
+      applyProxyOverrides(upstreamProxy, overrides.upstream ?? []),
+      models
+    ),
+    overrides.generated ?? []
+  )
+);
+execFileSync("pnpm", ["exec", "ultracite", "fix", stagedConfig], {
+  cwd: new URL("../", import.meta.url)
+});
+const config = await readFile(stagedConfig, "utf-8");
 const generatedCatalog = { models: [...models.values()] };
 assertProxyConfig(config);
 if (check) {

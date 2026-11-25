@@ -51,3 +51,23 @@
       settings:
         codex:
           # @codex-context
+- anchor: "        max-context-length: 272000"
+  after: '      - name: "gpt-6.2-astra"'
+  replace: true
+  after-generation: true
+  content: "        max-context-length: 292000"
+- anchor: "        max-context-length: 272000"
+  after: '      - name: "gpt-6-astra"'
+  replace: true
+  after-generation: true
+  content: "        max-context-length: 292000"
+- anchor: "        max-context-length: 272000"
+  after: '      - name: "gpt-6-luna"'
+  replace: true
+  after-generation: true
+  content: "        max-context-length: 292000"
+- anchor: "        max-context-length: 272000"
+  after: '      - name: "gpt-5.6-luna"'
+  replace: true
+  after-generation: true
+  content: "        max-context-length: 292000"
