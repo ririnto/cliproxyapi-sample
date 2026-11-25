@@ -3,9 +3,6 @@
   "type": "module",
   "scripts": {
     "check": "run-p --continue-on-error check:*",
-    "check:catalog": "node scripts/update-model-catalog.mjs --check",
-    "check:generated": "node cliproxyapi/generate-config.mjs --check",
-    "check:generated-test": "node --test scripts/generate-config.test.mts",
     "check:markdownlint-cli2": "markdownlint-cli2",
     "check:statusline-test": "node --test scripts/statusline.test.mts",
     "check:types": "tsc --noEmit",

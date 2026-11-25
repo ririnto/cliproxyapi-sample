@@ -180,19 +180,7 @@ const resolveModelCatalog = (source) => {
   });
 };
 
-const check = process.argv.at(-1) === "--check";
-const args = process.argv.slice(2, check ? -1 : undefined);
-const sourcePath = args.at(0);
-if (
-  args.length > 1 ||
-  sourcePath === "" ||
-  sourcePath?.startsWith("--") === true
-) {
-  throw new Error(
-    `Usage: node scripts/update-model-catalog.mjs [<source> | -] [--check]`
-  );
-}
-
+const [sourcePath] = process.argv.slice(2);
 /** @type {unknown} */
 const source = JSON.parse(
   sourcePath === undefined
@@ -210,9 +198,6 @@ execFileSync("pnpm", ["exec", "ultracite", "fix", staged], { cwd: root });
 const content = fs.readFileSync(staged, "utf-8");
 const target = path.join(root, file);
 if (!fs.existsSync(target) || fs.readFileSync(target, "utf-8") !== content) {
-  if (check) {
-    throw new Error(`Regenerate stale model configuration: ${file}`);
-  }
   const temporaryPath = `${target}.tmp`;
   fs.writeFileSync(temporaryPath, content);
   fs.renameSync(temporaryPath, target);

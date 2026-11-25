@@ -224,15 +224,12 @@ Codex CLI를 재시작한다.
 - 반복되는 `efforts`와 `supported_reasoning_levels` 목록은 각 필드 안에서 `<<: &이름`으로 정의하고 `<<: *이름`으로 재사용한다.
 - Z.ai 라우트 키에는 샘플 값만 두고 운영 키는 설치한 설정에 넣는다.
 
-### 프록시 재정의와 검증
+### 프록시 재정의
 
 | 키 | 적용 방식 |
 | --- | --- |
 | `anchor` | 일치시킬 업스트림 텍스트 블록 |
 | `comment: true` | 원래 내용을 주석으로 남기고 아래에 새 값 추가 |
-
-- `pnpm run check:catalog`는 공식 Codex 카탈로그와 YAML override로 현재 생성물을 검사한다.
-- `pnpm run check:generated`는 공식 CLIProxyAPI 예시와 Codex 카탈로그로 프록시 샘플을 검사한다.
 
 `pnpm run generate:agents`는 [upstream pstack 에이전트](https://github.com/cursor/plugins/tree/main/pstack/agents)의 Markdown을 가져와 `.codex/agents/`의 `poteto-agent.toml`과 `comment-sicko.toml`을 갱신한다.
 갱신한 TOML을 사용자 설정으로 적용하려면 `${CODEX_HOME:-$HOME/.codex}/agents/`에 복사한다.

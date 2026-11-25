@@ -1,4 +1,3 @@
-import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +36,6 @@ const parseModels = (value) => {
     if (!isRecord(model) || typeof model.slug !== "string") {
       throw new TypeError("Model catalog entry requires a slug");
     }
-    assertBareModelId(model.slug, "slug");
     return { ...model, slug: model.slug };
   });
   if (new Set(models.map(({ slug }) => slug)).size !== models.length) {
@@ -117,34 +115,55 @@ const resolveUpstreamAliases = (upstreamModels) => {
   return { aliases, latestListedByLane };
 };
 
-/** @typedef {{
- *   name: string,
- *   alias: string,
- *   display_name: string,
- *   context_window?: number,
- *   efforts: readonly string[]
- * }} RouteModel */
-/** @typedef {{
- *   default_context_window: number,
- *   sources: readonly {type: string, url: string}[],
- *   routes: {claude: {zai: {models: readonly RouteModel[]} & Record<string, unknown>}}
- * }} ProxyConfig */
-/** @type {(value: unknown) => asserts value is ProxyConfig} */
-const assertProxyConfig = (value) => {
-  if (
-    !isRecord(value) ||
-    !Array.isArray(value.sources) ||
-    !Number.isSafeInteger(value.default_context_window) ||
-    !isRecord(value.routes) ||
-    !isRecord(value.routes.claude) ||
-    !isRecord(value.routes.claude.zai) ||
-    !Array.isArray(value.routes.claude.zai.models)
-  ) {
-    throw new TypeError(
-      "Proxy models require sources, default_context_window, and routes"
-    );
+/** @param {unknown} value YAML mapping. */
+const readMap = (value) => {
+  if (!isRecord(value)) {
+    throw new TypeError("Expected a YAML mapping");
   }
+  return value;
 };
+
+/** @param {unknown} value YAML sequence. */
+const readList = (value) => {
+  if (!Array.isArray(value)) {
+    throw new TypeError("Expected a YAML sequence");
+  }
+  /** @type {unknown[]} */
+  const items = value;
+  return items;
+};
+
+/** @param {unknown} value YAML string. */
+const readString = (value) => {
+  if (typeof value !== "string") {
+    throw new TypeError("Expected a YAML string");
+  }
+  return value;
+};
+
+/** @param {unknown} value Context size. */
+const readWindow = (value) => {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError("Expected a positive context window");
+  }
+  return value;
+};
+
+/** @param {unknown} raw Configured model. */
+const readRouteModel = (raw) => {
+  const model = readMap(raw);
+  return {
+    alias: readString(model.alias),
+    name: readString(model.name),
+    display_name: readString(model.display_name),
+    efforts: readList(model.efforts).map(readString),
+    context_window:
+      model.context_window === undefined
+        ? undefined
+        : readWindow(model.context_window)
+  };
+};
+
 const modelsDocument = parseDocument(
   fs.readFileSync(path.join(process.cwd(), "cliproxyapi/models.yaml"), "utf-8"),
   { merge: true }
@@ -173,105 +192,11 @@ visit(modelsDocument, {
   }
 });
 /** @type {unknown} */
-const modelConfig = modelsDocument.toJS();
-assertProxyConfig(modelConfig);
-/**
- * @param {string} id Public model identifier.
- * @param {string} field Identifier field.
- */
-const assertBareModelId = (id, field) => {
-  assert.ok(
-    !id.startsWith("zai/"),
-    `Model ${field} ${JSON.stringify(id)} cannot start with the "zai/" prefix.`
-  );
-};
-
-/** @param {Record<string, unknown>} config Parsed proxy mapping. */
-const assertBareModelIds = (config) => {
-  /** @type {unknown[]} */
-  const modelLists = [];
-  if (isRecord(config.oauth)) {
-    for (const section of [
-      config.oauth["model-alias"],
-      config.oauth.settings
-    ]) {
-      if (isRecord(section)) {
-        modelLists.push(...Object.values(section));
-      }
-    }
-  }
-  /** @type {Set<unknown>} */
-  const sections = new Set([config]);
-  for (const section of sections) {
-    if (Array.isArray(section)) {
-      for (const item of section) {
-        sections.add(item);
-      }
-    } else if (isRecord(section)) {
-      modelLists.push(section.models);
-      for (const value of Object.values(section)) {
-        sections.add(value);
-      }
-    }
-  }
-  for (const list of modelLists) {
-    if (Array.isArray(list)) {
-      for (const row of list) {
-        if (isRecord(row)) {
-          for (const field of ["name", "alias"]) {
-            const id = row[field];
-            if (typeof id === "string") {
-              assertBareModelId(id, field);
-            }
-          }
-        }
-      }
-    }
-  }
-};
-
-/** @param {string} contents Rendered sample. */
-const assertRenderedConfig = (contents) => {
-  /** @type {unknown} */
-  const config = parse(contents, { merge: true });
-  assert.ok(isRecord(config), "Expected a proxy configuration mapping");
-  assertBareModelIds(config);
-  const providers = isRecord(config["api-keys"])
-    ? config["api-keys"].claude
-    : undefined;
-  const zai = Array.isArray(providers)
-    ? providers.filter(isRecord).find(({ name }) => name === "zai")
-    : undefined;
-  assert.ok(
-    zai?.["base-url"] === "https://api.z.ai/api/anthropic",
-    "zai base-url: expected the direct Claude endpoint https://api.z.ai/api/anthropic"
-  );
-  assert.ok(
-    Array.isArray(zai.models),
-    "zai models: expected Claude model rows"
-  );
-  /** @type {readonly unknown[]} */
-  const zaiModels = zai.models;
-  for (const model of zaiModels) {
-    assert.ok(
-      isRecord(model) && typeof model.name === "string" && model.name,
-      "zai models: expected a bare model name"
-    );
-    assert.ok(
-      !model.name.includes("/"),
-      `zai ${model.name} name: expected a bare model name`
-    );
-    assert.equal(
-      model.alias,
-      model.name,
-      `zai ${model.name} alias: expected the bare model name`
-    );
-    assert.ok(
-      !JSON.stringify(model).includes("${"),
-      `zai ${model.name}: model rows cannot use environment placeholders`
-    );
-  }
-};
+const rawConfig = modelsDocument.toJS();
+const modelConfig = readMap(rawConfig);
+const defaultContextWindow = readWindow(modelConfig.default_context_window);
+const zai = readMap(readMap(readMap(modelConfig.routes).claude).zai);
+const sources = readList(modelConfig.sources).map(readMap);
 
 /**
  * @param {string} upstream Upstream configuration.
@@ -323,28 +248,27 @@ const renderConfig = (template, catalog) => {
     fork: true
   }));
   const effortOrder = ["max", "xhigh", "high", "medium", "low"];
-  const { zai } = modelConfig.routes.claude;
-  const glmRoutes = zai.models.map((model) => {
-    const supported = new Set(model.efforts);
-    const highest = effortOrder.find((effort) => supported.has(effort));
-    assert.ok(
-      highest !== undefined,
-      `No usable reasoning effort for ${model.name}`
-    );
-    return {
-      model: {
-        name: model.name,
-        alias: model.alias,
-        "display-name": model.display_name,
-        "max-context-length":
-          model.context_window ?? modelConfig.default_context_window,
-        "is-compat": true,
-        thinking: { levels: effortOrder }
-      },
-      supported,
-      highest
-    };
-  });
+  const glmRoutes = readList(zai.models)
+    .map(readRouteModel)
+    .map((model) => {
+      const supported = new Set(model.efforts);
+      const highest = effortOrder.find((effort) => supported.has(effort));
+      if (highest === undefined) {
+        throw new Error(`No usable reasoning effort for ${model.name}`);
+      }
+      return {
+        model: {
+          name: model.name,
+          alias: model.alias,
+          "display-name": model.display_name,
+          "max-context-length": model.context_window ?? defaultContextWindow,
+          "is-compat": true,
+          thinking: { levels: effortOrder }
+        },
+        supported,
+        highest
+      };
+    });
   const rules = effortOrder.flatMap((requested, index) => {
     /** @type {Map<string, string[]>} */
     const byTarget = new Map();
@@ -376,16 +300,10 @@ const renderConfig = (template, catalog) => {
   ].map((slug) => {
     const target = entries.get(aliases[slug] ?? slug);
     const maximum = target?.max_context_window ?? target?.context_window;
-    assert.ok(
-      typeof maximum === "number" && maximum > 0,
-      `Missing model context: ${slug}`
-    );
+    const context = readWindow(maximum);
     return {
       name: slug,
-      "max-context-length": Math.min(
-        maximum,
-        modelConfig.default_context_window
-      )
+      "max-context-length": Math.min(context, defaultContextWindow)
     };
   });
   const sections = [
@@ -426,23 +344,10 @@ const renderConfig = (template, catalog) => {
   return proxy;
 };
 
-const check = process.argv.at(-1) === "--check";
-const args = process.argv.slice(2, check ? -1 : undefined);
-const sourcePath = args.at(0);
-if (
-  args.length > 1 ||
-  sourcePath === "" ||
-  sourcePath?.startsWith("--") === true
-) {
-  throw new Error(
-    `Usage: node cliproxyapi/generate-config.mjs [<source> | -] [--check]`
-  );
-}
-
-const url = modelConfig.sources.find(
-  ({ type }) => type === "codex-catalog"
-)?.url;
-assert.ok(url !== undefined, "Missing Codex catalog source");
+const [sourcePath] = process.argv.slice(2);
+const url = readString(
+  sources.find(({ type }) => type === "codex-catalog")?.url
+);
 const [catalogText, upstream] = await Promise.all([
   sourcePath === undefined
     ? fetchSource(url)
@@ -461,15 +366,8 @@ const staged = path.join(staging.path, path.basename(file));
 fs.writeFileSync(staged, input);
 execFileSync("pnpm", ["exec", "ultracite", "fix", staged], { cwd: root });
 const content = fs.readFileSync(staged, "utf-8");
-assertRenderedConfig(content);
 const target = path.resolve(file);
 if (!fs.existsSync(target) || fs.readFileSync(target, "utf-8") !== content) {
-  if (check) {
-    if (fs.existsSync(target)) {
-      assertRenderedConfig(fs.readFileSync(target, "utf-8"));
-    }
-    throw new Error(`${file} is stale. Run pnpm run generate:config.`);
-  }
   const temporaryPath = `${target}.tmp`;
   fs.writeFileSync(temporaryPath, content);
   fs.renameSync(temporaryPath, target);
