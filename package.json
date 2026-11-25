@@ -6,6 +6,7 @@
     "check:generated": "node scripts/generate-config.mts --check",
     "check:generated-test": "node --test scripts/generate-config.test.mts",
     "check:markdownlint-cli2": "markdownlint-cli2",
+    "check:statusline-test": "node --test scripts/statusline.test.mts",
     "check:types": "tsc --noEmit",
     "check:ultracite": "ultracite check",
     "fix": "run-p fix:*",

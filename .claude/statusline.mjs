@@ -477,11 +477,12 @@ const isSnapshot = (value) =>
   );
 
 /**
- * @typedef {object} CacheRecord
- * @property {string} credentialHash Credential identity digest.
- * @property {number | null} fetchedAt Latest successful fetch time, or null.
- * @property {number} nextAttemptAt Earliest retry timestamp.
- * @property {import("./statusline/types.ts").Snapshot} [snapshot] Validated usage snapshot.
+ * @typedef {{
+ *   credentialHash: string,
+ *   fetchedAt: number | null,
+ *   nextAttemptAt: number,
+ *   snapshot?: import("./statusline/types.ts").Snapshot
+ * }} CacheRecord
  */
 
 const MAX_STALE_MS = 5 * 60_000;
@@ -520,9 +521,11 @@ const validRecord = (value, credentialHash) =>
   (value.snapshot === undefined || isSnapshot(value.snapshot));
 
 /**
- * @param {import("./statusline/types.ts").Snapshot | undefined} snapshot Cached data.
- * @param {number} elapsed Elapsed milliseconds.
- * @param {number} maxAge Maximum age of a usable snapshot.
+ * @type {(
+ *   snapshot: import("./statusline/types.ts").Snapshot | undefined,
+ *   elapsed: number,
+ *   maxAge: number
+ * ) => import("./statusline/types.ts").Snapshot | undefined}
  */
 const adjustedSnapshot = (snapshot, elapsed, maxAge) =>
   snapshot !== undefined && elapsed <= maxAge
@@ -576,11 +579,12 @@ const readCache = (filePath, credentialHash) => {
 };
 
 /**
- * Use SQLite's write lock to serialize the JSON read and rename across processes.
- * @param {string} filePath Cache path.
- * @param {CacheRecord | undefined} cached Entry observed before the request.
- * @param {CacheRecord} next Refresh result.
- * @param {number} now Refresh start time.
+ * @type {(
+ *   filePath: string,
+ *   cached: CacheRecord | undefined,
+ *   next: CacheRecord,
+ *   now: number
+ * ) => Promise<CacheRecord>}
  */
 const publishCache = async (filePath, cached, next, now) => {
   const directory = path.dirname(filePath);
