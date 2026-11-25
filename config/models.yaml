@@ -2,13 +2,6 @@ default_context_window: 292000
 sources:
   - type: codex-catalog
     url: https://raw.githubusercontent.com/openai/codex/refs/heads/main/codex-rs/models-manager/models.json
-codex:
-  context_windows:
-    codex-auto-review: 272000
-    gpt-5.5: 272000
-    gpt-6.2-sol: 292000
-    gpt-6.1-sol: 292000
-    gpt-6.1-terra: 292000
 routes:
   claude:
     zai:

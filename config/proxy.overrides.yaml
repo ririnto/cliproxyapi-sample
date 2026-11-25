@@ -1,15 +1,15 @@
 - anchor: '  host: ""'
-  replace: true
-  content: '  host: "127.0.0.1"'
+  comment: true
+  insert: '  host: "127.0.0.1"'
 - anchor: |2-
       api-keys:
         - "your-api-key-1"
         - "your-api-key-2"
         - "your-api-key-3"
-  replace: true
-  content: "  api-keys: []"
+  comment: true
+  insert: "  api-keys: []"
 - anchor: '  #         - ''input.#(type=="additional_tools")#.tools.#(name=="functions")#.tools.#(name=="apply_patch")#'''
-  content: |2-
+  insert: |2-
       payload:
         override:
           # @glm-overrides
@@ -32,35 +32,15 @@
 - anchor: |-
     #         - name: "kimi-k2.5"
     #           alias: "claude-opus-4.66"
-  content: |-
+  insert: |-
     # @routes
 - anchor: '  #       alias: "sample-latest"'
-  content: |2-
+  insert: |2-
       model-alias:
         codex:
           # @codex-aliases
 - anchor: "  #       max-context-length: 1048576"
-  content: |2-
+  insert: |2-
       settings:
         codex:
           # @codex-context
-- anchor: "        max-context-length: 272000"
-  after: '      - name: "gpt-6.2-astra"'
-  replace: true
-  after-generation: true
-  content: "        max-context-length: 292000"
-- anchor: "        max-context-length: 272000"
-  after: '      - name: "gpt-6-astra"'
-  replace: true
-  after-generation: true
-  content: "        max-context-length: 292000"
-- anchor: "        max-context-length: 272000"
-  after: '      - name: "gpt-6-luna"'
-  replace: true
-  after-generation: true
-  content: "        max-context-length: 292000"
-- anchor: "        max-context-length: 272000"
-  after: '      - name: "gpt-5.6-luna"'
-  replace: true
-  after-generation: true
-  content: "        max-context-length: 292000"

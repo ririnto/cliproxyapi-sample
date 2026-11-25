@@ -210,13 +210,14 @@ Codex CLI를 재시작한다.
 | 프록시 공통 설정과 요청 필터 | [프록시 재정의](config/proxy.overrides.yaml) | `pnpm run generate:config` |
 
 `pnpm run generate`는 두 설정과 pstack 에이전트 파일을 모두 갱신한다.
-각 생성기는 공식 Codex 카탈로그를 자신의 입력으로 가져오며 다른 생성기의 결과를 읽지 않는다.
+각 생성기는 공식 Codex 카탈로그를 직접 읽으며 다른 생성기의 결과를 읽지 않는다.
 프록시 생성기는 [CLIProxyAPI의 main 샘플](https://github.com/router-for-me/CLIProxyAPI/blob/main/config.example.yaml)에 로컬 설정을 적용한다.
 
 ### 모델 설정
 
 - Codex override는 같은 slug의 필드만 덮어쓰며 새 모델은 공식 카탈로그의 첫 모델을 바탕으로 추가한다.
 - 업그레이드가 있는 항목과 같은 GPT 계열의 이전 버전은 Codex 목록에서 숨긴다.
+- 샘플 Codex 카탈로그의 `context_window`는 최대 292,000이며, 모델별 override 없이 적용한다.
 - 프록시의 Codex OAuth 별칭은 같은 계열의 가장 높은 공개 버전을 가리킨다.
 - 모델별 `context_window`를 지정하면 `default_context_window`보다 커도 그 값을 사용한다.
 - `efforts`는 지원하는 값을 낮은 값부터 적는다.
@@ -228,12 +229,10 @@ Codex CLI를 재시작한다.
 | 키 | 적용 방식 |
 | --- | --- |
 | `anchor` | 일치시킬 업스트림 텍스트 블록 |
-| `after` | 바로 앞 텍스트로 일치 범위 제한 |
-| `after-generation: true` | 생성된 모델 행에 적용 |
-| `replace: true` | 원래 내용을 주석으로 남기고 아래에 새 값 추가 |
+| `comment: true` | 원래 내용을 주석으로 남기고 아래에 새 값 추가 |
 
-- `pnpm run check:catalog`는 현재 카탈로그에 로컬 override가 반영됐는지 확인한다.
-- `pnpm run check:generated`는 [업스트림 프록시 사본](config/proxy.upstream.yaml.txt)과 [Codex 라우팅용 사본](config/codex.upstream.json)을 사용해 프록시 샘플을 오프라인에서 검사한다.
+- `pnpm run check:catalog`는 공식 Codex 카탈로그와 YAML override로 현재 생성물을 검사한다.
+- `pnpm run check:generated`는 공식 CLIProxyAPI 예시와 Codex 카탈로그로 프록시 샘플을 검사한다.
 
 `pnpm run generate:agents`는 [upstream pstack 에이전트](https://github.com/cursor/plugins/tree/main/pstack/agents)의 Markdown을 가져와 `.codex/agents/`의 `poteto-agent.toml`과 `comment-sicko.toml`을 갱신한다.
 갱신한 TOML을 사용자 설정으로 적용하려면 `${CODEX_HOME:-$HOME/.codex}/agents/`에 복사한다.

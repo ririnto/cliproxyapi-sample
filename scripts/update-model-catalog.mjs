@@ -160,6 +160,7 @@ const resolveModelCatalog = (source) => {
       latestByLane.set(version.lane, version);
     }
   }
+  const contextLimit = 292_000;
   /** @type {CatalogModel[]} */
   return originalModels.map((base) => {
     const { slug } = base;
@@ -168,7 +169,14 @@ const resolveModelCatalog = (source) => {
     const hidden =
       (base.upgrade !== null && base.upgrade !== undefined) ||
       (latest !== undefined && latest.slug !== slug);
-    return { ...base, ...(hidden ? { visibility: "hide" } : {}) };
+    const contextWindow = base.context_window;
+    return {
+      ...base,
+      ...(hidden ? { visibility: "hide" } : {}),
+      ...(typeof contextWindow === "number" && contextWindow > contextLimit
+        ? { context_window: contextLimit }
+        : {})
+    };
   });
 };
 
@@ -185,19 +193,12 @@ if (
   );
 }
 
-let sourceText;
-if (sourcePath !== undefined) {
-  sourceText = fs.readFileSync(sourcePath === "-" ? 0 : sourcePath, "utf-8");
-} else if (check) {
-  sourceText = fs.readFileSync(
-    path.join(root, ".codex/model_catalog.json"),
-    "utf-8"
-  );
-} else {
-  sourceText = await fetchSource(officialCatalogUrl);
-}
 /** @type {unknown} */
-const source = JSON.parse(sourceText);
+const source = JSON.parse(
+  sourcePath === undefined
+    ? await fetchSource(officialCatalogUrl)
+    : fs.readFileSync(sourcePath === "-" ? 0 : sourcePath, "utf-8")
+);
 const input = JSON.stringify({ models: resolveModelCatalog(source) }, null, 2);
 const file = ".codex/model_catalog.json";
 const content = execFileSync(

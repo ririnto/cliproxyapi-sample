@@ -18,11 +18,9 @@ import { fileURLToPath } from "node:url";
 import { isMap, isSeq, parseDocument } from "yaml";
 
 const catalogFile = ".codex/model_catalog.json";
-const upstreamFile = "config/proxy.upstream.yaml.txt";
 const overridesFile = "config/proxy.overrides.yaml";
 const configFile = "config.example.yaml";
 const settingsFile = "config/models.yaml";
-const upstreamCatalogFile = "config/codex.upstream.json";
 const codexOverrides = ".codex/model_catalog.override.yaml";
 const catalogGenerator = "scripts/update-model-catalog.mjs";
 const overriddenModels = [
@@ -42,13 +40,7 @@ const copyFixtureFiles = async (
   edits: FixtureEdits = {}
 ) =>
   await Promise.all(
-    [
-      ...files,
-      settingsFile,
-      upstreamFile,
-      overridesFile,
-      upstreamCatalogFile
-    ].map(async (file) => {
+    [...files, settingsFile, overridesFile].map(async (file) => {
       const destination = path.join(directory, file);
       await mkdir(path.dirname(destination), { recursive: true });
       const contents = await readFile(file, "utf-8");
@@ -59,7 +51,7 @@ const copyFixtureFiles = async (
 const runGenerator = (cwd: string, ...args: readonly string[]) =>
   spawnSync(
     process.execPath,
-    [fileURLToPath(new URL("generate-config.mts", import.meta.url)), ...args],
+    [fileURLToPath(new URL("generate-config.mjs", import.meta.url)), ...args],
     { cwd, encoding: "utf-8" }
   );
 
@@ -81,6 +73,12 @@ const assertGeneratedCheckRejects = async (
   for (const pattern of expected) {
     assert.match(diagnostic, pattern);
   }
+};
+
+const loadSource = async (url: string) => {
+  const response = await fetch(url);
+  assert.ok(response.ok, `Failed to load ${url}`);
+  return await response.text();
 };
 
 const prefixRule = [/\bprefix\b/u, /["'`]zai\/["'`]/u];
@@ -141,28 +139,22 @@ await test("proxy generation reads the two upstream sources without the local Co
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
   );
-  const astraOverride = 293_000;
   await copyFixtureFiles(fixture.path, [], {
-    [upstreamFile]: () => "stale: true\n",
-    [overridesFile]: (contents) => {
-      const overrides = parseDocument(contents);
-      assert.ok(isSeq(overrides.contents));
-      const astraEdit: unknown = overrides.contents.items.find(
-        (entry: unknown) =>
-          isMap(entry) && entry.get("after") === '      - name: "gpt-6.2-astra"'
-      );
-      assert.ok(isMap(astraEdit));
-      astraEdit.set("content", `        max-context-length: ${astraOverride}`);
-      return overrides.toString();
-    },
     [settingsFile]: (contents) =>
       contents.replace(
         "display_name: GLM-5.4",
         "display_name: GLM-5.4\n          context_window: 400000"
       )
   });
-  const upstream = await readFile(upstreamCatalogFile, "utf-8");
-  const proxySource = await readFile(upstreamFile, "utf-8");
+  const [proxySource, upstream] = await Promise.all([
+    loadSource(
+      "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI/refs/heads/main/config.example.yaml"
+    ),
+    loadSource(
+      "https://raw.githubusercontent.com/openai/codex/refs/heads/main/codex-rs/models-manager/models.json"
+    )
+  ]);
+  await writeFile(path.join(fixture.path, "source.json"), upstream);
   const upstreamNote = "# An upstream example comment\n";
   await writeFile(
     path.join(fixture.path, "upstream.yaml"),
@@ -177,14 +169,14 @@ mock.method(globalThis, "fetch", (url) => {
   if (url !== "https://raw.githubusercontent.com/openai/codex/refs/heads/main/codex-rs/models-manager/models.json") {
     throw new Error("Unexpected catalog URL: " + url);
   }
-  return Promise.resolve(new Response(${JSON.stringify(upstream)}));
+  return Promise.resolve(new Response(readFileSync("source.json", "utf-8")));
 });`;
   const result = spawnSync(
     process.execPath,
     [
       "--import",
       `data:text/javascript,${encodeURIComponent(preload)}`,
-      fileURLToPath(new URL("generate-config.mts", import.meta.url))
+      fileURLToPath(new URL("generate-config.mjs", import.meta.url))
     ],
     { cwd: fixture.path, encoding: "utf-8" }
   );
@@ -224,17 +216,17 @@ mock.method(globalThis, "fetch", (url) => {
   ]);
   assert.ok(isSeq(oauthSettings));
   for (const name of overriddenModels) {
-    const expected = name === "gpt-6.2-astra" ? astraOverride : 292_000;
     const row: unknown = oauthSettings.items.find(
       (entry) => isMap(entry) && entry.get("name") === name
     );
     assert.ok(isMap(row), `Missing OAuth settings for ${name}`);
-    assert.equal(row.get("max-context-length"), expected);
+    assert.equal(row.get("max-context-length"), 292_000);
+  }
+  for (const name of ["codex-auto-review", "gpt-5.5"]) {
     assert.ok(
-      proxy.includes(
-        `      - name: "${name}"\n        # max-context-length: 272000\n        max-context-length: ${expected}\n`
-      ),
-      `Missing original context directly above the override for ${name}`
+      !oauthSettings.items.some(
+        (entry) => isMap(entry) && entry.get("name") === name
+      )
     );
   }
   const filters: unknown = proxyDocument.getIn([
@@ -248,10 +240,6 @@ mock.method(globalThis, "fetch", (url) => {
       (filter) =>
         isMap(filter) && filter.getIn(["models", 0, "name"]) === "gpt-*"
     )
-  );
-  assert.equal(
-    await readFile(path.join(fixture.path, upstreamFile), "utf-8"),
-    proxySource + upstreamNote
   );
   assert.ok(proxy.includes('  # host: ""\n  host: "127.0.0.1"\n'));
   assert.ok(
@@ -272,40 +260,6 @@ mock.method(globalThis, "fetch", (url) => {
     "Expected top-level api-keys immediately after the upstream API key examples"
   );
   assert.ok(proxy.endsWith(upstreamNote));
-  const check = runGenerator(fixture.path, "--check");
-  assert.equal(check.status, 0, check.stderr);
-});
-
-await test("the generated overrides change only the four targeted OAuth settings", async () => {
-  await using fixture = await mkdtempDisposable(
-    path.join(tmpdir(), "proxy-config-")
-  );
-  await copyFixtureFiles(fixture.path, [catalogFile, configFile]);
-  const withOverrides = runGenerator(fixture.path, "--check");
-  assert.equal(withOverrides.status, 0, withOverrides.stderr);
-
-  const overridesPath = path.join(fixture.path, overridesFile);
-  const overrides = parseDocument(await readFile(overridesPath, "utf-8"));
-  assert.ok(isSeq(overrides.contents));
-  overrides.contents.items = overrides.contents.items.filter(
-    (entry: unknown) => !isMap(entry) || entry.get("after-generation") !== true
-  );
-  await writeFile(overridesPath, overrides.toString());
-
-  const samplePath = path.join(fixture.path, configFile);
-  let expected = await readFile(samplePath, "utf-8");
-  for (const name of overriddenModels) {
-    const row = `      - name: "${name}"\n`;
-    const overridden = `${row}        # max-context-length: 272000\n        max-context-length: 292000\n`;
-    assert.ok(expected.includes(overridden), `Missing override for ${name}`);
-    expected = expected.replace(
-      overridden,
-      `${row}        max-context-length: 272000\n`
-    );
-  }
-  await writeFile(samplePath, expected);
-  const withoutOverrides = runGenerator(fixture.path, "--check");
-  assert.equal(withoutOverrides.status, 0, withoutOverrides.stderr);
 });
 
 await test("the generated check rejects stale or unformatted samples without changing files", async () => {
@@ -325,19 +279,14 @@ await test("the generated check rejects stale or unformatted samples without cha
       });
       const entries = await readdir(fixture.path, { recursive: true });
       const files = await Promise.all(
-        [
-          catalogFile,
-          configFile,
-          overridesFile,
-          settingsFile,
-          upstreamFile,
-          upstreamCatalogFile
-        ].map(async (name) => {
-          const file = path.join(fixture.path, name);
-          await utimes(file, 0, 0);
-          const { mtimeMs } = await stat(file);
-          return { contents: await readFile(file), file, mtimeMs };
-        })
+        [catalogFile, configFile, overridesFile, settingsFile].map(
+          async (name) => {
+            const file = path.join(fixture.path, name);
+            await utimes(file, 0, 0);
+            const { mtimeMs } = await stat(file);
+            return { contents: await readFile(file), file, mtimeMs };
+          }
+        )
       );
 
       const result = runGenerator(fixture.path, "--check");
@@ -418,30 +367,19 @@ await test("generated GLM rules remap only unsupported Claude effort levels", as
   }
 });
 
-await test("the generated config check rejects a zai/ catalog slug", async () => {
-  const id = "zai/review-probe";
-  await assertGeneratedCheckRejects(
-    {
-      [upstreamCatalogFile]: (contents) => {
-        const catalog: unknown = JSON.parse(contents);
-        assert.ok(
-          typeof catalog === "object" &&
-            catalog !== null &&
-            "models" in catalog &&
-            Array.isArray(catalog.models)
-        );
-        const rows: readonly unknown[] = catalog.models;
-        const [row] = rows;
-        assert.ok(typeof row === "object" && row !== null);
-        return JSON.stringify({
-          ...catalog,
-          models: [...rows, { ...row, slug: id }]
-        });
-      }
-    },
-    id,
-    [/\bslug\b/u, ...prefixRule]
+await test("proxy generation rejects a prefixed upstream model ID", async () => {
+  await using fixture = await mkdtempDisposable(
+    path.join(tmpdir(), "proxy-config-")
   );
+  await copyFixtureFiles(fixture.path, []);
+  const file = path.join(fixture.path, "bad-source.json");
+  await writeFile(
+    file,
+    JSON.stringify({ models: [{ slug: "zai/review-probe" }] })
+  );
+  const result = runGenerator(fixture.path, file, "--check");
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /zai\/review-probe/u);
 });
 
 await test("Codex refresh reads its own overrides and does not need the proxy files", async () => {
@@ -504,7 +442,7 @@ await test("Codex refresh reads its own overrides and does not need the proxy fi
   );
   assert.equal(result.getIn(["models", 0, "visibility"]), "hide");
   assert.equal(result.getIn(["models", 1, "visibility"]), "list");
-  assert.equal(result.getIn(["models", 1, "context_window"]), 550_000);
+  assert.equal(result.getIn(["models", 1, "context_window"]), 292_000);
   for (const [index, slug] of ["glm-5.4", "glm-5.3-flash"].entries()) {
     assert.equal(result.getIn(["models", index + 2, "slug"]), slug);
     assert.equal(result.getIn(["models", index + 2, "priority"]), index + 5);
@@ -519,7 +457,7 @@ await test("Codex refresh reads its own overrides and does not need the proxy fi
       assert.deepEqual(values.items, []);
     }
   }
-  const check = runCatalog("--check");
+  const check = runCatalog("upstream.json", "--check");
   assert.equal(check.status, 0, check.stderr);
   const pathToOverrides = path.join(fixture.path, codexOverrides);
   const contents = await readFile(pathToOverrides, "utf-8");
@@ -527,7 +465,7 @@ await test("Codex refresh reads its own overrides and does not need the proxy fi
     pathToOverrides,
     contents.replace("display_name: GLM-5.4", "display_name: Updated")
   );
-  const stale = runCatalog("--check");
+  const stale = runCatalog("upstream.json", "--check");
   assert.equal(stale.status, 1, stale.stderr);
   assert.match(stale.stderr, /model_catalog\.json/u);
 });
