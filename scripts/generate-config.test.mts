@@ -18,9 +18,9 @@ import { fileURLToPath } from "node:url";
 import { isMap, isSeq, parseDocument } from "yaml";
 
 const catalogFile = ".codex/model_catalog.json";
-const overridesFile = "config/proxy.overrides.yaml";
+const overridesFile = "cliproxyapi/config.overrides.yaml";
 const configFile = "config.example.yaml";
-const settingsFile = "config/models.yaml";
+const settingsFile = "cliproxyapi/models.yaml";
 const codexOverrides = ".codex/model_catalog.override.yaml";
 const catalogGenerator = "scripts/update-model-catalog.mjs";
 const overriddenModels = [
@@ -51,7 +51,12 @@ const copyFixtureFiles = async (
 const runGenerator = (cwd: string, ...args: readonly string[]) =>
   spawnSync(
     process.execPath,
-    [fileURLToPath(new URL("generate-config.mjs", import.meta.url)), ...args],
+    [
+      fileURLToPath(
+        new URL("../cliproxyapi/generate-config.mjs", import.meta.url)
+      ),
+      ...args
+    ],
     { cwd, encoding: "utf-8" }
   );
 
@@ -176,7 +181,9 @@ mock.method(globalThis, "fetch", (url) => {
     [
       "--import",
       `data:text/javascript,${encodeURIComponent(preload)}`,
-      fileURLToPath(new URL("generate-config.mjs", import.meta.url))
+      fileURLToPath(
+        new URL("../cliproxyapi/generate-config.mjs", import.meta.url)
+      )
     ],
     { cwd: fixture.path, encoding: "utf-8" }
   );

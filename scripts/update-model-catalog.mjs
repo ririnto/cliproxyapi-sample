@@ -20,19 +20,18 @@ if (overridesDocument.errors.length > 0) {
 visit(overridesDocument, {
   Pair(_key, pair) {
     if (
-      !isScalar(pair.key) ||
-      pair.key.value !== "supported_reasoning_levels" ||
-      !isMap(pair.value)
+      isScalar(pair.key) &&
+      pair.key.value === "supported_reasoning_levels" &&
+      isMap(pair.value)
     ) {
-      return;
-    }
-    const [entry] = pair.value.items;
-    if (
-      pair.value.items.length === 1 &&
-      isScalar(entry?.key) &&
-      entry.key.source === "<<"
-    ) {
-      pair.value = entry.value;
+      const [entry] = pair.value.items;
+      if (
+        pair.value.items.length === 1 &&
+        isScalar(entry?.key) &&
+        entry.key.source === "<<"
+      ) {
+        pair.value = entry.value;
+      }
     }
   }
 });

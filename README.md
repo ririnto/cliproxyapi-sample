@@ -206,8 +206,8 @@ Codex CLI를 재시작한다.
 | 바꿀 항목 | 수정할 파일 | 다시 생성 |
 | --- | --- | --- |
 | Codex에서 표시하는 모델 | [Codex override](.codex/model_catalog.override.yaml) | `pnpm run generate:model-catalog` |
-| 프록시 라우트, 모델 및 컨텍스트 기본값 | [모델 설정](config/models.yaml) | `pnpm run generate:config` |
-| 프록시 공통 설정과 요청 필터 | [프록시 재정의](config/proxy.overrides.yaml) | `pnpm run generate:config` |
+| 프록시 라우트, 모델 및 컨텍스트 기본값 | [모델 설정](cliproxyapi/models.yaml) | `pnpm run generate:config` |
+| 프록시 공통 설정과 요청 필터 | [프록시 재정의](cliproxyapi/config.overrides.yaml) | `pnpm run generate:config` |
 
 `pnpm run generate`는 두 설정과 pstack 에이전트 파일을 모두 갱신한다.
 각 생성기는 공식 Codex 카탈로그를 직접 읽으며 다른 생성기의 결과를 읽지 않는다.

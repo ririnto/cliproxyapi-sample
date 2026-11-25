@@ -145,7 +145,7 @@ const assertProxyConfig = (value) => {
   }
 };
 const modelsDocument = parseDocument(
-  fs.readFileSync(path.join(process.cwd(), "config/models.yaml"), "utf-8"),
+  fs.readFileSync(path.join(process.cwd(), "cliproxyapi/models.yaml"), "utf-8"),
   { merge: true }
 );
 if (modelsDocument.errors.length > 0) {
@@ -156,19 +156,18 @@ if (modelsDocument.errors.length > 0) {
 visit(modelsDocument, {
   Pair(_key, pair) {
     if (
-      !isScalar(pair.key) ||
-      pair.key.value !== "efforts" ||
-      !isMap(pair.value)
+      isScalar(pair.key) &&
+      pair.key.value === "efforts" &&
+      isMap(pair.value)
     ) {
-      return;
-    }
-    const [entry] = pair.value.items;
-    if (
-      pair.value.items.length === 1 &&
-      isScalar(entry?.key) &&
-      entry.key.source === "<<"
-    ) {
-      pair.value = entry.value;
+      const [entry] = pair.value.items;
+      if (
+        pair.value.items.length === 1 &&
+        isScalar(entry?.key) &&
+        entry.key.source === "<<"
+      ) {
+        pair.value = entry.value;
+      }
     }
   }
 });
@@ -279,7 +278,7 @@ const assertRenderedConfig = (contents) => {
 const applyTemplate = (upstream) => {
   /** @type {unknown} */
   const proxyOverrides = parse(
-    fs.readFileSync("config/proxy.overrides.yaml", "utf-8")
+    fs.readFileSync("cliproxyapi/config.overrides.yaml", "utf-8")
   );
   if (!Array.isArray(proxyOverrides)) {
     throw new TypeError("CLIProxyAPI overrides require a list of edits");
@@ -435,7 +434,7 @@ if (
   sourcePath?.startsWith("--") === true
 ) {
   throw new Error(
-    `Usage: node scripts/generate-config.mjs [<source> | -] [--check]`
+    `Usage: node cliproxyapi/generate-config.mjs [<source> | -] [--check]`
   );
 }
 
