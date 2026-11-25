@@ -2,10 +2,11 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delayMs } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
@@ -476,11 +477,12 @@ const isSnapshot = (value) =>
   );
 
 /**
- * @typedef {object} CacheRecord
- * @property {string} credentialHash Credential identity digest.
- * @property {number} fetchedAt Snapshot fetch timestamp.
- * @property {number} nextAttemptAt Earliest retry timestamp.
- * @property {import("./statusline/types.ts").Snapshot} [snapshot] Validated usage snapshot.
+ * @typedef {{
+ *   credentialHash: string,
+ *   fetchedAt: number | null,
+ *   nextAttemptAt: number,
+ *   snapshot?: import("./statusline/types.ts").Snapshot
+ * }} CacheRecord
  */
 
 const MAX_STALE_MS = 5 * 60_000;
@@ -514,24 +516,24 @@ const isSuccessfulResponse = (status, usageError) =>
 const validRecord = (value, credentialHash) =>
   isRecord(value) &&
   value.credentialHash === credentialHash &&
-  isFiniteNumber(value.fetchedAt) &&
+  (value.fetchedAt === null || isFiniteNumber(value.fetchedAt)) &&
   isFiniteNumber(value.nextAttemptAt) &&
   (value.snapshot === undefined || isSnapshot(value.snapshot));
 
 /**
- * @param {import("./statusline/types.ts").Snapshot | undefined} snapshot Cached data.
- * @param {number} elapsed Elapsed milliseconds.
+ * @type {(
+ *   snapshot: import("./statusline/types.ts").Snapshot | undefined,
+ *   elapsed: number,
+ *   maxAge: number
+ * ) => import("./statusline/types.ts").Snapshot | undefined}
  */
-const adjustedSnapshot = (snapshot, elapsed) => {
-  if (!snapshot || !Array.isArray(snapshot.groups)) {
-    return snapshot;
-  }
-  return {
-    ...snapshot,
-    groups: snapshot.groups.map((group) => ({
-      ...group,
-      metrics: Array.isArray(group.metrics)
-        ? group.metrics.map((metric) =>
+const adjustedSnapshot = (snapshot, elapsed, maxAge) =>
+  snapshot !== undefined && elapsed <= maxAge
+    ? {
+        ...snapshot,
+        groups: snapshot.groups.map((group) => ({
+          ...group,
+          metrics: group.metrics.map((metric) =>
             "resetsInMs" in metric && isFiniteNumber(metric.resetsInMs)
               ? {
                   ...metric,
@@ -539,10 +541,9 @@ const adjustedSnapshot = (snapshot, elapsed) => {
                 }
               : metric
           )
-        : group.metrics
-    }))
-  };
-};
+        }))
+      }
+    : undefined;
 
 /**
  * @param {string | null | undefined} value Retry header.
@@ -564,13 +565,13 @@ const retryDelay = (value, now) => {
  * @param {string} filePath Cache path.
  * @param {string} credentialHash Expected identity.
  */
-const readCache = async (filePath, credentialHash) => {
+const readCache = (filePath, credentialHash) => {
   /**
    * @type {unknown}
    */
   let entry;
   try {
-    entry = JSON.parse(await readFile(filePath, "utf-8"));
+    entry = JSON.parse(readFileSync(filePath, "utf-8"));
   } catch {
     entry = undefined;
   }
@@ -578,18 +579,48 @@ const readCache = async (filePath, credentialHash) => {
 };
 
 /**
- * @param {string} directory Cache directory.
- * @param {string} filePath Cache path.
- * @param {Omit<CacheRecord, "snapshot"> & {snapshot?: unknown}} entry Entry to serialize.
- * Persisted snapshots are validated when read.
+ * @type {(
+ *   filePath: string,
+ *   cached: CacheRecord | undefined,
+ *   next: CacheRecord,
+ *   now: number
+ * ) => Promise<CacheRecord>}
  */
-const writeCache = async (directory, filePath, entry) => {
+const publishCache = async (filePath, cached, next, now) => {
+  const directory = path.dirname(filePath);
+  let selected = next.fetchedAt === null ? (cached ?? next) : next;
   let temporaryPath;
   try {
     await mkdir(directory, { mode: 0o700, recursive: true });
+    using lock = new DatabaseSync(path.join(directory, ".publish.sqlite"), {
+      timeout: 1000
+    });
+    lock.exec("BEGIN IMMEDIATE");
+    const latest = readCache(filePath, next.credentialHash) ?? cached;
+    if (
+      latest &&
+      (next.fetchedAt === null ||
+        (latest.fetchedAt !== null && latest.fetchedAt >= next.fetchedAt))
+    ) {
+      selected = latest;
+    }
     temporaryPath = path.join(directory, `.${randomUUID()}.tmp`);
-    await writeFile(temporaryPath, JSON.stringify(entry), { mode: 0o600 });
-    await rename(temporaryPath, filePath);
+    writeFileSync(
+      temporaryPath,
+      JSON.stringify({
+        ...selected,
+        nextAttemptAt: Math.max(
+          next.nextAttemptAt,
+          latest?.nextAttemptAt ?? next.nextAttemptAt
+        ),
+        snapshot:
+          now - (selected.fetchedAt ?? now) <= MAX_STALE_MS
+            ? selected.snapshot
+            : undefined
+      }),
+      { mode: 0o600 }
+    );
+    renameSync(temporaryPath, filePath);
   } catch {
     if (temporaryPath !== undefined && temporaryPath !== "") {
       try {
@@ -606,6 +637,7 @@ const writeCache = async (directory, filePath, entry) => {
       console.error("[statusline-usage] 사용량 캐시 저장에 실패했습니다.");
     }
   }
+  return selected;
 };
 
 /** @type {import("./statusline/types.ts").UsageRuntime["withUsageCache"]} */
@@ -626,28 +658,26 @@ const withUsageCache = async (
   const directory =
     options.cacheDir ??
     path.join(options.home ?? homedir(), ".claude", "cache", "usage");
-  const filePath = path.join(directory, `${provider}.json`);
   const credentialHash = createHash("sha256")
     .update(JSON.stringify([provider, credentialIdentity]))
     .digest("hex");
-  const cached = await readCache(filePath, credentialHash);
+  const filePath = path.join(directory, provider, `${credentialHash}.json`);
+  const cached =
+    readCache(filePath, credentialHash) ??
+    readCache(path.join(directory, `${provider}.json`), credentialHash);
   if (cached && now < cached.nextAttemptAt) {
-    const age = Math.max(0, now - cached.fetchedAt);
-    if (
-      cached.snapshot !== undefined &&
-      age > MAX_STALE_MS &&
-      cached.nextAttemptAt - cached.fetchedAt > ttl
-    ) {
-      cached.snapshot = undefined;
-      await writeCache(directory, filePath, cached);
-    }
-    return adjustedSnapshot(cached.snapshot, age);
+    const fetchedAt = cached.fetchedAt ?? now;
+    return adjustedSnapshot(
+      cached.snapshot,
+      Math.max(0, now - fetchedAt),
+      cached.nextAttemptAt - fetchedAt > ttl ? MAX_STALE_MS : Infinity
+    );
   }
   /**
    * @type {number | undefined}
    */
   let status;
-  let delay = 0;
+  let retryAt = now;
   let usageError = false;
   const originalFetch = options.fetch ?? globalThis.fetch;
   /**
@@ -657,11 +687,14 @@ const withUsageCache = async (
     ...options,
     fetch: async (...args) => {
       status = undefined;
-      delay = 0;
+      retryAt = now;
       usageError = false;
       const response = await originalFetch(...args);
       status = Number.isFinite(response?.status) ? response.status : undefined;
-      delay = retryDelay(response?.headers?.get?.("retry-after"), now);
+      const responseAt = nowValue(options.now);
+      retryAt =
+        responseAt +
+        retryDelay(response?.headers?.get?.("retry-after"), responseAt);
       return response;
     },
     onUsageError: () => {
@@ -674,26 +707,22 @@ const withUsageCache = async (
   } catch {
     status = undefined;
   }
-  const nextAttemptAt = now + Math.max(ttl, delay);
-  if (isSuccessfulResponse(status, usageError)) {
-    await writeCache(directory, filePath, {
-      credentialHash,
-      fetchedAt: now,
-      nextAttemptAt,
-      snapshot
-    });
+  const successful = isSuccessfulResponse(status, usageError);
+  const next = {
+    credentialHash,
+    fetchedAt: successful ? now : null,
+    nextAttemptAt: Math.max(now + ttl, retryAt),
+    snapshot: successful && isSnapshot(snapshot) ? snapshot : undefined
+  };
+  const selected = await publishCache(filePath, cached, next, now);
+  if (successful && selected === next) {
     return snapshot;
   }
-  const fetchedAt = cached?.fetchedAt ?? now;
-  const age = Math.max(0, now - fetchedAt);
-  const fallback = age <= MAX_STALE_MS ? cached?.snapshot : undefined;
-  await writeCache(directory, filePath, {
-    credentialHash,
-    fetchedAt,
-    nextAttemptAt,
-    snapshot: fallback
-  });
-  return adjustedSnapshot(fallback, age);
+  return adjustedSnapshot(
+    selected.snapshot,
+    Math.max(0, now - (selected.fetchedAt ?? now)),
+    MAX_STALE_MS
+  );
 };
 
 /** @type {import("./statusline/types.ts").UsageRuntime["requestJson"]} */
