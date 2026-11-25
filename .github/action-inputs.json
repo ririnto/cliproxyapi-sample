@@ -1,0 +1,63 @@
+{
+  "actions/checkout@v7": {
+    "commit": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "inputs": {
+      "repository": {
+        "default": "${{ github.repository }}",
+        "contextDependent": true
+      },
+      "ref": {},
+      "token": { "default": "${{ github.token }}", "contextDependent": true },
+      "ssh-key": {},
+      "ssh-known-hosts": {},
+      "ssh-strict": { "default": "true" },
+      "ssh-user": { "default": "git" },
+      "persist-credentials": { "default": "true" },
+      "path": {},
+      "clean": { "default": "true" },
+      "filter": { "default": null, "contextDependent": true },
+      "sparse-checkout": { "default": null },
+      "sparse-checkout-cone-mode": { "default": "true" },
+      "fetch-depth": { "default": "1" },
+      "fetch-tags": { "default": "false" },
+      "show-progress": { "default": "true" },
+      "lfs": { "default": "false" },
+      "submodules": { "default": "false" },
+      "set-safe-directory": { "default": "true" },
+      "github-server-url": {},
+      "allow-unsafe-pr-checkout": { "default": "false" }
+    }
+  },
+  "actions/setup-node@v7": {
+    "commit": "949feb2413d6458794dcd2491c4babbbce0c15c1",
+    "inputs": {
+      "node-version": {},
+      "node-version-file": {},
+      "architecture": {},
+      "check-latest": { "default": "false" },
+      "registry-url": {},
+      "scope": {},
+      "token": {
+        "default": "${{ github.server_url == 'https://github.com' && github.token || '' }}",
+        "contextDependent": true
+      },
+      "cache": {},
+      "package-manager-cache": { "default": "true", "contextDependent": true },
+      "cache-dependency-path": {},
+      "mirror": {},
+      "mirror-token": {}
+    }
+  },
+  "pnpm/action-setup@v6": {
+    "commit": "73e46992e05b19abd31f2f3c20e0e7370d762115",
+    "inputs": {
+      "version": {},
+      "dest": { "default": "~/setup-pnpm", "contextDependent": true },
+      "run_install": { "default": "null" },
+      "cache": { "default": "false" },
+      "cache_dependency_path": { "default": "pnpm-lock.yaml" },
+      "package_json_file": { "default": "package.json" },
+      "standalone": { "default": "false" }
+    }
+  }
+}
