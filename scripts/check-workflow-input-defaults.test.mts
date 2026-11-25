@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtempDisposable, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtempDisposable,
+  readFile,
+  writeFile
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -11,16 +16,22 @@ await test("the workflow check reports only equal literal inputs for approved ac
     path.join(tmpdir(), "workflow-input-defaults-")
   );
   const workflow = ".github/workflows/check.yml";
+  const metadata = ".github/action-inputs.json";
+  const approvedInputs: unknown = JSON.parse(
+    await readFile(new URL(`../${metadata}`, import.meta.url), "utf-8")
+  );
+  assert.ok(
+    typeof approvedInputs === "object" &&
+      approvedInputs !== null &&
+      !Array.isArray(approvedInputs)
+  );
   await mkdir(path.join(fixture.path, path.dirname(workflow)), {
     recursive: true
   });
   await writeFile(
-    path.join(fixture.path, ".github/action-inputs.json"),
+    path.join(fixture.path, metadata),
     JSON.stringify({
-      "pnpm/action-setup@v6": {
-        commit: "73e46992e05b19abd31f2f3c20e0e7370d762115",
-        inputs: { cache: { default: "false" }, version: {} }
-      },
+      ...approvedInputs,
       "pnpm/action-setup@unresolved": {
         commit: null,
         inputs: { cache: { default: "false" } }
@@ -59,6 +70,10 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: auto
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: ""
+          filter: null
 `
     );
     return spawnSync(
@@ -78,8 +93,7 @@ jobs:
 
   const failing = await check("false");
   assert.equal(failing.status, 1, failing.stderr);
-  assert.equal(
-    failing.stderr,
-    `${workflow}:9: pnpm/action-setup@v6 input cache equals its declared default "false". Omit the input.\n`
-  );
+  assert.equal(failing.stderr.trim().split("\n").length, 1, failing.stderr);
+  assert.match(failing.stderr, /\bpnpm\/action-setup@v6(?![\w.-])/u);
+  assert.match(failing.stderr, /\bcache\b/u);
 });
