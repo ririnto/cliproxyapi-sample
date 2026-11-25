@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { isMap, isScalar, parse, parseDocument, stringify, visit } from "yaml";
@@ -453,16 +454,13 @@ const [catalogText, upstream] = await Promise.all([
 const catalog = parseModels(JSON.parse(catalogText));
 const input = renderConfig(applyTemplate(upstream), catalog);
 const file = "config.example.yaml";
-const content = execFileSync(
-  "pnpm",
-  ["exec", "oxfmt", "--stdin-filepath", file],
-  {
-    cwd: root,
-    encoding: "utf-8",
-    input,
-    maxBuffer: 4 * 1024 * 1024
-  }
+using staging = fs.mkdtempDisposableSync(
+  path.join(tmpdir(), "model-generation-")
 );
+const staged = path.join(staging.path, path.basename(file));
+fs.writeFileSync(staged, input);
+execFileSync("pnpm", ["exec", "ultracite", "fix", staged], { cwd: root });
+const content = fs.readFileSync(staged, "utf-8");
 assertRenderedConfig(content);
 const target = path.resolve(file);
 if (!fs.existsSync(target) || fs.readFileSync(target, "utf-8") !== content) {

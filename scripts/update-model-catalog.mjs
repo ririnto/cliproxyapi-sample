@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { isMap, isScalar, parseDocument, visit } from "yaml";
@@ -200,16 +201,13 @@ const source = JSON.parse(
 );
 const input = JSON.stringify({ models: resolveModelCatalog(source) }, null, 2);
 const file = ".codex/model_catalog.json";
-const content = execFileSync(
-  "pnpm",
-  ["exec", "oxfmt", "--stdin-filepath", file],
-  {
-    cwd: root,
-    encoding: "utf-8",
-    input,
-    maxBuffer: 4 * 1024 * 1024
-  }
+using staging = fs.mkdtempDisposableSync(
+  path.join(tmpdir(), "model-generation-")
 );
+const staged = path.join(staging.path, path.basename(file));
+fs.writeFileSync(staged, input);
+execFileSync("pnpm", ["exec", "ultracite", "fix", staged], { cwd: root });
+const content = fs.readFileSync(staged, "utf-8");
 const target = path.join(root, file);
 if (!fs.existsSync(target) || fs.readFileSync(target, "utf-8") !== content) {
   if (check) {

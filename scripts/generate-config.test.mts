@@ -405,13 +405,12 @@ await test("Codex refresh reads its own overrides and does not need the proxy fi
     path.join(fixture.path, "node_modules"),
     "dir"
   );
-  await writeFile(
-    path.join(fixture.path, "package.json"),
-    await readFile("package.json")
-  );
-  await writeFile(
-    path.join(fixture.path, "oxfmt.config.ts"),
-    await readFile("oxfmt.config.ts")
+  await Promise.all(
+    ["package.json", "oxfmt.config.ts", "oxlint.config.ts"].map(
+      async (file) => {
+        await writeFile(path.join(fixture.path, file), await readFile(file));
+      }
+    )
   );
   const input = {
     models: [
