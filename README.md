@@ -242,6 +242,5 @@ pnpm install --frozen-lockfile
 pnpm run pre-push
 ```
 
-이 명령은 문서 형식, 린트, 타입, 생성 파일을 검사한다.
-[CI](.github/workflows/checks.yaml)는 같은 검사를 실행하고
-`docker compose -f compose.yaml config --quiet`로 Compose 설정을 확인한다.
+`pnpm run pre-push`는 Markdownlint CLI2와 Ultracite를 실행한다.
+[CI](.github/workflows/checks.yaml)는 잠금 파일대로 의존성을 설치하고 같은 lint 검사를 실행한다.

@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/markdownlint-cli2/schema/markdownlint-cli2-config-schema.json",
+  "config": {
+    "code-block-style": {
+      "style": "fenced"
+    },
+    "docs/no-box-drawing": true,
+    "docs/one-sentence-per-line": true,
+    "line-length": false,
+    "no-duplicate-heading": {
+      "siblings_only": true
+    },
+    "no-emphasis-as-heading": true,
+    "no-inline-html": {
+      "allowed_elements": ["details", "summary", "kbd", "img", "code"],
+      "table_allowed_elements": ["br", "code"]
+    },
+    "single-title": {
+      "front_matter_title": ""
+    },
+    "table-column-style": {
+      "style": "compact"
+    }
+  },
+  "customRules": ["rules/no-box-drawing.ts", "rules/one-sentence-per-line.ts"],
+  "globs": ["**/*.md"],
+  "gitignore": true,
+  "ignores": ["**/rules/**"]
+}
