@@ -1,0 +1,31 @@
+default_context_window: 292000
+sources:
+  - type: codex-catalog
+    url: https://raw.githubusercontent.com/openai/codex/refs/heads/main/codex-rs/models-manager/models.json
+codex:
+  context_windows:
+    codex-auto-review: 272000
+    gpt-5.5: 272000
+    gpt-6.2-sol: 292000
+    gpt-6.1-sol: 292000
+    gpt-6.1-terra: 292000
+routes:
+  claude:
+    zai:
+      base-url: https://api.z.ai/api/anthropic
+      models:
+        - alias: glm-5.4
+          name: glm-5.4
+          display_name: GLM-5.4
+          efforts:
+            <<: &low-high-max
+              - low
+              - high
+              - max
+        - alias: glm-5.3-flash
+          name: glm-5.3-flash
+          display_name: GLM-5.3-Flash
+          efforts:
+            <<: *low-high-max
+      keys:
+        - api-key: __ZAI_API_KEY__

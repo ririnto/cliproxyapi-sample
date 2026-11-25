@@ -6,6 +6,7 @@ import {
   readdir,
   readFile,
   stat,
+  symlink,
   utimes,
   writeFile
 } from "node:fs/promises";
@@ -20,7 +21,10 @@ const catalogFile = ".codex/model_catalog.json";
 const upstreamFile = "config/proxy.upstream.yaml.txt";
 const overridesFile = "config/proxy.overrides.yaml";
 const configFile = "config.example.yaml";
-const settingsFile = "config/models.json";
+const settingsFile = "config/models.yaml";
+const upstreamCatalogFile = "config/codex.upstream.json";
+const codexOverrides = ".codex/model_catalog.override.yaml";
+const catalogGenerator = "scripts/update-model-catalog.mjs";
 const overriddenModels = [
   "gpt-6.2-astra",
   "gpt-6-astra",
@@ -38,7 +42,13 @@ const copyFixtureFiles = async (
   edits: FixtureEdits = {}
 ) =>
   await Promise.all(
-    [...files, settingsFile, upstreamFile, overridesFile].map(async (file) => {
+    [
+      ...files,
+      settingsFile,
+      upstreamFile,
+      overridesFile,
+      upstreamCatalogFile
+    ].map(async (file) => {
       const destination = path.join(directory, file);
       await mkdir(path.dirname(destination), { recursive: true });
       const contents = await readFile(file, "utf-8");
@@ -127,18 +137,13 @@ await test("the generated check rejects violations of the GLM route rules", asyn
   );
 });
 
-await test("generation applies local settings to the official catalog and proxy example", async () => {
+await test("proxy generation reads the two upstream sources without the local Codex catalog", async () => {
   await using fixture = await mkdtempDisposable(
     path.join(tmpdir(), "proxy-config-")
   );
   const astraOverride = 293_000;
-  await copyFixtureFiles(fixture.path, [catalogFile], {
+  await copyFixtureFiles(fixture.path, [], {
     [upstreamFile]: () => "stale: true\n",
-    [catalogFile]: () =>
-      JSON.stringify({
-        sourceVisibility: { "gpt-6.2-sol": "hide" },
-        models: [{ slug: "old-local-model", context_window: 100_000 }]
-      }),
     [overridesFile]: (contents) => {
       const overrides = parseDocument(contents);
       assert.ok(isSeq(overrides.contents));
@@ -150,70 +155,13 @@ await test("generation applies local settings to the official catalog and proxy 
       astraEdit.set("content", `        max-context-length: ${astraOverride}`);
       return overrides.toString();
     },
-    [settingsFile]: () =>
-      JSON.stringify({
-        finalModels: [
-          "gpt-6.2-sol",
-          "gpt-6.2-astra",
-          "gpt-6.1-terra",
-          "gpt-6-luna",
-          "glm-5.4",
-          "glm-5.3-flash"
-        ],
-        codex: {
-          "gpt-5.5": { visibility: "hide" },
-          "gpt-6.2-sol": {
-            context_window: 292_000,
-            supports_search_tool: false,
-            local_only: true
-          },
-          "gpt-6.1-sol": { visibility: "list" },
-          "claude-opus-5": { display_name: "Claude Opus 5" }
-        },
-        zai: {
-          "glm-5.4": { display_name: "GLM-5.4", local_only: true },
-          "glm-5.3-flash": { display_name: "GLM-5.3-Flash" }
-        }
-      })
+    [settingsFile]: (contents) =>
+      contents.replace(
+        "display_name: GLM-5.4",
+        "display_name: GLM-5.4\n          context_window: 400000"
+      )
   });
-  const first = {
-    slug: "gpt-6.2-sol",
-    visibility: "list",
-    context_window: 500_000,
-    display_name: "Original",
-    supported_reasoning_levels: [{ effort: "low", description: "Low" }],
-    supports_search_tool: true,
-    upstream_only: { retained: true }
-  };
-  const astra = {
-    ...first,
-    slug: "gpt-6.2-astra",
-    context_window: 272_000,
-    max_context_window: 872_000
-  };
-  const luna = { ...astra, slug: "gpt-6-luna" };
-  const upstream = {
-    models: [
-      first,
-      { ...first, slug: "gpt-6.1-sol", visibility: "hide" },
-      { ...first, slug: "gpt-7-sol" },
-      astra,
-      { ...astra, slug: "gpt-6-astra" },
-      luna,
-      { ...luna, slug: "gpt-5.6-luna" },
-      { ...first, slug: "gpt-6.1-terra", visibility: "hide" },
-      { ...first, slug: "gpt-5.5" },
-      { ...first, slug: "codex-auto-review", visibility: "hide" },
-      { ...first, slug: "glm-5.3" },
-      { ...first, slug: "glm-5.2-flash" },
-      { slug: "claude-sonnet-5", context_window: 200_000, visibility: "none" },
-      {
-        ...first,
-        slug: "upstream-search-disabled",
-        supports_search_tool: false
-      }
-    ]
-  };
+  const upstream = await readFile(upstreamCatalogFile, "utf-8");
   const proxySource = await readFile(upstreamFile, "utf-8");
   const upstreamNote = "# An upstream example comment\n";
   await writeFile(
@@ -223,13 +171,13 @@ await test("generation applies local settings to the official catalog and proxy 
   const preload = `import { readFileSync } from "node:fs";
 import { mock } from "node:test";
 mock.method(globalThis, "fetch", (url) => {
-  if (url === "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI/85225381d89915595598ed13766cd79890c03a84/config.example.yaml") {
+  if (url === "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI/refs/heads/main/config.example.yaml") {
     return Promise.resolve(new Response(readFileSync("upstream.yaml", "utf-8")));
   }
   if (url !== "https://raw.githubusercontent.com/openai/codex/refs/heads/main/codex-rs/models-manager/models.json") {
     throw new Error("Unexpected catalog URL: " + url);
   }
-  return Promise.resolve(Response.json(${JSON.stringify(upstream)}));
+  return Promise.resolve(new Response(${JSON.stringify(upstream)}));
 });`;
   const result = spawnSync(
     process.execPath,
@@ -241,42 +189,34 @@ mock.method(globalThis, "fetch", (url) => {
     { cwd: fixture.path, encoding: "utf-8" }
   );
   assert.equal(result.status, 0, result.stderr);
-  const actual: unknown = JSON.parse(
-    await readFile(path.join(fixture.path, catalogFile), "utf-8")
-  );
-  assert.deepEqual(actual, {
-    models: [
-      { ...first, context_window: 292_000, supports_search_tool: false },
-      { ...first, slug: "gpt-6.1-sol" },
-      { ...first, slug: "gpt-7-sol", visibility: "hide" },
-      astra,
-      { ...astra, slug: "gpt-6-astra", visibility: "hide" },
-      luna,
-      { ...luna, slug: "gpt-5.6-luna", visibility: "hide" },
-      { ...first, slug: "gpt-6.1-terra", visibility: "hide" },
-      { ...first, slug: "gpt-5.5", visibility: "hide" },
-      { ...first, slug: "codex-auto-review", visibility: "hide" },
-      { ...first, slug: "glm-5.3", visibility: "hide" },
-      { ...first, slug: "glm-5.2-flash", visibility: "hide" },
-      {
-        slug: "claude-sonnet-5",
-        context_window: 200_000,
-        visibility: "none",
-        supports_search_tool: true
-      },
-      {
-        ...first,
-        slug: "upstream-search-disabled",
-        supports_search_tool: false
-      },
-      { ...first, slug: "claude-opus-5", display_name: "Claude Opus 5" },
-      { ...first, slug: "glm-5.4", display_name: "GLM-5.4" },
-      { ...first, slug: "glm-5.3-flash", display_name: "GLM-5.3-Flash" }
-    ]
+  await assert.rejects(readFile(path.join(fixture.path, catalogFile)), {
+    code: "ENOENT"
   });
   const proxy = await readFile(path.join(fixture.path, configFile), "utf-8");
   const proxyDocument = parseDocument(proxy);
   assert.equal(proxyDocument.getIn(["models", "codex-catalog"]), "");
+  assert.equal(
+    proxyDocument.getIn([
+      "api-keys",
+      "claude",
+      0,
+      "models",
+      0,
+      "max-context-length"
+    ]),
+    400_000
+  );
+  assert.equal(
+    proxyDocument.getIn([
+      "api-keys",
+      "claude",
+      0,
+      "models",
+      1,
+      "max-context-length"
+    ]),
+    292_000
+  );
   const oauthSettings: unknown = proxyDocument.getIn([
     "oauth",
     "settings",
@@ -390,7 +330,8 @@ await test("the generated check rejects stale or unformatted samples without cha
           configFile,
           overridesFile,
           settingsFile,
-          upstreamFile
+          upstreamFile,
+          upstreamCatalogFile
         ].map(async (name) => {
           const file = path.join(fixture.path, name);
           await utimes(file, 0, 0);
@@ -481,7 +422,7 @@ await test("the generated config check rejects a zai/ catalog slug", async () =>
   const id = "zai/review-probe";
   await assertGeneratedCheckRejects(
     {
-      [catalogFile]: (contents) => {
+      [upstreamCatalogFile]: (contents) => {
         const catalog: unknown = JSON.parse(contents);
         assert.ok(
           typeof catalog === "object" &&
@@ -503,13 +444,90 @@ await test("the generated config check rejects a zai/ catalog slug", async () =>
   );
 });
 
-await test("the generated check rejects a stale catalog override", async () => {
-  await assertGeneratedCheckRejects(
-    {
-      [settingsFile]: (contents) =>
-        contents.replace('"visibility": "hide"', '"visibility": "none"')
-    },
-    catalogFile,
-    [/stale/u]
+await test("Codex refresh reads its own overrides and does not need the proxy files", async () => {
+  await using fixture = await mkdtempDisposable(
+    path.join(tmpdir(), "codex-catalog-")
   );
+  await Promise.all(
+    [codexOverrides, catalogGenerator].map(async (file) => {
+      const target = path.join(fixture.path, file);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, await readFile(file));
+    })
+  );
+  await symlink(
+    path.resolve("node_modules"),
+    path.join(fixture.path, "node_modules"),
+    "dir"
+  );
+  await writeFile(
+    path.join(fixture.path, "package.json"),
+    await readFile("package.json")
+  );
+  await writeFile(
+    path.join(fixture.path, "oxfmt.config.ts"),
+    await readFile("oxfmt.config.ts")
+  );
+  const input = {
+    models: [
+      {
+        slug: "gpt-6.10.2-test",
+        context_window: 500_000,
+        priority: 3,
+        visibility: "list",
+        available_in_plans: ["paid"],
+        service_tiers: ["fast"],
+        additional_speed_tiers: ["fast"],
+        experimental_supported_tools: ["test"]
+      },
+      {
+        slug: "gpt-6.10.11-test",
+        context_window: 550_000,
+        priority: 4,
+        visibility: "list"
+      }
+    ]
+  };
+  await writeFile(
+    path.join(fixture.path, "upstream.json"),
+    JSON.stringify(input)
+  );
+  const runCatalog = (...args: readonly string[]) =>
+    spawnSync(process.execPath, [catalogGenerator, ...args], {
+      cwd: fixture.path,
+      encoding: "utf-8"
+    });
+  const refresh = runCatalog("upstream.json");
+  assert.equal(refresh.status, 0, refresh.stderr);
+  const result = parseDocument(
+    await readFile(path.join(fixture.path, catalogFile), "utf-8")
+  );
+  assert.equal(result.getIn(["models", 0, "visibility"]), "hide");
+  assert.equal(result.getIn(["models", 1, "visibility"]), "list");
+  assert.equal(result.getIn(["models", 1, "context_window"]), 550_000);
+  for (const [index, slug] of ["glm-5.4", "glm-5.3-flash"].entries()) {
+    assert.equal(result.getIn(["models", index + 2, "slug"]), slug);
+    assert.equal(result.getIn(["models", index + 2, "priority"]), index + 5);
+    for (const field of [
+      "available_in_plans",
+      "service_tiers",
+      "additional_speed_tiers",
+      "experimental_supported_tools"
+    ]) {
+      const values: unknown = result.getIn(["models", index + 2, field], true);
+      assert.ok(isSeq(values));
+      assert.deepEqual(values.items, []);
+    }
+  }
+  const check = runCatalog("--check");
+  assert.equal(check.status, 0, check.stderr);
+  const pathToOverrides = path.join(fixture.path, codexOverrides);
+  const contents = await readFile(pathToOverrides, "utf-8");
+  await writeFile(
+    pathToOverrides,
+    contents.replace("display_name: GLM-5.4", "display_name: Updated")
+  );
+  const stale = runCatalog("--check");
+  assert.equal(stale.status, 1, stale.stderr);
+  assert.match(stale.stderr, /model_catalog\.json/u);
 });

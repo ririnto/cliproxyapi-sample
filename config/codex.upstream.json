@@ -1,0 +1,74 @@
+{
+  "models": [
+    {
+      "slug": "gpt-6.2-sol",
+      "visibility": "list",
+      "context_window": 500000
+    },
+    {
+      "slug": "gpt-6.2-astra",
+      "visibility": "list",
+      "context_window": 272000
+    },
+    {
+      "slug": "gpt-6-astra",
+      "visibility": "list",
+      "context_window": 272000
+    },
+    {
+      "slug": "gpt-6.1-sol",
+      "visibility": "list",
+      "context_window": 500000
+    },
+    {
+      "slug": "gpt-6.1-terra",
+      "visibility": "list",
+      "context_window": 500000
+    },
+    {
+      "slug": "gpt-6-sol",
+      "visibility": "list",
+      "context_window": 272000
+    },
+    {
+      "slug": "gpt-6-luna",
+      "visibility": "list",
+      "context_window": 272000
+    },
+    {
+      "slug": "gpt-5.6-sol",
+      "visibility": "list",
+      "context_window": 272000
+    },
+    {
+      "slug": "gpt-5.6-terra",
+      "visibility": "list",
+      "context_window": 272000
+    },
+    {
+      "slug": "gpt-5.6-luna",
+      "visibility": "list",
+      "context_window": 272000
+    },
+    {
+      "slug": "gpt-daybreak-blue-latest",
+      "visibility": "hide",
+      "context_window": 272000
+    },
+    {
+      "slug": "gpt-daybreak-red-latest",
+      "visibility": "hide",
+      "context_window": 372000
+    },
+    {
+      "slug": "gpt-5.5",
+      "visibility": "list",
+      "context_window": 272000
+    },
+    {
+      "slug": "codex-auto-review",
+      "visibility": "hide",
+      "context_window": 272000
+    }
+  ]
+}

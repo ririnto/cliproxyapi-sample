@@ -3,9 +3,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempDisposable, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { isDeepStrictEqual } from "node:util";
 
-import { parse, stringify } from "yaml";
+import { isMap, isScalar, parse, parseDocument, stringify, visit } from "yaml";
 
 interface CatalogEntry extends Record<string, unknown> {
   readonly slug: string;
@@ -15,13 +14,11 @@ interface CatalogModel extends CatalogEntry {
   readonly context_window: number;
 }
 
-const settingsPath = "config/models.json";
-const clientCatalogPath = ".codex/model_catalog.json";
+const settingsPath = "config/models.yaml";
+const upstreamCatalogPath = "config/codex.upstream.json";
 const proxyUpstreamPath = "config/proxy.upstream.yaml.txt";
-const officialCatalogUrl =
-  "https://raw.githubusercontent.com/openai/codex/refs/heads/main/codex-rs/models-manager/models.json";
 const officialProxyUrl =
-  "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI/85225381d89915595598ed13766cd79890c03a84/config.example.yaml";
+  "https://raw.githubusercontent.com/router-for-me/CLIProxyAPI/refs/heads/main/config.example.yaml";
 
 const fetchText = async (url: string) => {
   const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
@@ -122,60 +119,86 @@ const assertProxyConfig = (contents: string) => {
 
 const codexVersion = (slug: string) => {
   const version =
-    /^gpt-(?<major>\d+)(?:\.(?<minor>\d+))?-(?<lane>[a-zA-Z]+)$/u.exec(
+    /^gpt-(?<number>[0-9]+(?:\.[0-9]+)*)-(?<lane>[A-Za-z]+)$/u.exec(
       slug
     )?.groups;
-  return version?.lane === undefined
+  return version?.lane === undefined || version.number === undefined
     ? undefined
-    : {
-        lane: version.lane,
-        major: Number(version.major),
-        minor: Number(version.minor ?? 0)
-      };
+    : { lane: version.lane, parts: version.number.split(".").map(BigInt) };
 };
 
-const modelLane = (slug: string) => {
-  const codex = codexVersion(slug);
-  if (codex) {
-    return `gpt-${codex.lane}`;
-  }
-  const glm = /^glm-\d+(?:\.\d+)?(?<variant>-flash)?$/u.exec(slug)?.groups;
-  return glm === undefined ? undefined : `glm${glm.variant ?? ""}`;
-};
-
-const readModelSettings = (contents: string) => {
-  const settings: unknown = JSON.parse(contents);
-  assert.ok(
-    isRecord(settings) && Array.isArray(settings.finalModels),
-    `Expected finalModels in ${settingsPath}`
-  );
-  const laneFinals = new Map<string, string>();
-  const finalModels: readonly unknown[] = settings.finalModels;
-  for (const slug of finalModels) {
-    assert.ok(typeof slug === "string", "Expected a model slug in finalModels");
-    const lane = modelLane(slug);
-    assert.ok(lane !== undefined, `${slug} finalModels: model lane is unknown`);
-    assert.ok(
-      !laneFinals.has(lane),
-      `${slug} finalModels: duplicate lane ${lane}`
-    );
-    laneFinals.set(lane, slug);
-  }
-  const models = new Map<
-    string,
-    { group: "codex" | "zai"; overrides: Record<string, unknown> }
-  >();
-  for (const group of ["codex", "zai"] as const) {
-    const entries = settings[group];
-    assert.ok(isRecord(entries), `Expected ${group} in ${settingsPath}`);
-    for (const [slug, overrides] of Object.entries(entries)) {
-      assertBareModelId(slug, "slug");
-      assert.ok(isRecord(overrides), `Invalid model settings for ${slug}`);
-      assert.ok(!models.has(slug), `Duplicate model settings for ${slug}`);
-      models.set(slug, { group, overrides });
+const isNewer = (a: readonly bigint[], b: readonly bigint[]) => {
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const left = a[index] ?? 0n;
+    const right = b[index] ?? 0n;
+    if (left !== right) {
+      return left > right;
     }
   }
-  return { laneFinals, models };
+  return false;
+};
+
+interface RouteModel {
+  readonly name: string;
+  readonly alias: string;
+  readonly display_name: string;
+  readonly context_window?: number;
+  readonly efforts: readonly string[];
+}
+
+interface ProxySettings {
+  readonly default_context_window: number;
+  readonly sources: readonly { type: string; url: string }[];
+  readonly codex: { context_windows: Readonly<Record<string, number>> };
+  readonly routes: {
+    claude: {
+      zai: { models: readonly RouteModel[] } & Record<string, unknown>;
+    };
+  };
+}
+
+const isProxySettings = (settings: unknown): settings is ProxySettings =>
+  isRecord(settings) &&
+  Array.isArray(settings.sources) &&
+  Number.isSafeInteger(settings.default_context_window) &&
+  isRecord(settings.codex) &&
+  isRecord(settings.codex.context_windows) &&
+  isRecord(settings.routes) &&
+  isRecord(settings.routes.claude) &&
+  isRecord(settings.routes.claude.zai) &&
+  Array.isArray(settings.routes.claude.zai.models);
+
+const readModelSettings = (contents: string): ProxySettings => {
+  const document = parseDocument(contents, { merge: true });
+  if (document.errors.length > 0) {
+    throw document.errors[0];
+  }
+  // Unwrap effort sequences before applying ordinary YAML mapping merges.
+  visit(document, {
+    Pair(_key, pair) {
+      if (
+        !isScalar(pair.key) ||
+        pair.key.value !== "efforts" ||
+        !isMap(pair.value)
+      ) {
+        return;
+      }
+      const [entry] = pair.value.items;
+      if (
+        pair.value.items.length === 1 &&
+        isScalar(entry?.key) &&
+        entry.key.source === "<<"
+      ) {
+        pair.value = entry.value;
+      }
+    }
+  });
+  const settings: unknown = document.toJS();
+  assert.ok(
+    isProxySettings(settings),
+    `Expected proxy model settings in ${settingsPath}`
+  );
+  return settings;
 };
 
 const deriveCodexAliases = (entries: Iterable<CatalogModel>) => {
@@ -183,30 +206,22 @@ const deriveCodexAliases = (entries: Iterable<CatalogModel>) => {
     const version = codexVersion(slug);
     return version ? [{ slug, version, visibility }] : [];
   });
-  const latest = new Map<
-    string,
-    { slug: string; major: number; minor: number }
-  >();
+  const latest = new Map<string, { slug: string; parts: bigint[] }>();
   for (const { slug, version, visibility } of known) {
     const previous = latest.get(version.lane);
     if (
       visibility === "list" &&
-      (!previous ||
-        version.major > previous.major ||
-        (version.major === previous.major && version.minor > previous.minor))
+      (!previous || isNewer(version.parts, previous.parts))
     ) {
       latest.set(version.lane, {
         slug,
-        major: version.major,
-        minor: version.minor
+        parts: version.parts
       });
     }
   }
   return known.flatMap(({ slug, version }) => {
     const target = latest.get(version.lane);
-    return target &&
-      (version.major < target.major ||
-        (version.major === target.major && version.minor < target.minor))
+    return target && isNewer(target.parts, version.parts)
       ? [{ name: target.slug, alias: slug, fork: true }]
       : [];
   });
@@ -268,49 +283,31 @@ const applyProxyOverrides = (
 
 const renderConfig = (
   template: string,
-  catalog: ReadonlyMap<string, CatalogModel>
+  catalog: ReadonlyMap<string, CatalogModel>,
+  settings: ProxySettings
 ) => {
   const codexAliases = deriveCodexAliases(catalog.values());
-  const glmRoutes = [...catalog].flatMap(([name, model]) => {
-    if (modelSettings.get(name)?.group !== "zai") {
-      return [];
-    }
-    const {
-      context_window,
-      display_name,
-      supported_reasoning_levels: reasoningLevels
-    } = model;
-    assert.ok(
-      Array.isArray(reasoningLevels),
-      `Missing reasoning levels for ${name}`
-    );
-    const supported = new Set(
-      reasoningLevels.map((level: unknown) => {
-        assert.ok(
-          isRecord(level) &&
-            typeof level.effort === "string" &&
-            level.effort.length > 0,
-          `Invalid reasoning level for ${name}`
-        );
-        return level.effort;
-      })
-    );
+  const route = settings.routes.claude.zai;
+  const glmRoutes = route.models.map((model) => {
+    const supported = new Set(model.efforts);
     const highest = effortOrder.find((effort) => supported.has(effort));
-    assert.ok(highest !== undefined, `No usable reasoning effort for ${name}`);
-    return [
-      {
-        model: {
-          name,
-          alias: name,
-          "display-name": display_name,
-          "max-context-length": context_window,
-          "is-compat": true,
-          thinking: { levels: [...effortOrder] }
-        },
-        supported,
-        highest
-      }
-    ];
+    assert.ok(
+      highest !== undefined,
+      `No usable reasoning effort for ${model.name}`
+    );
+    return {
+      model: {
+        name: model.name,
+        alias: model.alias,
+        "display-name": model.display_name,
+        "max-context-length":
+          model.context_window ?? settings.default_context_window,
+        "is-compat": true,
+        thinking: { levels: [...effortOrder] }
+      },
+      supported,
+      highest
+    };
   });
   const glmOverrides = effortOrder.flatMap((requested, index) => {
     const byTarget = new Map<string, string[]>();
@@ -344,7 +341,10 @@ const renderConfig = (
   }
   const codexContext = [...catalog].flatMap(([name, { context_window }]) => {
     const target = contextTargets.get(name);
-    if (target === undefined && modelSettings.get(name)?.group !== "codex") {
+    if (
+      target === undefined &&
+      !Object.hasOwn(settings.codex.context_windows, name)
+    ) {
       return [];
     }
     return [
@@ -357,9 +357,19 @@ const renderConfig = (
   const sections = [
     { indent: 6, marker: "glm-overrides", entries: glmOverrides, quote: false },
     {
-      indent: 8,
-      marker: "zai-models",
-      entries: glmRoutes.map(({ model }) => model),
+      indent: 0,
+      marker: "routes",
+      entries: {
+        "api-keys": {
+          claude: [
+            {
+              name: "zai",
+              ...route,
+              models: glmRoutes.map(({ model }) => model)
+            }
+          ]
+        }
+      },
       quote: false
     },
     { indent: 6, marker: "codex-aliases", entries: codexAliases, quote: true },
@@ -391,73 +401,44 @@ assert.ok(
   "Usage: node scripts/generate-config.mts [--check]"
 );
 const check = args[0] === "--check";
-const [upstreamProxy, proxyOverrides, settingsContents, source] =
-  await Promise.all([
-    check ? readFile(proxyUpstreamPath, "utf-8") : fetchText(officialProxyUrl),
-    readFile("config/proxy.overrides.yaml", "utf-8"),
-    readFile(settingsPath, "utf-8"),
-    check ? readFile(clientCatalogPath, "utf-8") : fetchText(officialCatalogUrl)
-  ]);
-const { laneFinals, models: modelSettings } =
-  readModelSettings(settingsContents);
+const [upstreamProxy, proxyOverrides, settingsContents] = await Promise.all([
+  check ? readFile(proxyUpstreamPath, "utf-8") : fetchText(officialProxyUrl),
+  readFile("config/proxy.overrides.yaml", "utf-8"),
+  readFile(settingsPath, "utf-8")
+]);
+const settings = readModelSettings(settingsContents);
+const source = check
+  ? await readFile(upstreamCatalogPath, "utf-8")
+  : await fetchText(
+      settings.sources.find(({ type }) => type === "codex-catalog")?.url ?? ""
+    );
 const catalog: unknown = JSON.parse(source);
 assert.ok(
   isRecord(catalog) && Array.isArray(catalog.models),
   "Expected a Codex models array"
 );
-const entries = new Map<string, CatalogEntry>();
-const sourceModels: readonly unknown[] = catalog.models;
-for (const entry of sourceModels) {
-  assert.ok(
-    isRecord(entry) && typeof entry.slug === "string" && entry.slug,
-    "Expected a nonempty catalog model slug"
-  );
-  assertBareModelId(entry.slug, "slug");
-  assert.ok(!entries.has(entry.slug), `Duplicate catalog model: ${entry.slug}`);
-  entries.set(entry.slug, { ...entry, slug: entry.slug });
-}
-const first = entries.values().next().value;
-assert.ok(first, "Expected at least one Codex model");
-const hasSearchTool = [...entries.values()].some((entry) =>
-  Object.hasOwn(entry, "supports_search_tool")
-);
-for (const slug of modelSettings.keys()) {
-  if (!entries.has(slug)) {
-    entries.set(slug, { ...first, slug });
-  }
-}
-for (const slug of laneFinals.values()) {
-  assert.ok(
-    entries.has(slug),
-    `${slug} finalModels: missing from Codex catalog`
-  );
-}
 const models = new Map<string, CatalogModel>();
-for (const [slug, entry] of entries) {
-  const updated = { ...entry };
-  const final = laneFinals.get(modelLane(slug) ?? "");
-  if (final !== undefined && updated.visibility !== "hide") {
-    updated.visibility = final === slug ? "list" : "hide";
-  }
-  if (hasSearchTool && !Object.hasOwn(updated, "supports_search_tool")) {
-    updated.supports_search_tool = true;
-  }
-  for (const [field, value] of Object.entries(
-    modelSettings.get(slug)?.overrides ?? {}
-  )) {
-    if (field !== "slug" && Object.hasOwn(updated, field)) {
-      updated[field] = value;
-    }
-  }
-  const { context_window } = updated;
+const sourceModels: readonly unknown[] = catalog.models;
+const snapshot = sourceModels.map((entry) => {
   assert.ok(
-    typeof context_window === "number" &&
-      Number.isSafeInteger(context_window) &&
-      context_window > 0,
-    `Invalid context window for ${slug}`
+    isRecord(entry) &&
+      typeof entry.slug === "string" &&
+      typeof entry.context_window === "number" &&
+      entry.context_window > 0,
+    "Expected a Codex model slug and context window"
   );
-  models.set(slug, { ...updated, context_window });
-}
+  const { slug, visibility, context_window } = entry;
+  assertBareModelId(slug, "slug");
+  assert.ok(!models.has(slug), `Duplicate catalog model: ${slug}`);
+  const model = { slug, visibility, context_window };
+  models.set(slug, {
+    ...model,
+    context_window:
+      settings.codex.context_windows[slug] ??
+      Math.min(context_window, settings.default_context_window)
+  });
+  return model;
+});
 
 const proxyConfigPath = "config.example.yaml";
 const overrides = Object.groupBy(
@@ -473,7 +454,8 @@ await writeFile(
   applyProxyOverrides(
     renderConfig(
       applyProxyOverrides(upstreamProxy, overrides.upstream ?? []),
-      models
+      models,
+      settings
     ),
     overrides.generated ?? []
   )
@@ -482,7 +464,6 @@ execFileSync("pnpm", ["exec", "ultracite", "fix", stagedConfig], {
   cwd: new URL("../", import.meta.url)
 });
 const config = await readFile(stagedConfig, "utf-8");
-const generatedCatalog = { models: [...models.values()] };
 assertProxyConfig(config);
 if (check) {
   const existing = await readFile(proxyConfigPath, "utf-8");
@@ -494,17 +475,13 @@ if (check) {
     config,
     `${proxyConfigPath} is stale. Run pnpm run generate:config.`
   );
-  assert.ok(
-    isDeepStrictEqual(catalog, generatedCatalog),
-    `${clientCatalogPath} is stale. Run pnpm run generate:config.`
-  );
 } else {
   await Promise.all([
     writeFile(proxyConfigPath, config),
     writeFile(proxyUpstreamPath, upstreamProxy),
     writeFile(
-      clientCatalogPath,
-      `${JSON.stringify(generatedCatalog, null, 2)}\n`
+      upstreamCatalogPath,
+      `${JSON.stringify({ models: snapshot }, null, 2)}\n`
     )
   ]);
 }

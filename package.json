@@ -3,6 +3,7 @@
   "type": "module",
   "scripts": {
     "check": "run-p --continue-on-error check:*",
+    "check:catalog": "node scripts/update-model-catalog.mjs --check",
     "check:generated": "node scripts/generate-config.mts --check",
     "check:generated-test": "node --test scripts/generate-config.test.mts",
     "check:markdownlint-cli2": "markdownlint-cli2",
@@ -15,7 +16,8 @@
     "fix:ultracite": "ultracite fix",
     "generate": "run-p generate:*",
     "generate:agents": "node scripts/generate-agents.mts",
-    "generate:config": "node scripts/generate-config.mts && ultracite fix .codex/model_catalog.json",
+    "generate:config": "node scripts/generate-config.mts",
+    "generate:model-catalog": "node scripts/update-model-catalog.mjs",
     "pre-commit": "run-p check:markdownlint-cli2 check:ultracite",
     "pre-push": "pnpm run check",
     "prepare": "husky"

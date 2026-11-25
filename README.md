@@ -203,27 +203,37 @@ Codex CLI를 재시작한다.
 
 ## 개발 검증
 
-`pnpm run generate`는 카탈로그와 pstack 에이전트 설정을 병렬로 갱신한다.
+| 바꿀 항목 | 수정할 파일 | 다시 생성 |
+| --- | --- | --- |
+| Codex에서 표시하는 모델 | [Codex override](.codex/model_catalog.override.yaml) | `pnpm run generate:model-catalog` |
+| 프록시 라우트, 모델 및 컨텍스트 기본값 | [모델 설정](config/models.yaml) | `pnpm run generate:config` |
+| 프록시 공통 설정과 요청 필터 | [프록시 재정의](config/proxy.overrides.yaml) | `pnpm run generate:config` |
 
-`pnpm run generate:config`는 [공식 Codex 카탈로그](https://raw.githubusercontent.com/openai/codex/refs/heads/main/codex-rs/models-manager/models.json)를 받아 `.codex/model_catalog.json`과 `config.example.yaml`을 다시 생성한다.
-[모델 설정](config/models.json)의 `finalModels`는 계열별로 표시할 모델을 지정한다.
-같은 계열의 나머지 모델은 숨긴다.
-공식 카탈로그에서 숨긴 모델은 `visibility`를 명시적으로 재정의할 때만 표시할 수 있다.
-`codex`와 `zai`의 항목은 모델 ID를 키로 사용하고, 해당 모델의 기존 필드에 지정한 값만 덮어쓴다.
-공식 카탈로그에 없는 모델은 첫 항목을 복제한 뒤 설정을 적용한다.
-공식 카탈로그에 `supports_search_tool` 필드가 있으면 해당 값이 생략된 모델에는 `true`를 적용한다.
-모델에서 검색 도구를 끄려면 `supports_search_tool`을 `false`로 지정한다.
-프록시 예시는 [CLIProxyAPI 설정 예시](https://github.com/router-for-me/CLIProxyAPI/blob/85225381d89915595598ed13766cd79890c03a84/config.example.yaml)를 바탕으로 생성한다.
-[프록시 재정의 설정](config/proxy.overrides.yaml)의 `anchor`는 일치시킬 텍스트 블록을 지정한다.
-`after`를 지정하면 해당 텍스트 바로 뒤에 있는 `anchor`만 일치한다.
-`after-generation: true`를 지정하면 카탈로그에서 모델 행을 생성한 뒤 재정의를 적용한다.
-`replace: true`를 지정하면 원래 블록을 주석으로 남기고 바로 아래에 `content`를 추가한다.
-`replace`를 생략하면 원래 블록을 유지한 채 바로 아래에 `content`를 추가한다.
-업스트림 설정 사본은 원본을 그대로 저장하고 프록시 예시는 저장소의 YAML 서식을 적용한다.
-모델 설정이나 프록시 재정의 설정을 수정하면 `pnpm run generate:config`를 실행한다.
-`pnpm run check:generated`는 커밋된 카탈로그와 [업스트림 설정 사본](config/proxy.upstream.yaml.txt)을 사용해 생성물을 오프라인에서 확인한다.
-`gpt-6.2-sol`처럼 `gpt-`로 시작하고 숫자 버전과 영문 계열명으로 끝나는 모델 ID에서 계열을 추출한다.
-각 계열에서 가장 높은 공개 버전이 직접 경로가 되고, 알려진 이전 버전은 자동으로 그 모델을 가리키는 별칭이 된다.
+`pnpm run generate`는 두 설정과 pstack 에이전트 파일을 모두 갱신한다.
+각 생성기는 공식 Codex 카탈로그를 자신의 입력으로 가져오며 다른 생성기의 결과를 읽지 않는다.
+프록시 생성기는 [CLIProxyAPI의 main 샘플](https://github.com/router-for-me/CLIProxyAPI/blob/main/config.example.yaml)에 로컬 설정을 적용한다.
+
+### 모델 설정
+
+- Codex override는 같은 slug의 필드만 덮어쓰며 새 모델은 공식 카탈로그의 첫 모델을 바탕으로 추가한다.
+- 업그레이드가 있는 항목과 같은 GPT 계열의 이전 버전은 Codex 목록에서 숨긴다.
+- 프록시의 Codex OAuth 별칭은 같은 계열의 가장 높은 공개 버전을 가리킨다.
+- 모델별 `context_window`를 지정하면 `default_context_window`보다 커도 그 값을 사용한다.
+- `efforts`는 지원하는 값을 낮은 값부터 적는다.
+- 반복되는 `efforts`와 `supported_reasoning_levels` 목록은 각 필드 안에서 `<<: &이름`으로 정의하고 `<<: *이름`으로 재사용한다.
+- Z.ai 라우트 키에는 샘플 값만 두고 운영 키는 설치한 설정에 넣는다.
+
+### 프록시 재정의와 검증
+
+| 키 | 적용 방식 |
+| --- | --- |
+| `anchor` | 일치시킬 업스트림 텍스트 블록 |
+| `after` | 바로 앞 텍스트로 일치 범위 제한 |
+| `after-generation: true` | 생성된 모델 행에 적용 |
+| `replace: true` | 원래 내용을 주석으로 남기고 아래에 새 값 추가 |
+
+- `pnpm run check:catalog`는 현재 카탈로그에 로컬 override가 반영됐는지 확인한다.
+- `pnpm run check:generated`는 [업스트림 프록시 사본](config/proxy.upstream.yaml.txt)과 [Codex 라우팅용 사본](config/codex.upstream.json)을 사용해 프록시 샘플을 오프라인에서 검사한다.
 
 `pnpm run generate:agents`는 [upstream pstack 에이전트](https://github.com/cursor/plugins/tree/main/pstack/agents)의 Markdown을 가져와 `.codex/agents/`의 `poteto-agent.toml`과 `comment-sicko.toml`을 갱신한다.
 갱신한 TOML을 사용자 설정으로 적용하려면 `${CODEX_HOME:-$HOME/.codex}/agents/`에 복사한다.

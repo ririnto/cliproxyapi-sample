@@ -33,14 +33,7 @@
     #         - name: "kimi-k2.5"
     #           alias: "claude-opus-4.66"
   content: |-
-    api-keys:
-      claude:
-        - name: zai
-          base-url: https://api.z.ai/api/anthropic
-          models:
-            # @zai-models
-          keys:
-            - api-key: __ZAI_API_KEY__
+    # @routes
 - anchor: '  #       alias: "sample-latest"'
   content: |2-
       model-alias:
