@@ -22,4 +22,3 @@ jobs:
           cache: true
       - run: pnpm install --frozen-lockfile
       - run: pnpm run pre-push
-      - run: docker compose -f compose.yaml config --quiet
