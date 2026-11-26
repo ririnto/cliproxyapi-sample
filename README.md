@@ -177,6 +177,11 @@ cp -i .codex/statusline/*.mjs .codex/statusline/providers.json "$codex_dir/statu
 저장소의 `.codex/statusline`은 `.claude/statusline`을 가리키는 심볼릭 링크다.
 설치 명령은 공급자 파일을 Codex 설정 디렉터리에 복사하므로 Claude Code를 설치하지 않아도 된다.
 
+Claude Code와 Codex CLI 상태줄은 `~/.cache/statusline/usage.sqlite`에서 사용량을 공유한다.
+같은 공급자와 계정의 갱신은 한 프로세스만 수행한다.
+다른 세션은 갱신을 기다리지 않고 남아 있는 사용량을 표시한다.
+기존 설치를 갱신할 때는 두 상태줄과 `statusline/`의 모듈을 함께 다시 복사한다.
+
 다음 설정은 프로젝트가 아닌 사용자 [`config.toml`](.codex/config.toml)에 병합한다.
 `CODEX_HOME`이 지정되어 있지 않으면 `$HOME/.codex`를 사용한다.
 
