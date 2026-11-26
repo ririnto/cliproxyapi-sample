@@ -6,20 +6,20 @@ const BUDGET_URL = "https://api.mistral.ai/v1/billing/budget";
  * @param {unknown} value Value to validate.
  * @returns {value is import("./types.ts").JsonRecord} Whether the value has the required shape.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is import("./types.ts").JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * @param {unknown} value Value to validate.
  * @returns {value is number} Whether the value has the required shape.
  */
-const isFiniteNumber = (value) =>
+const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
 /**
  * @param {unknown} value Current timestamp or Date.
  */
-const nowValue = (value) => {
+const nowValue = (value: unknown) => {
   if (value instanceof Date) {
     return value.getTime();
   }
@@ -33,7 +33,12 @@ const nowValue = (value) => {
  * @param {(() => void) | undefined} onUsageError Input value.
  * @returns {Promise<import("./types.ts").JsonRecord | null>} Validated record.
  */
-const requestJson = async (url, headers, fetchFunction, onUsageError) => {
+const requestJson = async (
+  url: string,
+  headers: Record<string, string>,
+  fetchFunction: import("./types.ts").Fetch,
+  onUsageError: (() => void) | undefined
+): Promise<import("./types.ts").JsonRecord | null> => {
   const controller = new AbortController();
   const timeout = setTimeout(() => {
     controller.abort();
@@ -53,7 +58,7 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
           /**
            * @type {unknown}
            */
-          const payload = await response.json();
+          const payload: unknown = await response.json();
           if (isRecord(payload)) {
             return payload;
           }
@@ -87,7 +92,11 @@ const requestJson = async (url, headers, fetchFunction, onUsageError) => {
  * @param {number} now Current timestamp.
  * @returns {import("./types.ts").Metric | undefined} Normalized budget.
  */
-const budgetMetric = (label, budget, now) => {
+const budgetMetric = (
+  label: string,
+  budget: unknown,
+  now: number
+): import("./types.ts").Metric | undefined => {
   const resetAt = Date.parse(
     isRecord(budget) && typeof budget.reset_at === "string"
       ? budget.reset_at
@@ -110,7 +119,9 @@ const budgetMetric = (label, budget, now) => {
  * @param {import("./types.ts").UsageOptions} [options] Input value.
  * @returns {Promise<import("./types.ts").Snapshot|undefined>} Result.
  */
-const fetchUsageUncached = async (options = {}) => {
+const fetchUsageUncached = async (
+  options: import("./types.ts").UsageOptions = {}
+): Promise<import("./types.ts").Snapshot | undefined> => {
   const credential =
     typeof options.credential === "string" ? options.credential : "";
   const budget = await requestJson(
@@ -140,7 +151,10 @@ const fetchUsageUncached = async (options = {}) => {
  * @param {Pick<import("./types.ts").UsageRuntime, "withUsageCache">} runtime Host-provided usage helpers.
  * @returns {Promise<import("./types.ts").Snapshot | undefined> | undefined} Usage when a credential is available.
  */
-export const fetchUsage = (options, { withUsageCache }) => {
+export const fetchUsage = (
+  options: import("./types.ts").UsageOptions,
+  { withUsageCache }: Pick<import("./types.ts").UsageRuntime, "withUsageCache">
+): Promise<import("./types.ts").Snapshot | undefined> | undefined => {
   const credential =
     typeof options.credential === "string" ? options.credential : "";
   return credential

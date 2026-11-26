@@ -252,11 +252,11 @@
   "skipDangerousModePermissionPrompt": true,
   "skipWebFetchPreflight": true,
   "statusLine": {
-    "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.mjs\"",
+    "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.ts\"",
     "type": "command"
   },
   "subagentStatusLine": {
-    "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/subagent-statusline.mjs\"",
+    "command": "node \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/subagent-statusline.ts\"",
     "type": "command"
   },
   "teammateMode": "auto",

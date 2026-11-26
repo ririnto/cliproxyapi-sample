@@ -1,38 +1,36 @@
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, rm } from "node:fs/promises";
-import { homedir } from "node:os";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delayMs } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 import { isMainThread, parentPort, Worker } from "node:worker_threads";
+
+import { withUsageCache } from "./statusline/usage-cache.ts";
 
 /**
  * @param {unknown} value Candidate JSON object.
  * @returns {value is Record<string, unknown>} Result.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
 /**
  * @param {unknown} value Value to read as a JSON object.
  */
-const record = (value) => (isRecord(value) ? value : {});
+const record = (value: unknown) => (isRecord(value) ? value : {});
 
 /**
  * @param {unknown} value Value to read as an array.
  * @returns {unknown[]} Result.
  */
-const list = (value) => (Array.isArray(value) ? value : []);
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /**
  * @param {unknown} value Candidate numeric value.
  * @returns {value is number} Whether the value is finite.
  */
-const isFiniteNumber = (value) =>
+const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
 const neutral = "#999999";
@@ -42,12 +40,12 @@ const dim = "#84909C";
 /**
  * @param {unknown} value Candidate numeric value.
  */
-const finite = (value) => (isFiniteNumber(value) ? value : null);
+const finite = (value: unknown) => (isFiniteNumber(value) ? value : null);
 
 /**
  * @param {unknown} value Text from a status snapshot or addon.
  */
-const display = (value) =>
+const display = (value: unknown) =>
   typeof value === "string"
     ? stripVTControlCharacters(value)
         .replaceAll(/[\p{Cc}\u{2028}\u{2029}]/gu, " ")
@@ -57,7 +55,7 @@ const display = (value) =>
 /**
  * @param {number} value Count to display.
  */
-const count = (value) => {
+const count = (value: number) => {
   if (value >= 1_000_000) {
     return `${Number((value / 1_000_000).toFixed(1))}M`;
   }
@@ -69,7 +67,7 @@ const count = (value) => {
 /**
  * @param {number} minutes Duration in minutes.
  */
-const duration = (minutes) => {
+const duration = (minutes: number) => {
   const hours = Math.floor((minutes % 1440) / 60);
   if (minutes >= 1440) {
     return `${Math.floor(minutes / 1440)}d${hours > 0 ? `${hours}h` : ""}`;
@@ -80,14 +78,23 @@ const duration = (minutes) => {
     : `${remainder}m`;
 };
 
-/**
- * @typedef {string | {type: "text", props: {color: string, weight: "bold" | "normal"}, children: [string]}} Span
- */
+type Span =
+  | string
+  | {
+      type: "text";
+      props: { color: string; weight: "bold" | "normal" };
+      children: [string];
+    };
 
-/**
- * @typedef {{period: string, used: number, resetsAt: number}} QuotaWindow
- * @typedef {{spans: Span[], codexWindows: QuotaWindow[]}} ProviderRow
- */
+interface QuotaWindow {
+  period: string;
+  used: number;
+  resetsAt: number;
+}
+interface ProviderRow {
+  spans: Span[];
+  codexWindows: QuotaWindow[];
+}
 
 /**
  * @param {string} value Text to display.
@@ -95,7 +102,11 @@ const duration = (minutes) => {
  * @param {"bold" | "normal"} weight Text weight.
  * @returns {Span} Result.
  */
-const colored = (value, color, weight = "normal") => ({
+const colored = (
+  value: string,
+  color: string,
+  weight: "bold" | "normal" = "normal"
+): Span => ({
   type: "text",
   props: { color, weight },
   children: [value]
@@ -106,373 +117,72 @@ const colored = (value, color, weight = "normal") => ({
  * @param {number} percent Percentage of the total allowance remaining.
  * @returns {Span} Result.
  */
-const quota = (value, percent) => {
+const quota = (value: string, percent: number): Span => {
   if (percent < 10) {
     return colored(value, "#E990A9");
   }
   return colored(value, percent < 30 ? "#F2B590" : "#ABDFA7");
 };
 
-/**
- * @param {unknown} value Untrusted metric.
- * @returns {value is import("./statusline/types.ts").Metric} Result.
- */
-const isMetric = (value) => {
-  if (
-    !isRecord(value) ||
-    typeof value.label !== "string" ||
-    (value.resetsInMs !== undefined && !isFiniteNumber(value.resetsInMs)) ||
-    (value.currency !== undefined && typeof value.currency !== "string")
-  ) {
-    return false;
-  }
-  switch (value.type) {
-    case "percentage": {
-      return isFiniteNumber(value.percentage);
-    }
-    case "usage": {
-      return isFiniteNumber(value.used) && isFiniteNumber(value.total);
-    }
-    case "budget": {
-      return (
-        isFiniteNumber(value.used) &&
-        isFiniteNumber(value.total) &&
-        isFiniteNumber(value.percentage)
-      );
-    }
-    case "credit": {
-      return isFiniteNumber(value.remaining);
-    }
-    default: {
-      return false;
-    }
-  }
-};
-/**
- * @param {unknown} value Persisted snapshot.
- * @returns {value is import("./statusline/types.ts").Snapshot} Result.
- */
-const isSnapshot = (value) =>
-  isRecord(value) &&
-  Array.isArray(value.groups) &&
-  value.groups.every(
-    (group) =>
-      isRecord(group) &&
-      (group.label === undefined || typeof group.label === "string") &&
-      (group.deduplicateWithNativeQuota === undefined ||
-        typeof group.deduplicateWithNativeQuota === "boolean") &&
-      Array.isArray(group.metrics) &&
-      group.metrics.every(isMetric)
-  );
-
-/**
- * @typedef {{
- *   credentialHash: string,
- *   fetchedAt: number | null,
- *   nextAttemptAt: number,
- *   snapshot?: import("./statusline/types.ts").Snapshot
- * }} CacheRecord
- */
-
-const MAX_STALE_MS = 5 * 60_000;
-
-const DEFAULT_USAGE_CACHE_TTL_MS = 5000;
-
-/**
- * @param {unknown} value Current timestamp.
- */
-const nowValue = (value) => {
-  if (value instanceof Date) {
-    return value.getTime();
-  }
-  return isFiniteNumber(value) ? value : Date.now();
-};
-
-/**
- * @param {number | undefined} status HTTP status.
- * @param {boolean} usageError Payload failure.
- */
-const isSuccessfulResponse = (status, usageError) =>
-  !usageError && isFiniteNumber(status) && status >= 200 && status < 300;
-
-/**
- * @param {unknown} value Persisted data.
- * @param {string} credentialHash Expected identity.
- * @returns {value is CacheRecord} Result.
- */
-const validRecord = (value, credentialHash) =>
-  isRecord(value) &&
-  value.credentialHash === credentialHash &&
-  (value.fetchedAt === null || isFiniteNumber(value.fetchedAt)) &&
-  isFiniteNumber(value.nextAttemptAt) &&
-  (value.snapshot === undefined || isSnapshot(value.snapshot));
-
-/**
- * @type {(
- *   snapshot: import("./statusline/types.ts").Snapshot | undefined,
- *   elapsed: number,
- *   maxAge: number
- * ) => import("./statusline/types.ts").Snapshot | undefined}
- */
-const adjustedSnapshot = (snapshot, elapsed, maxAge) =>
-  snapshot !== undefined && elapsed <= maxAge
-    ? {
-        ...snapshot,
-        groups: snapshot.groups.map((group) => ({
-          ...group,
-          metrics: group.metrics.map((metric) =>
-            "resetsInMs" in metric && isFiniteNumber(metric.resetsInMs)
-              ? {
-                  ...metric,
-                  resetsInMs: Math.max(0, metric.resetsInMs - elapsed)
-                }
-              : metric
-          )
-        }))
-      }
-    : undefined;
-
-/**
- * @param {string | null | undefined} value Retry header.
- * @param {number} now Current time.
- */
-const retryDelay = (value, now) => {
-  if (value === undefined || value === null || value === "") {
-    return 0;
-  }
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return seconds * 1000;
-  }
-  const date = Date.parse(value);
-  return Number.isFinite(date) ? Math.max(0, date - now) : 0;
-};
-
-/**
- * @param {string} filePath Cache path.
- * @param {string} credentialHash Expected identity.
- */
-const readCache = (filePath, credentialHash) => {
-  /**
-   * @type {unknown}
-   */
-  let entry;
-  try {
-    entry = JSON.parse(readFileSync(filePath, "utf-8"));
-  } catch {
-    entry = undefined;
-  }
-  return validRecord(entry, credentialHash) ? entry : undefined;
-};
-
-/**
- * @type {(
- *   filePath: string,
- *   cached: CacheRecord | undefined,
- *   next: CacheRecord,
- *   now: number
- * ) => Promise<CacheRecord>}
- */
-const publishCache = async (filePath, cached, next, now) => {
-  const directory = path.dirname(filePath);
-  let selected = next.fetchedAt === null ? (cached ?? next) : next;
-  let temporaryPath;
-  try {
-    await mkdir(directory, { mode: 0o700, recursive: true });
-    using lock = new DatabaseSync(path.join(directory, ".publish.sqlite"), {
-      timeout: 1000
-    });
-    lock.exec("BEGIN IMMEDIATE");
-    const latest = readCache(filePath, next.credentialHash) ?? cached;
-    if (
-      latest &&
-      (next.fetchedAt === null ||
-        (latest.fetchedAt !== null && latest.fetchedAt >= next.fetchedAt))
-    ) {
-      selected = latest;
-    }
-    temporaryPath = path.join(directory, `.${randomUUID()}.tmp`);
-    writeFileSync(
-      temporaryPath,
-      JSON.stringify({
-        ...selected,
-        nextAttemptAt: Math.max(
-          next.nextAttemptAt,
-          latest?.nextAttemptAt ?? next.nextAttemptAt
-        ),
-        snapshot:
-          now - (selected.fetchedAt ?? now) <= MAX_STALE_MS
-            ? selected.snapshot
-            : undefined
-      }),
-      { mode: 0o600 }
-    );
-    renameSync(temporaryPath, filePath);
-  } catch {
-    if (temporaryPath !== undefined && temporaryPath !== "") {
-      try {
-        await rm(temporaryPath, { force: true });
-      } catch {
-        if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
-          console.error(
-            "[statusline-usage] 임시 캐시 파일 정리에 실패했습니다."
-          );
-        }
-      }
-    }
-    if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
-      console.error("[statusline-usage] 사용량 캐시 저장에 실패했습니다.");
-    }
-  }
-  return selected;
-};
-
-/** @type {import("./statusline/types.ts").UsageRuntime["withUsageCache"]} */
-const withUsageCache = async (
-  provider,
-  credentialIdentity,
-  options,
-  fetchSnapshot
-) => {
-  if (options.cache === false || !/^[a-z0-9_-]+$/u.test(provider)) {
-    return await fetchSnapshot(options);
-  }
-  const now = nowValue(options.now);
-  const { cacheTtlMs } = options;
-  const ttl = isFiniteNumber(cacheTtlMs)
-    ? Math.max(0, cacheTtlMs)
-    : DEFAULT_USAGE_CACHE_TTL_MS;
-  const directory = options.cacheDir ?? cacheDir;
-  const credentialHash = createHash("sha256")
-    .update(JSON.stringify([provider, credentialIdentity]))
-    .digest("hex");
-  const filePath = path.join(directory, provider, `${credentialHash}.json`);
-  const cached =
-    readCache(filePath, credentialHash) ??
-    readCache(path.join(directory, `${provider}.json`), credentialHash);
-  if (cached && now < cached.nextAttemptAt) {
-    const fetchedAt = cached.fetchedAt ?? now;
-    return adjustedSnapshot(
-      cached.snapshot,
-      Math.max(0, now - fetchedAt),
-      cached.nextAttemptAt - fetchedAt > ttl ? MAX_STALE_MS : Infinity
-    );
-  }
-  /**
-   * @type {number | undefined}
-   */
-  let status;
-  let retryAt = now;
-  let usageError = false;
-  const originalFetch = options.fetch ?? globalThis.fetch;
-  /**
-   * @type {import("./statusline/types.ts").UsageOptions}
-   */
-  const wrappedOptions = {
-    ...options,
-    fetch: async (...args) => {
-      status = undefined;
-      retryAt = now;
-      usageError = false;
-      const response = await originalFetch(...args);
-      status = Number.isFinite(response?.status) ? response.status : undefined;
-      const responseAt = nowValue(options.now);
-      retryAt =
-        responseAt +
-        retryDelay(response?.headers?.get?.("retry-after"), responseAt);
-      return response;
-    },
-    onUsageError: () => {
-      usageError = true;
-    }
-  };
-  let snapshot;
-  try {
-    snapshot = await fetchSnapshot(wrappedOptions);
-  } catch {
-    status = undefined;
-  }
-  const successful = isSuccessfulResponse(status, usageError);
-  const next = {
-    credentialHash,
-    fetchedAt: successful ? now : null,
-    nextAttemptAt: Math.max(now + ttl, retryAt),
-    snapshot: successful && isSnapshot(snapshot) ? snapshot : undefined
-  };
-  const selected = await publishCache(filePath, cached, next, now);
-  if (successful && selected === next) {
-    return snapshot;
-  }
-  return adjustedSnapshot(
-    selected.snapshot,
-    Math.max(0, now - (selected.fetchedAt ?? now)),
-    MAX_STALE_MS
-  );
-};
-
 /** @type {import("./statusline/types.ts").UsageRuntime["requestJson"]} */
-const requestJson = async (url, headers, fetchFunction, onUsageError) => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 3000);
-  try {
-    const response = await fetchFunction(url, {
-      headers,
-      method: "GET",
-      signal: controller.signal
-    });
-    if (!Number.isFinite(response.status)) {
-      return { status: undefined };
-    }
-    if (response.status < 200 || response.status >= 300) {
-      try {
-        await Promise.race([
-          response.body?.cancel(),
-          delayMs(3000, undefined, { signal: controller.signal })
-        ]);
-      } catch {
-        if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
-          console.error(
-            `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
-          );
-        }
-      }
+const requestJson: import("./statusline/types.ts").UsageRuntime["requestJson"] =
+  async (url, headers, fetchFunction, onUsageError) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
       controller.abort();
-      return { status: response.status };
-    }
+    }, 3000);
     try {
-      /**
-       * @type {unknown}
-       */
-      const payload = await response.json();
-      if (!isRecord(payload)) {
+      const response = await fetchFunction(url, {
+        headers,
+        method: "GET",
+        signal: controller.signal
+      });
+      if (!Number.isFinite(response.status)) {
+        return { status: undefined };
+      }
+      if (response.status < 200 || response.status >= 300) {
+        try {
+          await Promise.race([
+            response.body?.cancel(),
+            delayMs(3000, undefined, { signal: controller.signal })
+          ]);
+        } catch {
+          if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
+            console.error(
+              `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
+            );
+          }
+        }
+        controller.abort();
+        return { status: response.status };
+      }
+      try {
+        /**
+         * @type {unknown}
+         */
+        const payload: unknown = await response.json();
+        if (!isRecord(payload)) {
+          onUsageError?.();
+          return { status: response.status };
+        }
+        return { payload, status: response.status };
+      } catch {
         onUsageError?.();
         return { status: response.status };
       }
-      return { payload, status: response.status };
     } catch {
-      onUsageError?.();
-      return { status: response.status };
+      return { status: undefined };
+    } finally {
+      clearTimeout(timeout);
     }
-  } catch {
-    return { status: undefined };
-  } finally {
-    clearTimeout(timeout);
-  }
-};
+  };
 
 const usageRuntime = { withUsageCache, requestJson };
-const cacheDir = path.join(
-  process.env.CODEX_HOME ?? path.join(homedir(), ".codex"),
-  "cache",
-  "statusline"
-);
 
 /**
  * @param {Record<string, unknown>} metric Normalized provider metric.
  */
-const allowance = (metric) => {
+const allowance = (metric: Record<string, unknown>) => {
   if (metric.type === "credit") {
     const remaining = finite(metric.remaining);
     if (remaining !== null) {
@@ -523,7 +233,11 @@ const allowance = (metric) => {
  * @param {number} showAbove Minimum percentage used.
  * @returns {ProviderRow[]} Result.
  */
-const renderGroup = (rawGroup, name, showAbove) => {
+const renderGroup = (
+  rawGroup: unknown,
+  name: string,
+  showAbove: number
+): ProviderRow[] => {
   const group = record(rawGroup);
   const groupLabel = display(group.label).replace(
     /\s+\((?:Pro|Individual)\)$/u,
@@ -594,7 +308,7 @@ const renderGroup = (rawGroup, name, showAbove) => {
 /**
  * @param {unknown} rawProvider One entry from the Codex provider list.
  */
-const collectProvider = async (rawProvider) => {
+const collectProvider = async (rawProvider: unknown) => {
   const { module, name, credentialEnv, enabled, showAbove } =
     record(rawProvider);
   if (
@@ -602,7 +316,7 @@ const collectProvider = async (rawProvider) => {
     typeof name !== "string" ||
     typeof module !== "string" ||
     path.basename(module) !== module ||
-    !module.endsWith(".mjs")
+    !module.endsWith(".ts")
   ) {
     return [];
   }
@@ -622,10 +336,7 @@ const collectProvider = async (rawProvider) => {
       return [];
     }
     const { groups } = record(
-      await Reflect.apply(fetchUsage, undefined, [
-        { cacheDir, credential },
-        usageRuntime
-      ])
+      await Reflect.apply(fetchUsage, undefined, [{ credential }, usageRuntime])
     );
     return list(groups).flatMap((group) =>
       renderGroup(group, display(name), finite(showAbove) ?? 0.001)
@@ -664,7 +375,7 @@ const graphemes = new Intl.Segmenter();
 /**
  * @param {Span[]} line Styled footer row.
  */
-const preventSoftWrap = (line) =>
+const preventSoftWrap = (line: Span[]) =>
   line.map((span) => {
     const value = typeof span === "string" ? span : span.children[0];
     const wordJoiner = "\u2060";
@@ -679,7 +390,7 @@ const preventSoftWrap = (line) =>
 /**
  * @param {unknown} cwd Active thread working directory.
  */
-const workspaceItems = (cwd) => {
+const workspaceItems = (cwd: unknown) => {
   if (typeof cwd !== "string" || cwd.length === 0) {
     return [];
   }
@@ -703,7 +414,7 @@ const workspaceItems = (cwd) => {
 /**
  * @param {unknown} rawUsage Thread context, tokens, and cost.
  */
-const usageItems = (rawUsage) => {
+const usageItems = (rawUsage: unknown) => {
   const { context, total, cost } = record(rawUsage);
   const { used_percentage: used, context_window_size: size } = record(context);
   const percent = finite(used);
@@ -712,7 +423,7 @@ const usageItems = (rawUsage) => {
   /**
    * @type {Span[][]}
    */
-  const items =
+  const items: Span[][] =
     dollars !== null && dollars > 0
       ? [[colored(`$${dollars.toFixed(2)}`, dim)]]
       : [];
@@ -752,7 +463,7 @@ const usageItems = (rawUsage) => {
  * @param {unknown} account Codex account snapshot.
  * @param {QuotaWindow[]} displayedWindows Provider windows already shown.
  */
-const rateLimitItems = (account, displayedWindows) => {
+const rateLimitItems = (account: unknown, displayedWindows: QuotaWindow[]) => {
   const now = Date.now() / 1000;
   return list(record(account).rate_limits)
     .slice(0, 6)
@@ -809,7 +520,7 @@ const rateLimitItems = (account, displayedWindows) => {
 /**
  * @param {Span[]} row Provider line.
  */
-const width = (row) =>
+const width = (row: Span[]) =>
   row.reduce(
     (size, span) =>
       size + (typeof span === "string" ? span.length : span.children[0].length),
@@ -819,7 +530,7 @@ const width = (row) =>
 /**
  * @param {Span[][]} groups Provider groups in display order.
  */
-const pack = (groups) => {
+const pack = (groups: Span[][]) => {
   const pairs = [];
   for (let index = 0; index < groups.length; index += 1) {
     const first = groups[index];
@@ -853,7 +564,7 @@ const pack = (groups) => {
  * @param {unknown} state Codex statusline snapshot.
  * @param {ProviderRow[]} addonRows Rendered usage from installed addons.
  */
-const render = (state, addonRows) => {
+const render = (state: unknown, addonRows: ProviderRow[]) => {
   const { thread, account } = record(state);
   const { model, workspace, usage } = record(thread);
   const { display_name: name, reasoning_level: effort } = record(model);
@@ -918,12 +629,12 @@ const runServer = async () => {
   /**
    * @type {Worker | null}
    */
-  let worker = null;
+  let worker: Worker | null = null;
   let nextRefresh = 0;
   /**
    * @type {ProviderRow[]}
    */
-  let addonRows = [];
+  let addonRows: ProviderRow[] = [];
 
   const refreshAddons = () => {
     if (worker !== null || performance.now() < nextRefresh) {
@@ -943,11 +654,11 @@ const runServer = async () => {
     /**
      * @type {ProviderRow[]}
      */
-    let lines = [];
+    let lines: ProviderRow[] = [];
     /**
      * @param {ProviderRow[]} result Rendered addon lines sent by the worker.
      */
-    const receiveLines = (result) => {
+    const receiveLines = (result: ProviderRow[]) => {
       lines = result;
     };
     current.once("message", receiveLines);
@@ -965,7 +676,7 @@ const runServer = async () => {
    * @param {string} method MCP request method.
    * @param {unknown} rawParams MCP request parameters.
    */
-  const respond = (method, rawParams) => {
+  const respond = (method: string, rawParams: unknown) => {
     const params = record(rawParams);
     switch (method) {
       case "initialize": {

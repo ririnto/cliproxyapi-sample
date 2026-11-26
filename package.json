@@ -10,8 +10,8 @@
     "fix:ultracite": "ultracite fix",
     "generate": "run-p generate:*",
     "generate:agents": "node scripts/generate-agents.mts",
-    "generate:config": "node cliproxyapi/generate-config.mjs",
-    "generate:model-catalog": "node scripts/update-model-catalog.mjs",
+    "generate:config": "node cliproxyapi/generate-config.ts",
+    "generate:model-catalog": "node scripts/update-model-catalog.ts",
     "pre-commit": "pnpm run check",
     "pre-push": "pnpm run check",
     "prepare": "husky"

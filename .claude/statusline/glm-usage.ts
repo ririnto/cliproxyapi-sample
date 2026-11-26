@@ -4,20 +4,20 @@ const USAGE_URL = "https://api.z.ai/api/monitor/usage/quota/limit";
  * @param {unknown} value Value to validate.
  * @returns {value is import("./types.ts").JsonRecord} Whether the value has the required shape.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is import("./types.ts").JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * @param {unknown} value Value to validate.
  * @returns {value is number} Whether the value has the required shape.
  */
-const isFiniteNumber = (value) =>
+const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
 /**
  * @param {unknown} value Current timestamp.
  */
-const nowValue = (value) => {
+const nowValue = (value: unknown) => {
   if (value instanceof Date) {
     return value.getTime();
   }
@@ -28,7 +28,7 @@ const nowValue = (value) => {
  * @param {unknown} timestamp Reset time.
  * @param {number} now Current time.
  */
-const resetAfter = (timestamp, now) =>
+const resetAfter = (timestamp: unknown, now: number) =>
   isFiniteNumber(timestamp) && timestamp > 0
     ? Math.max(0, Math.trunc(timestamp - now))
     : 0;
@@ -39,7 +39,11 @@ const resetAfter = (timestamp, now) =>
  * @param {number} resetsInMs Reset delay.
  * @returns {import("./types.ts").Metric | undefined} Normalized metric.
  */
-const percentageMetric = (label, percentage, resetsInMs) =>
+const percentageMetric = (
+  label: string,
+  percentage: unknown,
+  resetsInMs: number
+): import("./types.ts").Metric | undefined =>
   isFiniteNumber(percentage) && percentage >= 0 && percentage <= 100
     ? {
         label,
@@ -53,7 +57,10 @@ const percentageMetric = (label, percentage, resetsInMs) =>
  * @param {(import("./types.ts").Metric | undefined)[]} metrics Values.
  * @param {string | undefined} label Tier label.
  */
-const snapshot = (metrics, label) => {
+const snapshot = (
+  metrics: (import("./types.ts").Metric | undefined)[],
+  label: string | undefined
+) => {
   const validMetrics = metrics.filter((metric) => metric !== undefined);
   return validMetrics.length
     ? {
@@ -69,7 +76,7 @@ const snapshot = (metrics, label) => {
 /**
  * @type {Record<string, string>}
  */
-const TIER_LABELS = {
+const TIER_LABELS: Record<string, string> = {
   lite: "Lite",
   max: "Max",
   pro: "Pro"
@@ -80,7 +87,11 @@ const TIER_LABELS = {
  * @param {import("./types.ts").UsageOptions} options Request options.
  * @param {import("./types.ts").UsageRuntime["requestJson"]} requestJson Host HTTP transport.
  */
-const fetchUsageData = async (credential, options, requestJson) => {
+const fetchUsageData = async (
+  credential: string,
+  options: import("./types.ts").UsageOptions,
+  requestJson: import("./types.ts").UsageRuntime["requestJson"]
+) => {
   const { payload } = await requestJson(
     USAGE_URL,
     {
@@ -95,7 +106,8 @@ const fetchUsageData = async (credential, options, requestJson) => {
   /**
    * @type {unknown[] | null}
    */
-  const limits = successful && Array.isArray(data?.limits) ? data.limits : null;
+  const limits: unknown[] | null =
+    successful && Array.isArray(data?.limits) ? data.limits : null;
   if (limits === null) {
     options.onUsageError?.();
   }
@@ -129,7 +141,10 @@ const fetchUsageData = async (credential, options, requestJson) => {
  * @param {import("./types.ts").UsageOptions} options Lookup options.
  * @param {import("./types.ts").UsageRuntime} runtime Host-provided usage helpers.
  */
-export const fetchUsage = async (options, { withUsageCache, requestJson }) => {
+export const fetchUsage = async (
+  options: import("./types.ts").UsageOptions,
+  { withUsageCache, requestJson }: import("./types.ts").UsageRuntime
+) => {
   const credential =
     typeof options.credential === "string" ? options.credential : "";
   return credential

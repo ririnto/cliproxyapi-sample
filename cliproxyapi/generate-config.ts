@@ -7,7 +7,7 @@ import { isMap, isScalar, parse, parseDocument, stringify, visit } from "yaml";
 
 const root = path.resolve(import.meta.dirname, "..");
 /** @param {string} url URL of the upstream source file. */
-const fetchSource = async (url) => {
+const fetchSource = async (url: string) => {
   const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   if (!response.ok) {
     throw new Error(`Could not load ${url}: HTTP ${response.status}`);
@@ -19,16 +19,16 @@ const fetchSource = async (url) => {
  * @param {unknown} value Untrusted source catalog.
  * @returns {value is Record<string, unknown>} Whether the value is an object.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** @typedef {Record<string, unknown> & {slug: string}} CatalogModel */
+type CatalogModel = Record<string, unknown> & { slug: string };
 
 /**
  * @param {unknown} value Untrusted source catalog.
  * @returns {CatalogModel[]} Source model records.
  */
-const parseModels = (value) => {
+const parseModels = (value: unknown): CatalogModel[] => {
   if (!isRecord(value) || !Array.isArray(value.models)) {
     throw new TypeError("Model catalog requires a models array");
   }
@@ -47,10 +47,17 @@ const parseModels = (value) => {
 const versionedLanePattern =
   /^gpt-(?<version>[0-9]+(?:\.[0-9]+)*)-(?<lane>[A-Za-z]+)$/u;
 
-/** @typedef {{slug: string, lane: string, version: bigint[]}} ModelVersion */
+interface ModelVersion {
+  slug: string;
+  lane: string;
+  version: bigint[];
+}
 
 /** @type {(candidate: ModelVersion, current: ModelVersion) => boolean} */
-const isNewer = (candidate, current) => {
+const isNewer: (candidate: ModelVersion, current: ModelVersion) => boolean = (
+  candidate,
+  current
+): boolean => {
   for (
     let index = 0;
     index < Math.max(candidate.version.length, current.version.length);
@@ -66,9 +73,9 @@ const isNewer = (candidate, current) => {
 };
 
 /** @param {CatalogModel[]} models Source model records. */
-const modelVersions = (models) => {
+const modelVersions = (models: CatalogModel[]) => {
   /** @type {Map<string, ModelVersion>} */
-  const versions = new Map();
+  const versions = new Map<string, ModelVersion>();
   for (const { slug } of models) {
     const { lane, version } = versionedLanePattern.exec(slug)?.groups ?? {};
     if (lane !== undefined && version !== undefined) {
@@ -83,10 +90,10 @@ const modelVersions = (models) => {
 };
 
 /** @param {CatalogModel[]} upstreamModels Official upstream model records. */
-const resolveUpstreamAliases = (upstreamModels) => {
+const resolveUpstreamAliases = (upstreamModels: CatalogModel[]) => {
   const versions = modelVersions(upstreamModels);
   /** @type {Map<string, ModelVersion>} */
-  const latestListedByLane = new Map();
+  const latestListedByLane = new Map<string, ModelVersion>();
   for (const { slug, visibility } of upstreamModels) {
     const version = versions.get(slug);
     const current = version && latestListedByLane.get(version.lane);
@@ -100,7 +107,7 @@ const resolveUpstreamAliases = (upstreamModels) => {
   }
 
   /** @type {Record<string, string>} */
-  const aliases = Object.fromEntries(
+  const aliases: Record<string, string> = Object.fromEntries(
     upstreamModels.flatMap(({ slug }) => {
       const version = versions.get(slug);
       if (version === undefined) {
@@ -116,7 +123,7 @@ const resolveUpstreamAliases = (upstreamModels) => {
 };
 
 /** @param {unknown} value YAML mapping. */
-const readMap = (value) => {
+const readMap = (value: unknown) => {
   if (!isRecord(value)) {
     throw new TypeError("Expected a YAML mapping");
   }
@@ -124,17 +131,17 @@ const readMap = (value) => {
 };
 
 /** @param {unknown} value YAML sequence. */
-const readList = (value) => {
+const readList = (value: unknown) => {
   if (!Array.isArray(value)) {
     throw new TypeError("Expected a YAML sequence");
   }
   /** @type {unknown[]} */
-  const items = value;
+  const items: unknown[] = value;
   return items;
 };
 
 /** @param {unknown} value YAML string. */
-const readString = (value) => {
+const readString = (value: unknown) => {
   if (typeof value !== "string") {
     throw new TypeError("Expected a YAML string");
   }
@@ -142,7 +149,7 @@ const readString = (value) => {
 };
 
 /** @param {unknown} value Context size. */
-const readWindow = (value) => {
+const readWindow = (value: unknown) => {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
     throw new TypeError("Expected a positive context window");
   }
@@ -150,7 +157,7 @@ const readWindow = (value) => {
 };
 
 /** @param {unknown} raw Configured model. */
-const readRouteModel = (raw) => {
+const readRouteModel = (raw: unknown) => {
   const model = readMap(raw);
   return {
     alias: readString(model.alias),
@@ -192,7 +199,7 @@ visit(modelsDocument, {
   }
 });
 /** @type {unknown} */
-const rawConfig = modelsDocument.toJS();
+const rawConfig: unknown = modelsDocument.toJS();
 const modelConfig = readMap(rawConfig);
 const defaultContextWindow = readWindow(modelConfig.default_context_window);
 const zai = readMap(readMap(readMap(modelConfig.routes).claude).zai);
@@ -201,9 +208,9 @@ const sources = readList(modelConfig.sources).map(readMap);
 /**
  * @param {string} upstream Upstream configuration.
  */
-const applyTemplate = (upstream) => {
+const applyTemplate = (upstream: string) => {
   /** @type {unknown} */
-  const proxyOverrides = parse(
+  const proxyOverrides: unknown = parse(
     fs.readFileSync("cliproxyapi/config.overrides.yaml", "utf-8")
   );
   if (!Array.isArray(proxyOverrides)) {
@@ -240,7 +247,7 @@ const applyTemplate = (upstream) => {
  * @param {string} template Upstream sample.
  * @param {CatalogModel[]} catalog Official Codex models.
  */
-const renderConfig = (template, catalog) => {
+const renderConfig = (template: string, catalog: CatalogModel[]) => {
   const { aliases, latestListedByLane } = resolveUpstreamAliases(catalog);
   const codexAliases = Object.entries(aliases).map(([alias, name]) => ({
     name,
@@ -271,7 +278,7 @@ const renderConfig = (template, catalog) => {
     });
   const rules = effortOrder.flatMap((requested, index) => {
     /** @type {Map<string, string[]>} */
-    const byTarget = new Map();
+    const byTarget = new Map<string, string[]>();
     for (const { model, supported, highest } of glmRoutes) {
       if (!supported.has(requested)) {
         const forwarded =
