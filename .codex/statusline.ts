@@ -6,31 +6,31 @@ import { setTimeout as delayMs } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 import { isMainThread, parentPort, Worker } from "node:worker_threads";
 
-import { withUsageCache } from "./statusline/usage-cache.mjs";
+import { withUsageCache } from "./statusline/usage-cache.ts";
 
 /**
  * @param {unknown} value Candidate JSON object.
  * @returns {value is Record<string, unknown>} Result.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
 /**
  * @param {unknown} value Value to read as a JSON object.
  */
-const record = (value) => (isRecord(value) ? value : {});
+const record = (value: unknown) => (isRecord(value) ? value : {});
 
 /**
  * @param {unknown} value Value to read as an array.
  * @returns {unknown[]} Result.
  */
-const list = (value) => (Array.isArray(value) ? value : []);
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /**
  * @param {unknown} value Candidate numeric value.
  * @returns {value is number} Whether the value is finite.
  */
-const isFiniteNumber = (value) =>
+const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
 const neutral = "#999999";
@@ -40,12 +40,12 @@ const dim = "#84909C";
 /**
  * @param {unknown} value Candidate numeric value.
  */
-const finite = (value) => (isFiniteNumber(value) ? value : null);
+const finite = (value: unknown) => (isFiniteNumber(value) ? value : null);
 
 /**
  * @param {unknown} value Text from a status snapshot or addon.
  */
-const display = (value) =>
+const display = (value: unknown) =>
   typeof value === "string"
     ? stripVTControlCharacters(value)
         .replaceAll(/[\p{Cc}\u{2028}\u{2029}]/gu, " ")
@@ -55,7 +55,7 @@ const display = (value) =>
 /**
  * @param {number} value Count to display.
  */
-const count = (value) => {
+const count = (value: number) => {
   if (value >= 1_000_000) {
     return `${Number((value / 1_000_000).toFixed(1))}M`;
   }
@@ -67,7 +67,7 @@ const count = (value) => {
 /**
  * @param {number} minutes Duration in minutes.
  */
-const duration = (minutes) => {
+const duration = (minutes: number) => {
   const hours = Math.floor((minutes % 1440) / 60);
   if (minutes >= 1440) {
     return `${Math.floor(minutes / 1440)}d${hours > 0 ? `${hours}h` : ""}`;
@@ -78,14 +78,23 @@ const duration = (minutes) => {
     : `${remainder}m`;
 };
 
-/**
- * @typedef {string | {type: "text", props: {color: string, weight: "bold" | "normal"}, children: [string]}} Span
- */
+type Span =
+  | string
+  | {
+      type: "text";
+      props: { color: string; weight: "bold" | "normal" };
+      children: [string];
+    };
 
-/**
- * @typedef {{period: string, used: number, resetsAt: number}} QuotaWindow
- * @typedef {{spans: Span[], codexWindows: QuotaWindow[]}} ProviderRow
- */
+interface QuotaWindow {
+  period: string;
+  used: number;
+  resetsAt: number;
+}
+interface ProviderRow {
+  spans: Span[];
+  codexWindows: QuotaWindow[];
+}
 
 /**
  * @param {string} value Text to display.
@@ -93,7 +102,11 @@ const duration = (minutes) => {
  * @param {"bold" | "normal"} weight Text weight.
  * @returns {Span} Result.
  */
-const colored = (value, color, weight = "normal") => ({
+const colored = (
+  value: string,
+  color: string,
+  weight: "bold" | "normal" = "normal"
+): Span => ({
   type: "text",
   props: { color, weight },
   children: [value]
@@ -104,7 +117,7 @@ const colored = (value, color, weight = "normal") => ({
  * @param {number} percent Percentage of the total allowance remaining.
  * @returns {Span} Result.
  */
-const quota = (value, percent) => {
+const quota = (value: string, percent: number): Span => {
   if (percent < 10) {
     return colored(value, "#E990A9");
   }
@@ -112,63 +125,64 @@ const quota = (value, percent) => {
 };
 
 /** @type {import("./statusline/types.ts").UsageRuntime["requestJson"]} */
-const requestJson = async (url, headers, fetchFunction, onUsageError) => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 3000);
-  try {
-    const response = await fetchFunction(url, {
-      headers,
-      method: "GET",
-      signal: controller.signal
-    });
-    if (!Number.isFinite(response.status)) {
-      return { status: undefined };
-    }
-    if (response.status < 200 || response.status >= 300) {
-      try {
-        await Promise.race([
-          response.body?.cancel(),
-          delayMs(3000, undefined, { signal: controller.signal })
-        ]);
-      } catch {
-        if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
-          console.error(
-            `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
-          );
-        }
-      }
+const requestJson: import("./statusline/types.ts").UsageRuntime["requestJson"] =
+  async (url, headers, fetchFunction, onUsageError) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
       controller.abort();
-      return { status: response.status };
-    }
+    }, 3000);
     try {
-      /**
-       * @type {unknown}
-       */
-      const payload = await response.json();
-      if (!isRecord(payload)) {
+      const response = await fetchFunction(url, {
+        headers,
+        method: "GET",
+        signal: controller.signal
+      });
+      if (!Number.isFinite(response.status)) {
+        return { status: undefined };
+      }
+      if (response.status < 200 || response.status >= 300) {
+        try {
+          await Promise.race([
+            response.body?.cancel(),
+            delayMs(3000, undefined, { signal: controller.signal })
+          ]);
+        } catch {
+          if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
+            console.error(
+              `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
+            );
+          }
+        }
+        controller.abort();
+        return { status: response.status };
+      }
+      try {
+        /**
+         * @type {unknown}
+         */
+        const payload: unknown = await response.json();
+        if (!isRecord(payload)) {
+          onUsageError?.();
+          return { status: response.status };
+        }
+        return { payload, status: response.status };
+      } catch {
         onUsageError?.();
         return { status: response.status };
       }
-      return { payload, status: response.status };
     } catch {
-      onUsageError?.();
-      return { status: response.status };
+      return { status: undefined };
+    } finally {
+      clearTimeout(timeout);
     }
-  } catch {
-    return { status: undefined };
-  } finally {
-    clearTimeout(timeout);
-  }
-};
+  };
 
 const usageRuntime = { withUsageCache, requestJson };
 
 /**
  * @param {Record<string, unknown>} metric Normalized provider metric.
  */
-const allowance = (metric) => {
+const allowance = (metric: Record<string, unknown>) => {
   if (metric.type === "credit") {
     const remaining = finite(metric.remaining);
     if (remaining !== null) {
@@ -219,7 +233,11 @@ const allowance = (metric) => {
  * @param {number} showAbove Minimum percentage used.
  * @returns {ProviderRow[]} Result.
  */
-const renderGroup = (rawGroup, name, showAbove) => {
+const renderGroup = (
+  rawGroup: unknown,
+  name: string,
+  showAbove: number
+): ProviderRow[] => {
   const group = record(rawGroup);
   const groupLabel = display(group.label).replace(
     /\s+\((?:Pro|Individual)\)$/u,
@@ -290,7 +308,7 @@ const renderGroup = (rawGroup, name, showAbove) => {
 /**
  * @param {unknown} rawProvider One entry from the Codex provider list.
  */
-const collectProvider = async (rawProvider) => {
+const collectProvider = async (rawProvider: unknown) => {
   const { module, name, credentialEnv, enabled, showAbove } =
     record(rawProvider);
   if (
@@ -298,7 +316,7 @@ const collectProvider = async (rawProvider) => {
     typeof name !== "string" ||
     typeof module !== "string" ||
     path.basename(module) !== module ||
-    !module.endsWith(".mjs")
+    !module.endsWith(".ts")
   ) {
     return [];
   }
@@ -357,7 +375,7 @@ const graphemes = new Intl.Segmenter();
 /**
  * @param {Span[]} line Styled footer row.
  */
-const preventSoftWrap = (line) =>
+const preventSoftWrap = (line: Span[]) =>
   line.map((span) => {
     const value = typeof span === "string" ? span : span.children[0];
     const wordJoiner = "\u2060";
@@ -372,7 +390,7 @@ const preventSoftWrap = (line) =>
 /**
  * @param {unknown} cwd Active thread working directory.
  */
-const workspaceItems = (cwd) => {
+const workspaceItems = (cwd: unknown) => {
   if (typeof cwd !== "string" || cwd.length === 0) {
     return [];
   }
@@ -396,7 +414,7 @@ const workspaceItems = (cwd) => {
 /**
  * @param {unknown} rawUsage Thread context, tokens, and cost.
  */
-const usageItems = (rawUsage) => {
+const usageItems = (rawUsage: unknown) => {
   const { context, total, cost } = record(rawUsage);
   const { used_percentage: used, context_window_size: size } = record(context);
   const percent = finite(used);
@@ -405,7 +423,7 @@ const usageItems = (rawUsage) => {
   /**
    * @type {Span[][]}
    */
-  const items =
+  const items: Span[][] =
     dollars !== null && dollars > 0
       ? [[colored(`$${dollars.toFixed(2)}`, dim)]]
       : [];
@@ -445,7 +463,7 @@ const usageItems = (rawUsage) => {
  * @param {unknown} account Codex account snapshot.
  * @param {QuotaWindow[]} displayedWindows Provider windows already shown.
  */
-const rateLimitItems = (account, displayedWindows) => {
+const rateLimitItems = (account: unknown, displayedWindows: QuotaWindow[]) => {
   const now = Date.now() / 1000;
   return list(record(account).rate_limits)
     .slice(0, 6)
@@ -502,7 +520,7 @@ const rateLimitItems = (account, displayedWindows) => {
 /**
  * @param {Span[]} row Provider line.
  */
-const width = (row) =>
+const width = (row: Span[]) =>
   row.reduce(
     (size, span) =>
       size + (typeof span === "string" ? span.length : span.children[0].length),
@@ -512,7 +530,7 @@ const width = (row) =>
 /**
  * @param {Span[][]} groups Provider groups in display order.
  */
-const pack = (groups) => {
+const pack = (groups: Span[][]) => {
   const pairs = [];
   for (let index = 0; index < groups.length; index += 1) {
     const first = groups[index];
@@ -546,7 +564,7 @@ const pack = (groups) => {
  * @param {unknown} state Codex statusline snapshot.
  * @param {ProviderRow[]} addonRows Rendered usage from installed addons.
  */
-const render = (state, addonRows) => {
+const render = (state: unknown, addonRows: ProviderRow[]) => {
   const { thread, account } = record(state);
   const { model, workspace, usage } = record(thread);
   const { display_name: name, reasoning_level: effort } = record(model);
@@ -611,12 +629,12 @@ const runServer = async () => {
   /**
    * @type {Worker | null}
    */
-  let worker = null;
+  let worker: Worker | null = null;
   let nextRefresh = 0;
   /**
    * @type {ProviderRow[]}
    */
-  let addonRows = [];
+  let addonRows: ProviderRow[] = [];
 
   const refreshAddons = () => {
     if (worker !== null || performance.now() < nextRefresh) {
@@ -636,11 +654,11 @@ const runServer = async () => {
     /**
      * @type {ProviderRow[]}
      */
-    let lines = [];
+    let lines: ProviderRow[] = [];
     /**
      * @param {ProviderRow[]} result Rendered addon lines sent by the worker.
      */
-    const receiveLines = (result) => {
+    const receiveLines = (result: ProviderRow[]) => {
       lines = result;
     };
     current.once("message", receiveLines);
@@ -658,7 +676,7 @@ const runServer = async () => {
    * @param {string} method MCP request method.
    * @param {unknown} rawParams MCP request parameters.
    */
-  const respond = (method, rawParams) => {
+  const respond = (method: string, rawParams: unknown) => {
     const params = record(rawParams);
     switch (method) {
       case "initialize": {

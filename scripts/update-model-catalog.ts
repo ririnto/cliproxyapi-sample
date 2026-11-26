@@ -37,11 +37,11 @@ visit(overridesDocument, {
   }
 });
 /** @type {unknown} */
-const catalogOverrides = overridesDocument.toJS();
+const catalogOverrides: unknown = overridesDocument.toJS();
 const officialCatalogUrl =
   "https://raw.githubusercontent.com/openai/codex/refs/heads/main/codex-rs/models-manager/models.json";
 /** @param {string} url URL of the upstream source file. */
-const fetchSource = async (url) => {
+const fetchSource = async (url: string) => {
   const response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
   if (!response.ok) {
     throw new Error(`Could not load ${url}: HTTP ${response.status}`);
@@ -53,16 +53,16 @@ const fetchSource = async (url) => {
  * @param {unknown} value Untrusted source catalog.
  * @returns {value is Record<string, unknown>} Whether the value is an object.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** @typedef {Record<string, unknown> & {slug: string}} CatalogModel */
+type CatalogModel = Record<string, unknown> & { slug: string };
 
 /**
  * @param {unknown} value Untrusted source catalog.
  * @returns {CatalogModel[]} Source model records.
  */
-const parseModels = (value) => {
+const parseModels = (value: unknown): CatalogModel[] => {
   if (!isRecord(value) || !Array.isArray(value.models)) {
     throw new TypeError("Model catalog requires a models array");
   }
@@ -81,10 +81,17 @@ const parseModels = (value) => {
 const versionedLanePattern =
   /^gpt-(?<version>[0-9]+(?:\.[0-9]+)*)-(?<lane>[A-Za-z]+)$/u;
 
-/** @typedef {{slug: string, lane: string, version: bigint[]}} ModelVersion */
+interface ModelVersion {
+  slug: string;
+  lane: string;
+  version: bigint[];
+}
 
 /** @type {(candidate: ModelVersion, current: ModelVersion) => boolean} */
-const isNewer = (candidate, current) => {
+const isNewer: (candidate: ModelVersion, current: ModelVersion) => boolean = (
+  candidate,
+  current
+): boolean => {
   for (
     let index = 0;
     index < Math.max(candidate.version.length, current.version.length);
@@ -100,9 +107,9 @@ const isNewer = (candidate, current) => {
 };
 
 /** @param {CatalogModel[]} models Source model records. */
-const modelVersions = (models) => {
+const modelVersions = (models: CatalogModel[]) => {
   /** @type {Map<string, ModelVersion>} */
-  const versions = new Map();
+  const versions = new Map<string, ModelVersion>();
   for (const { slug } of models) {
     const { lane, version } = versionedLanePattern.exec(slug)?.groups ?? {};
     if (lane !== undefined && version !== undefined) {
@@ -117,7 +124,7 @@ const modelVersions = (models) => {
 };
 
 /** @param {unknown} source Official Codex model catalog. */
-const resolveModelCatalog = (source) => {
+const resolveModelCatalog = (source: unknown) => {
   const overrideModels = parseModels(catalogOverrides);
   const overridesBySlug = new Map(
     overrideModels.map((model) => [model.slug, model])
@@ -133,7 +140,7 @@ const resolveModelCatalog = (source) => {
     throw new TypeError("Invalid final upstream model priority");
   }
   /** @type {CatalogModel[]} */
-  const originalModels = [
+  const originalModels: CatalogModel[] = [
     ...upstreamModels.map((model) => ({
       ...model,
       ...overridesBySlug.get(model.slug)
@@ -149,7 +156,7 @@ const resolveModelCatalog = (source) => {
 
   const versions = modelVersions(originalModels);
   /** @type {Map<string, ModelVersion>} */
-  const latestByLane = new Map();
+  const latestByLane = new Map<string, ModelVersion>();
   for (const { slug } of originalModels) {
     const version = versions.get(slug);
     const current = version && latestByLane.get(version.lane);
@@ -182,7 +189,7 @@ const resolveModelCatalog = (source) => {
 
 const [sourcePath] = process.argv.slice(2);
 /** @type {unknown} */
-const source = JSON.parse(
+const source: unknown = JSON.parse(
   sourcePath === undefined
     ? await fetchSource(officialCatalogUrl)
     : fs.readFileSync(sourcePath === "-" ? 0 : sourcePath, "utf-8")

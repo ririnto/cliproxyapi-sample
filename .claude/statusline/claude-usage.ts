@@ -7,7 +7,7 @@ import path from "node:path";
  * @param {unknown} value - Numeric input.
  * @returns {value is number} Finite number.
  */
-const isFiniteNumber = (value) =>
+const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
@@ -26,13 +26,13 @@ const WINDOWS = [
  * @param {unknown} value Value to validate.
  * @returns {value is import("./types.ts").JsonRecord} Record check.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is import("./types.ts").JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * @param {string} message - Redacted message.
  */
-const debug = (message) => {
+const debug = (message: string) => {
   if (
     process.env.STATUSLINE_DEBUG !== undefined &&
     process.env.STATUSLINE_DEBUG !== ""
@@ -45,12 +45,14 @@ const debug = (message) => {
  * @param {string} text - JSON document.
  * @returns {Record<string,unknown>|undefined|null} Valid result or absence.
  */
-const parseRecord = (text) => {
+const parseRecord = (
+  text: string
+): Record<string, unknown> | undefined | null => {
   try {
     /**
      * @type {unknown}
      */
-    const value = JSON.parse(text);
+    const value: unknown = JSON.parse(text);
     return isRecord(value) ? value : undefined;
   } catch {
     debug("native 인증 JSON을 해석할 수 없습니다.");
@@ -61,7 +63,7 @@ const parseRecord = (text) => {
 /**
  * @param {unknown} value - Timestamp.
  */
-const nowValue = (value) => {
+const nowValue = (value: unknown) => {
   if (value instanceof Date) {
     return value.getTime();
   }
@@ -76,11 +78,13 @@ const nowValue = (value) => {
  * @param {unknown} value - OAuth payload.
  * @returns {value is Record<string, unknown> & {accessToken: string}} Valid token-bearing record.
  */
-const hasAccessToken = (value) =>
+const hasAccessToken = (
+  value: unknown
+): value is Record<string, unknown> & { accessToken: string } =>
   isRecord(value) && typeof value.accessToken === "string";
 /** @param {unknown} store - Credential document.
  * @param {number} now - Current time. */
-const validOauth = (store, now) => {
+const validOauth = (store: unknown, now: number) => {
   const oauth = isRecord(store) ? store.claudeAiOauth : undefined;
   return hasAccessToken(oauth) &&
     typeof oauth.accessToken === "string" &&
@@ -98,7 +102,12 @@ const validOauth = (store, now) => {
  * @param {number} now - Current time.
  * @returns {(Record<string,unknown>&{accessToken:string})|undefined|null} Valid result or absence.
  */
-const keychainOauth = (options, configDir, home, now) => {
+const keychainOauth = (
+  options: import("./types.ts").UsageOptions,
+  configDir: string,
+  home: string,
+  now: number
+): (Record<string, unknown> & { accessToken: string }) | undefined | null => {
   if (
     configDir === path.join(home, ".claude") &&
     (process.platform === "darwin" || options.execFile !== undefined) &&
@@ -133,7 +142,12 @@ const keychainOauth = (options, configDir, home, now) => {
  * @param {number} now - Current time.
  * @returns {Promise<(Record<string,unknown>&{accessToken:string})|undefined|null>} Valid result or absence.
  */
-const nativeOauth = async (options, now) => {
+const nativeOauth = async (
+  options: import("./types.ts").UsageOptions,
+  now: number
+): Promise<
+  (Record<string, unknown> & { accessToken: string }) | undefined | null
+> => {
   const home = options.home ?? homedir();
   const configured = (options.environment ?? process.env).CLAUDE_CONFIG_DIR;
   const configDir =
@@ -164,7 +178,7 @@ const nativeOauth = async (options, now) => {
 /**
  * @param {Record<string, unknown>} oauth - Credential metadata.
  */
-const groupLabel = (oauth) => {
+const groupLabel = (oauth: Record<string, unknown>) => {
   const plan =
     PLAN_LABELS.get(
       typeof oauth.subscriptionType === "string" ? oauth.subscriptionType : ""
@@ -183,7 +197,11 @@ const groupLabel = (oauth) => {
  * @param {number} now - Current time.
  * @returns {import("./types.ts").Metric | undefined} Valid metric.
  */
-const windowMetric = (window, label, now) => {
+const windowMetric = (
+  window: unknown,
+  label: string,
+  now: number
+): import("./types.ts").Metric | undefined => {
   const reset =
     isRecord(window) && typeof window.resets_at === "string"
       ? Date.parse(window.resets_at)
@@ -205,7 +223,7 @@ const windowMetric = (window, label, now) => {
 /**
  * @param {Record<string, unknown>} wallet - Wallet payload.
  */
-const walletRemaining = (wallet) => {
+const walletRemaining = (wallet: Record<string, unknown>) => {
   if (Object.hasOwn(wallet, "remaining_dollars")) {
     return wallet.remaining_dollars;
   }
@@ -222,7 +240,10 @@ const walletRemaining = (wallet) => {
  * @param {number} now - Current time.
  * @returns {import("./types.ts").Metric | undefined} Valid credit.
  */
-const creditMetric = (wallet, now) => {
+const creditMetric = (
+  wallet: unknown,
+  now: number
+): import("./types.ts").Metric | undefined => {
   const remaining = isRecord(wallet) ? walletRemaining(wallet) : Number.NaN;
   const expiresAt =
     isRecord(wallet) && typeof wallet.resets_at === "string"
@@ -247,7 +268,9 @@ const creditMetric = (wallet, now) => {
  * @param {unknown} budget - Budget payload.
  * @returns {import("./types.ts").Metric | undefined} Valid budget.
  */
-const budgetMetric = (budget) => {
+const budgetMetric = (
+  budget: unknown
+): import("./types.ts").Metric | undefined => {
   const total = isRecord(budget)
     ? (budget.monthly_limit ?? budget.monthly_credit_limit)
     : undefined;
@@ -276,7 +299,11 @@ const budgetMetric = (budget) => {
  * @param {Record<string, unknown>} oauth - Credential metadata.
  * @param {number} now - Current time.
  */
-const usageSnapshot = (payload, oauth, now) => {
+const usageSnapshot = (
+  payload: Record<string, unknown>,
+  oauth: Record<string, unknown>,
+  now: number
+) => {
   const metrics = [
     ...WINDOWS.map(([key, label]) => windowMetric(payload?.[key], label, now)),
     creditMetric(payload?.iguana_necktie, now),
@@ -293,7 +320,11 @@ const usageSnapshot = (payload, oauth, now) => {
  * @param {number} now - Current time.
  * @returns {Promise<import("./types.ts").Snapshot|undefined|null>} Valid result or absence.
  */
-const fetchSnapshot = async (oauth, options, now) => {
+const fetchSnapshot = async (
+  oauth: Record<string, unknown> & { accessToken: string },
+  options: import("./types.ts").UsageOptions,
+  now: number
+): Promise<import("./types.ts").Snapshot | undefined | null> => {
   try {
     const response = await (options.fetch ?? globalThis.fetch)(USAGE_URL, {
       headers: {
@@ -313,7 +344,7 @@ const fetchSnapshot = async (oauth, options, now) => {
       /**
        * @type {unknown}
        */
-      const payload = await response.json();
+      const payload: unknown = await response.json();
       if (
         isRecord(payload) &&
         payload.type !== "error" &&
@@ -337,7 +368,10 @@ const fetchSnapshot = async (oauth, options, now) => {
  * @param {import("./types.ts").UsageOptions} options Lookup options.
  * @param {Pick<import("./types.ts").UsageRuntime, "withUsageCache">} runtime Host-provided usage helpers.
  */
-export const fetchUsage = async (options, { withUsageCache }) => {
+export const fetchUsage = async (
+  options: import("./types.ts").UsageOptions,
+  { withUsageCache }: Pick<import("./types.ts").UsageRuntime, "withUsageCache">
+) => {
   const now = nowValue(options.now);
   const oauth = await nativeOauth(options, now);
   return oauth

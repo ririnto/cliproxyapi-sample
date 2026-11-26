@@ -5,42 +5,43 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
-/**
- * @typedef {Record<string, unknown>} RecordValue
- */
+type RecordValue = Record<string, unknown>;
 /**
  * @param {unknown} value - Untrusted input.
  * @returns {value is RecordValue} Object shape.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is RecordValue =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 /**
  * @param {unknown} value - Untrusted input.
  * @returns {RecordValue} Object fields.
  */
-const record = (value) => (isRecord(value) ? value : {});
+const record = (value: unknown): RecordValue => (isRecord(value) ? value : {});
 /**
  * @param {unknown} value - Untrusted list.
  * @returns {unknown[]} Elements.
  */
-const array = (value) => (Array.isArray(value) ? value : []);
+const array = (value: unknown): unknown[] =>
+  Array.isArray(value) ? value : [];
 const truthy = Boolean;
 /**
  * @param {unknown} value - Preferred field.
  * @param {() => unknown} fallback - Read the fallback field if needed.
  */
-const truthyOr = (value, fallback) => (truthy(value) ? value : fallback());
+const truthyOr = (value: unknown, fallback: () => unknown) =>
+  truthy(value) ? value : fallback();
 /**
  * @param {unknown} value - Path input.
  * @param {string} fallback - Default path.
  */
-const textOr = (value, fallback = "") =>
+const textOr = (value: unknown, fallback = "") =>
   typeof value === "string" && value !== "" ? value : fallback;
 
 /** @param {unknown} value - Task boundary.
  * @returns {value is RecordValue & {id: string}} Task with an identifier.
  */
-const isTask = (value) => isRecord(value) && typeof value.id === "string";
+const isTask = (value: unknown): value is RecordValue & { id: string } =>
+  isRecord(value) && typeof value.id === "string";
 const RESET = "\u001B[0m";
 const DIM = "\u001B[38;2;132;144;156m";
 const BOLD = "\u001B[1m";
@@ -61,7 +62,7 @@ const statusMarks = new Map([
  * @param {() => T} operation - Optional operation.
  * @returns {NonNullable<T> | null} Result when available.
  */
-const optional = (operation) => {
+const optional = <T>(operation: () => T): NonNullable<T> | null => {
   try {
     return operation() ?? null;
   } catch (error) {
@@ -75,7 +76,7 @@ const optional = (operation) => {
  * @param {string} text - JSON text.
  * @returns {unknown} Parsed input.
  */
-const parseJson = (text) => JSON.parse(text);
+const parseJson = (text: string): unknown => JSON.parse(text);
 
 const settings =
   optional(() =>
@@ -91,7 +92,7 @@ const settings =
 /**
  * @param {string} directory - directory input.
  */
-const directoriesIn = (directory) => {
+const directoriesIn = (directory: string) => {
   try {
     return readdirSync(directory, { withFileTypes: true }).filter((entry) =>
       entry.isDirectory()
@@ -104,7 +105,7 @@ const directoriesIn = (directory) => {
 /**
  * @param {unknown} value - value input.
  */
-const displayText = (value) =>
+const displayText = (value: unknown) =>
   stripVTControlCharacters(String(value))
     .replaceAll(/[\p{Cc}\u{2028}\u{2029}]+/gu, " ")
     .trim();
@@ -114,13 +115,15 @@ const displayText = (value) =>
  * @param {string} suffix - suffix input.
  * @returns {(number:number)=>string} Numeric formatter.
  */
-const scaledText = (divisor, suffix) => (number) =>
-  `${(number / divisor).toFixed(1).replace(/\.0$/u, "")}${suffix}`;
+const scaledText =
+  (divisor: number, suffix: string): ((number: number) => string) =>
+  (number) =>
+    `${(number / divisor).toFixed(1).replace(/\.0$/u, "")}${suffix}`;
 
 /**
  * @param {unknown} value - value input.
  */
-const numberText = (value) => {
+const numberText = (value: unknown) => {
   const number = Number(value);
   if (!Number.isFinite(number)) {
     return "0";
@@ -134,7 +137,7 @@ const numberText = (value) => {
 /**
  * @param {number} milliseconds - milliseconds input.
  */
-const elapsedText = (milliseconds) => {
+const elapsedText = (milliseconds: number) => {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
@@ -153,7 +156,7 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 /**
  * @param {string} text - text input.
  */
-const cellWidth = (text) => {
+const cellWidth = (text: string) => {
   if (/^[\p{Mark}\p{Cf}]*$/u.test(text)) {
     return 0;
   }
@@ -166,7 +169,7 @@ const cellWidth = (text) => {
 /**
  * @param {string} text - text input.
  */
-const visibleWidth = (text) =>
+const visibleWidth = (text: string) =>
   [...graphemes.segment(stripVTControlCharacters(text))].reduce(
     (width, { segment }) => width + cellWidth(segment),
     0
@@ -176,7 +179,7 @@ const visibleWidth = (text) =>
  * @param {string} text - text input.
  * @param {number} columns - columns input.
  */
-const clip = (text, columns) => {
+const clip = (text: string, columns: number) => {
   if (columns <= 0) {
     return "";
   }
@@ -200,7 +203,10 @@ const clip = (text, columns) => {
  * @param {RecordValue} task - task input.
  * @param {{color:string,glyph:string}} mark - mark input.
  */
-const taskLabel = (task, mark) => {
+const taskLabel = (
+  task: RecordValue,
+  mark: { color: string; glyph: string }
+) => {
   const effortText =
     task.effort === undefined
       ? truthyOr(
@@ -235,7 +241,7 @@ const taskLabel = (task, mark) => {
  * @param {unknown} input - input input.
  * @param {number} nowMs - nowMs input.
  */
-export const renderRows = (input, nowMs) => {
+export const renderRows = (input: unknown, nowMs: number) => {
   if (!isRecord(input)) {
     throw new TypeError("Status payload must be an object");
   }

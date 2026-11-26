@@ -9,29 +9,33 @@ import { setTimeout as delayMs } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 
-import { withUsageCache } from "./statusline/usage-cache.mjs";
+import { withUsageCache } from "./statusline/usage-cache.ts";
 
-/**
- * @typedef {Record<string, unknown>} RecordValue
- */
-/**
- * @typedef {{addons?: unknown, branch?: string, cwd?: string, nowMs?: number, nativeUsage?: boolean | null, importModule?: (url: URL) => unknown}} RenderOptions
- */
+type RecordValue = Record<string, unknown>;
+interface RenderOptions {
+  addons?: unknown;
+  branch?: string;
+  cwd?: string;
+  nowMs?: number;
+  nativeUsage?: boolean | null;
+  importModule?: (url: URL) => unknown;
+}
 /**
  * @param {unknown} value - Untrusted input.
  * @returns {RecordValue} Object fields or an empty record.
  */
-const record = (value) => (isRecord(value) ? value : {});
+const record = (value: unknown): RecordValue => (isRecord(value) ? value : {});
 /**
  * @param {unknown} value - Untrusted list.
  * @returns {unknown[]} Array elements or an empty list.
  */
-const array = (value) => (Array.isArray(value) ? value : []);
+const array = (value: unknown): unknown[] =>
+  Array.isArray(value) ? value : [];
 /**
  * @param {unknown} value - Untrusted path.
  * @param {string} fallback - Default path.
  */
-const textOr = (value, fallback = "") =>
+const textOr = (value: unknown, fallback = "") =>
   typeof value === "string" && value !== "" ? value : fallback;
 
 /**
@@ -44,7 +48,8 @@ const truthy = Boolean;
  * @param {unknown} value - Candidate.
  * @param {unknown} alternative - Fallback.
  */
-const truthyOr = (value, alternative) => (truthy(value) ? value : alternative);
+const truthyOr = (value: unknown, alternative: unknown) =>
+  truthy(value) ? value : alternative;
 
 const RESET = "[0m";
 const DIM = "\u001B[38;2;132;144;156m";
@@ -61,7 +66,7 @@ const PCT_YELLOW = 90;
 /**
  * @param {unknown} value - value input.
  */
-const displayText = (value) =>
+const displayText = (value: unknown) =>
   stripVTControlCharacters(String(value)).replaceAll(
     /[\p{Cc}\u{2028}\u{2029}]+/gu,
     " "
@@ -71,13 +76,13 @@ const displayText = (value) =>
  * @param {unknown} value - value input.
  * @returns {value is RecordValue} Whether value has object fields.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is RecordValue =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * @param {RecordValue} metric - metric input.
  */
-const metricPercentage = (metric) => {
+const metricPercentage = (metric: RecordValue) => {
   if (metric?.type === "usage") {
     return Number(metric.total) > 0
       ? (Number(metric.used) / Number(metric.total)) * 100
@@ -91,13 +96,13 @@ const metricPercentage = (metric) => {
  * @param {number} divisor - divisor input.
  * @param {string} suffix - suffix input.
  */
-const scaledText = (number, divisor, suffix) =>
+const scaledText = (number: number, divisor: number, suffix: string) =>
   `${(number / divisor).toFixed(1).replace(/\.0$/u, "")}${suffix}`;
 
 /**
  * @param {unknown} value - value input.
  */
-const numberText = (value) => {
+const numberText = (value: unknown) => {
   const number = Number(value);
   if (!Number.isFinite(number)) {
     return "0";
@@ -113,7 +118,7 @@ const numberText = (value) => {
 /**
  * @param {unknown} milliseconds - milliseconds input.
  */
-const resetText = (milliseconds) => {
+const resetText = (milliseconds: unknown) => {
   const value = Number(milliseconds);
   if (!Number.isFinite(value) || value <= 0) {
     return "unknown";
@@ -131,7 +136,7 @@ const resetText = (milliseconds) => {
 /**
  * @param {number} percentage - percentage input.
  */
-const barColor = (percentage) => {
+const barColor = (percentage: number) => {
   if (!Number.isFinite(percentage)) {
     return "";
   }
@@ -146,7 +151,7 @@ const barColor = (percentage) => {
 /**
  * @param {number} percentage - percentage input.
  */
-const usageBar = (percentage) => {
+const usageBar = (percentage: number) => {
   const steps = Math.max(
     percentage > 0 ? 1 : 0,
     Math.min(8, Math.round((percentage / 100) * 8))
@@ -157,7 +162,7 @@ const usageBar = (percentage) => {
 /**
  * @param {string} cwd - cwd input.
  */
-const gitBranch = (cwd) => {
+const gitBranch = (cwd: string) => {
   try {
     return execFileSync("git", ["branch", "--show-current"], {
       cwd,
@@ -172,7 +177,7 @@ const gitBranch = (cwd) => {
 /**
  * @param {RecordValue} metric - metric input.
  */
-const metricDisplay = (metric) => {
+const metricDisplay = (metric: RecordValue) => {
   if (!isRecord(metric)) {
     return "";
   }
@@ -195,7 +200,7 @@ const metricDisplay = (metric) => {
 /**
  * @param {RecordValue} metric - metric input.
  */
-const metricPercent = (metric) => {
+const metricPercent = (metric: RecordValue) => {
   try {
     if (metric.type === "credit") {
       return Number.POSITIVE_INFINITY;
@@ -212,7 +217,11 @@ const metricPercent = (metric) => {
  * @param {string} groupLabel - groupLabel input.
  * @param {string} metricLabel - metricLabel input.
  */
-const thresholdFor = (showAbove, groupLabel, metricLabel) =>
+const thresholdFor = (
+  showAbove: unknown,
+  groupLabel: string,
+  metricLabel: string
+) =>
   isRecord(showAbove)
     ? Number(showAbove[metricLabel] ?? showAbove[groupLabel] ?? 0)
     : Number(truthyOr(showAbove, 0));
@@ -220,7 +229,7 @@ const thresholdFor = (showAbove, groupLabel, metricLabel) =>
 /**
  * @param {RecordValue} metric - metric input.
  */
-const renderMetric = (metric) => {
+const renderMetric = (metric: RecordValue) => {
   const reset = metric.resetsInMs ?? metric.resets_in_ms;
   return `${displayText(metric.label)} ${barColor(metricPercent(metric))}${displayText(metricDisplay(metric))}${RESET}${reset === undefined ? "" : ` ${DIM}↻${resetText(reset)}${RESET}`}`;
 };
@@ -229,13 +238,13 @@ const renderMetric = (metric) => {
  * @param {unknown} value - value input.
  * @returns {value is number} Whether value is finite.
  */
-const isFiniteNumber = (value) =>
+const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
 /**
  * @param {unknown} window - window input.
  */
-const windowPercentage = (window) => {
+const windowPercentage = (window: unknown) => {
   const percentage = record(window).used_percentage;
   return isFiniteNumber(percentage) && percentage >= 0 ? percentage : null;
 };
@@ -243,7 +252,7 @@ const windowPercentage = (window) => {
 /**
  * @param {unknown} window - window input.
  */
-const spendDollarPair = (window) => {
+const spendDollarPair = (window: unknown) => {
   const used = record(window).used_usd;
   const limit = record(window).limit_usd;
   return isFiniteNumber(used) && used >= 0 && isFiniteNumber(limit) && limit > 0
@@ -254,7 +263,7 @@ const spendDollarPair = (window) => {
 /**
  * @param {unknown} window - window input.
  */
-const spendPercentage = (window) => {
+const spendPercentage = (window: unknown) => {
   const percentage = record(window).used_percentage;
   return isFiniteNumber(percentage) && percentage >= 0 ? percentage : null;
 };
@@ -262,7 +271,7 @@ const spendPercentage = (window) => {
 /**
  * @param {unknown} rateLimits - rateLimits input.
  */
-const nativeUsageFor = (rateLimits) => {
+const nativeUsageFor = (rateLimits: unknown) => {
   if (!isRecord(rateLimits)) {
     return null;
   }
@@ -281,7 +290,12 @@ const nativeUsageFor = (rateLimits) => {
  * @param {RecordValue} rateLimits - rateLimits input.
  * @param {number} nowMs - nowMs input.
  */
-const windowRow = (key, label, rateLimits, nowMs) => {
+const windowRow = (
+  key: string,
+  label: string,
+  rateLimits: RecordValue,
+  nowMs: number
+) => {
   const window = rateLimits?.[key];
   const percentage = windowPercentage(window);
   if (percentage === null) {
@@ -301,7 +315,10 @@ const windowRow = (key, label, rateLimits, nowMs) => {
  * @param {{used:number,limit:number} | null} dollars - dollars input.
  * @param {number} percentage - percentage input.
  */
-const spendMetric = (dollars, percentage) =>
+const spendMetric = (
+  dollars: { used: number; limit: number } | null,
+  percentage: number
+) =>
   dollars
     ? {
         label: "spend",
@@ -316,7 +333,7 @@ const spendMetric = (dollars, percentage) =>
  * @param {RecordValue} rateLimits - rateLimits input.
  * @param {number} nowMs - nowMs input.
  */
-const spendRow = (rateLimits, nowMs) => {
+const spendRow = (rateLimits: RecordValue, nowMs: number) => {
   const spend = record(rateLimits.spend_limit);
   const dollars = spendDollarPair(spend);
   const percentage = dollars
@@ -337,7 +354,7 @@ const spendRow = (rateLimits, nowMs) => {
  * @param {RecordValue} rateLimits - rateLimits input.
  * @param {number} nowMs - nowMs input.
  */
-const renderRateLimits = (rateLimits, nowMs) =>
+const renderRateLimits = (rateLimits: RecordValue, nowMs: number) =>
   [
     windowRow("five_hour", "5h", rateLimits, nowMs),
     windowRow("seven_day", "7d", rateLimits, nowMs),
@@ -348,7 +365,7 @@ const renderRateLimits = (rateLimits, nowMs) =>
  * @param {RecordValue} addon - addon input.
  * @param {unknown} snapshot - snapshot input.
  */
-export const renderSnapshot = (addon, snapshot) => {
+export const renderSnapshot = (addon: RecordValue, snapshot: unknown) => {
   if (!isRecord(snapshot) || !Array.isArray(snapshot.groups)) {
     return "";
   }
@@ -395,7 +412,7 @@ export const renderSnapshot = (addon, snapshot) => {
  * @param {unknown} addons - addons input.
  * @returns {(RecordValue & {script:string})[]} Enabled script definitions.
  */
-const addonSettings = (addons) =>
+const addonSettings = (addons: unknown): (RecordValue & { script: string })[] =>
   array(addons).flatMap((addon) => {
     if (
       !isRecord(addon) ||
@@ -411,7 +428,7 @@ const addonSettings = (addons) =>
 /**
  * @param {string} script - script input.
  */
-const scriptPath = (script) => {
+const scriptPath = (script: string) => {
   const home = homedir();
   if (script === "~") {
     return home;
@@ -425,56 +442,57 @@ const scriptPath = (script) => {
 };
 
 /** @type {import("./statusline/types.ts").UsageRuntime["requestJson"]} */
-const requestJson = async (url, headers, fetchFunction, onUsageError) => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 3000);
-  try {
-    const response = await fetchFunction(url, {
-      headers,
-      method: "GET",
-      signal: controller.signal
-    });
-    if (!Number.isFinite(response.status)) {
-      return { status: undefined };
-    }
-    if (response.status < 200 || response.status >= 300) {
-      try {
-        await Promise.race([
-          response.body?.cancel(),
-          delayMs(3000, undefined, { signal: controller.signal })
-        ]);
-      } catch {
-        if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
-          console.error(
-            `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
-          );
-        }
-      }
+const requestJson: import("./statusline/types.ts").UsageRuntime["requestJson"] =
+  async (url, headers, fetchFunction, onUsageError) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
       controller.abort();
-      return { status: response.status };
-    }
+    }, 3000);
     try {
-      /**
-       * @type {unknown}
-       */
-      const payload = await response.json();
-      if (!isRecord(payload)) {
+      const response = await fetchFunction(url, {
+        headers,
+        method: "GET",
+        signal: controller.signal
+      });
+      if (!Number.isFinite(response.status)) {
+        return { status: undefined };
+      }
+      if (response.status < 200 || response.status >= 300) {
+        try {
+          await Promise.race([
+            response.body?.cancel(),
+            delayMs(3000, undefined, { signal: controller.signal })
+          ]);
+        } catch {
+          if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
+            console.error(
+              `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
+            );
+          }
+        }
+        controller.abort();
+        return { status: response.status };
+      }
+      try {
+        /**
+         * @type {unknown}
+         */
+        const payload: unknown = await response.json();
+        if (!isRecord(payload)) {
+          onUsageError?.();
+          return { status: response.status };
+        }
+        return { payload, status: response.status };
+      } catch {
         onUsageError?.();
         return { status: response.status };
       }
-      return { payload, status: response.status };
     } catch {
-      onUsageError?.();
-      return { status: response.status };
+      return { status: undefined };
+    } finally {
+      clearTimeout(timeout);
     }
-  } catch {
-    return { status: undefined };
-  } finally {
-    clearTimeout(timeout);
-  }
-};
+  };
 
 export const usageRuntime = { withUsageCache, requestJson };
 
@@ -482,17 +500,20 @@ export const usageRuntime = { withUsageCache, requestJson };
  * @param {{script:string}} addon - addon input.
  * @param {RenderOptions} options - options input.
  */
-const importAddonModule = async (addon, options) => {
+const importAddonModule = async (
+  addon: { script: string },
+  options: RenderOptions
+) => {
   /**
    * @type {unknown}
    */
-  const module = await (
+  const module: unknown = await (
     options.importModule ??
     (async (url) => {
       /**
        * @type {unknown}
        */
-      const imported = await import(url.href);
+      const imported: unknown = await import(url.href);
       return imported;
     })
   )(pathToFileURL(scriptPath(addon.script)));
@@ -504,14 +525,18 @@ const importAddonModule = async (addon, options) => {
    * @param {RecordValue} input - Provider request.
    * @returns {unknown} Provider result.
    */
-  return (input) => Reflect.apply(fetchUsage, module, [input, usageRuntime]);
+  return (input: RecordValue): unknown =>
+    Reflect.apply(fetchUsage, module, [input, usageRuntime]);
 };
 
 /**
  * @param {unknown} addons - addons input.
  * @param {RenderOptions} options - options input.
  */
-const renderAddonResults = async (addons, options = {}) => {
+const renderAddonResults = async (
+  addons: unknown,
+  options: RenderOptions = {}
+) => {
   const results = await Promise.all(
     addonSettings(addons)
       .filter(
@@ -524,7 +549,7 @@ const renderAddonResults = async (addons, options = {}) => {
           /**
            * @type {unknown}
            */
-          const snapshot = module
+          const snapshot: unknown = module
             ? await module({
                 credential:
                   typeof addon.credential === "string" ? addon.credential : ""
@@ -543,7 +568,7 @@ const renderAddonResults = async (addons, options = {}) => {
 /**
  * @param {RecordValue} workspace - workspace input.
  */
-const projectDisplay = (workspace) => {
+const projectDisplay = (workspace: RecordValue) => {
   const currentDir = textOr(
     workspace.current_dir,
     textOr(workspace.project_dir, process.cwd())
@@ -558,7 +583,7 @@ const projectDisplay = (workspace) => {
 /**
  * @param {RecordValue} input - input input.
  */
-const renderContext = (input) => {
+const renderContext = (input: RecordValue) => {
   const context = record(input.context_window);
   const value = Number(context.used_percentage);
   const known =
@@ -576,7 +601,7 @@ const renderContext = (input) => {
  * @param {RecordValue} input - input input.
  * @param {RenderOptions} options - options input.
  */
-const renderHeader = (input, options) => {
+const renderHeader = (input: RecordValue, options: RenderOptions) => {
   const model = record(input.model);
   const displayName = model.display_name;
   const modelName = truthy(displayName)
@@ -613,7 +638,7 @@ const renderHeader = (input, options) => {
 /**
  * @param {RecordValue} input - input input.
  */
-const renderTokens = (input) => {
+const renderTokens = (input: RecordValue) => {
   const context = record(input.context_window);
   const usage = record(context.current_usage);
   const metrics = [
@@ -630,7 +655,7 @@ const renderTokens = (input) => {
 /**
  * @param {string[]} rows - rows input.
  */
-const packProviderRows = (rows) => {
+const packProviderRows = (rows: string[]) => {
   const packed = [];
   let current = [];
   for (const row of rows) {
@@ -670,7 +695,10 @@ const packProviderRows = (rows) => {
  * @param {RecordValue} input - input input.
  * @param {RenderOptions} options - options input.
  */
-export const renderStatusline = async (input, options = {}) => {
+export const renderStatusline = async (
+  input: RecordValue,
+  options: RenderOptions = {}
+) => {
   const nowMs = options.nowMs ?? Date.now();
   const nativeRate = renderRateLimits(record(input.rate_limits), nowMs);
   const addonResults = await renderAddonResults(options.addons ?? [], {
@@ -703,7 +731,7 @@ const readProviderAddons = async () => {
   /**
    * @type {unknown}
    */
-  let registry;
+  let registry: unknown;
   try {
     registry = JSON.parse(
       await readFile(
@@ -724,7 +752,7 @@ const readProviderAddons = async () => {
       typeof name !== "string" ||
       typeof module !== "string" ||
       path.basename(module) !== module ||
-      !module.endsWith(".mjs")
+      !module.endsWith(".ts")
     ) {
       return [];
     }
@@ -747,7 +775,7 @@ export const main = async () => {
     /**
      * @type {unknown}
      */
-    const parsed = JSON.parse(readFileSync(0, "utf-8"));
+    const parsed: unknown = JSON.parse(readFileSync(0, "utf-8"));
     const input = record(parsed);
     const rows = await renderStatusline(input, {
       addons: await readProviderAddons(),

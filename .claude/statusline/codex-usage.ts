@@ -8,25 +8,25 @@ const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
  * @param {unknown} value Value to validate.
  * @returns {value is import("./types.ts").JsonRecord} Whether the value has the required shape.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is import("./types.ts").JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * @param {unknown} value Value to validate.
  * @returns {value is number} Whether the value has the required shape.
  */
-const isFiniteNumber = (value) =>
+const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
 /**
  * @param {string} filePath Auth file.
  */
-const readJson = async (filePath) => {
+const readJson = async (filePath: string) => {
   try {
     /**
      * @type {unknown}
      */
-    const value = JSON.parse(await readFile(filePath, "utf-8"));
+    const value: unknown = JSON.parse(await readFile(filePath, "utf-8"));
     return isRecord(value) ? value : null;
   } catch {
     if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
@@ -39,7 +39,7 @@ const readJson = async (filePath) => {
 /**
  * @param {unknown} value Seconds.
  */
-const secondsToMs = (value) =>
+const secondsToMs = (value: unknown) =>
   isFiniteNumber(value) && value > 0
     ? Math.max(0, Math.trunc(value * 1000))
     : 0;
@@ -50,7 +50,11 @@ const secondsToMs = (value) =>
  * @param {number} resetsInMs Delay.
  * @returns {import("./types.ts").Metric | undefined} Metric.
  */
-const percentageMetric = (label, percentage, resetsInMs) =>
+const percentageMetric = (
+  label: string,
+  percentage: unknown,
+  resetsInMs: number
+): import("./types.ts").Metric | undefined =>
   isFiniteNumber(percentage) && percentage >= 0 && percentage <= 100
     ? {
         label,
@@ -63,7 +67,7 @@ const percentageMetric = (label, percentage, resetsInMs) =>
 /**
  * @param {unknown} data Untrusted auth.
  */
-const readChatgptAuth = (data) => {
+const readChatgptAuth = (data: unknown) => {
   const tokens = isRecord(data) ? data.tokens : undefined;
   return isRecord(tokens) &&
     typeof tokens.access_token === "string" &&
@@ -79,7 +83,7 @@ const readChatgptAuth = (data) => {
 /**
  * @param {unknown} data Untrusted auth.
  */
-const readOpenCodeOpenAiAuth = (data) => {
+const readOpenCodeOpenAiAuth = (data: unknown) => {
   const tokens = isRecord(data) ? data.openai : undefined;
   return isRecord(tokens) &&
     typeof tokens.access === "string" &&
@@ -94,7 +98,7 @@ const readOpenCodeOpenAiAuth = (data) => {
 /**
  * @param {import("./types.ts").UsageOptions} options Auth options.
  */
-const chatgptAuth = async (options) => {
+const chatgptAuth = async (options: import("./types.ts").UsageOptions) => {
   const home = options.home ?? homedir();
   const codex = readChatgptAuth(
     await readJson(path.join(home, ".codex", "auth.json"))
@@ -116,7 +120,7 @@ const chatgptAuth = async (options) => {
  * @param {unknown} seconds Window length.
  * @param {string} fallback Default.
  */
-const windowLabel = (seconds, fallback) => {
+const windowLabel = (seconds: unknown, fallback: string) => {
   if (
     typeof seconds !== "number" ||
     !Number.isFinite(seconds) ||
@@ -134,7 +138,7 @@ const windowLabel = (seconds, fallback) => {
  * @param {unknown} window Untrusted window.
  * @param {string} fallback Default label.
  */
-const chatgptWindow = (window, fallback) =>
+const chatgptWindow = (window: unknown, fallback: string) =>
   isRecord(window)
     ? percentageMetric(
         windowLabel(window.limit_window_seconds, fallback),
@@ -148,7 +152,11 @@ const chatgptWindow = (window, fallback) =>
  * @param {string} label Label.
  * @param {import("./types.ts").Metric} [credit] Credit.
  */
-const chatgptGroup = (rateLimit, label, credit) => {
+const chatgptGroup = (
+  rateLimit: unknown,
+  label: string,
+  credit?: import("./types.ts").Metric
+) => {
   const metrics = (
     isRecord(rateLimit)
       ? [
@@ -167,7 +175,9 @@ const chatgptGroup = (rateLimit, label, credit) => {
  * @param {unknown} credits Untrusted balance.
  * @returns {import("./types.ts").Metric | undefined} Metric.
  */
-const chatgptCredit = (credits) => {
+const chatgptCredit = (
+  credits: unknown
+): import("./types.ts").Metric | undefined => {
   const creditBalance =
     isRecord(credits) && credits.has_credits === true
       ? credits.balance
@@ -185,7 +195,7 @@ const chatgptCredit = (credits) => {
 /**
  * @param {unknown} planType Untrusted plan.
  */
-const chatgptPlanLabel = (planType) => {
+const chatgptPlanLabel = (planType: unknown) => {
   if (
     typeof planType !== "string" ||
     !["free", "plus", "pro", "team", "enterprise", "edu"].includes(planType)
@@ -200,7 +210,11 @@ const chatgptPlanLabel = (planType) => {
  * @param {import("./types.ts").UsageOptions} options Options.
  * @param {import("./types.ts").UsageRuntime["requestJson"]} requestJson Host HTTP transport.
  */
-const usageSnapshot = async (selected, options, requestJson) => {
+const usageSnapshot = async (
+  selected: { token: string; accountId: string },
+  options: import("./types.ts").UsageOptions,
+  requestJson: import("./types.ts").UsageRuntime["requestJson"]
+) => {
   let { payload } = await requestJson(
     USAGE_URL,
     {
@@ -226,18 +240,16 @@ const usageSnapshot = async (selected, options, requestJson) => {
         chatgptCredit(payload.credits)
       )
     : undefined;
-  /** @type {import("./types.ts").Snapshot["groups"]} */
-  const groups = [];
-  if (primaryGroup !== undefined) {
-    groups.push(
-      primaryGroup.metrics.some((metric) => metric.type === "percentage")
-        ? { ...primaryGroup, deduplicateWithNativeQuota: true }
-        : primaryGroup
-    );
-  }
-  if (Array.isArray(payload?.additional_rate_limits)) {
-    groups.push(
-      ...payload.additional_rate_limits.filter(isRecord).flatMap((limit) => {
+  const primary =
+    primaryGroup === undefined
+      ? []
+      : [
+          primaryGroup.metrics.some((metric) => metric.type === "percentage")
+            ? { ...primaryGroup, deduplicateWithNativeQuota: true }
+            : primaryGroup
+        ];
+  const additional = Array.isArray(payload?.additional_rate_limits)
+    ? payload.additional_rate_limits.filter(isRecord).flatMap((limit) => {
         const { limit_name: label, rate_limit: rateLimit } = limit;
         if (typeof label === "string" && label !== "") {
           const group = chatgptGroup(
@@ -248,8 +260,8 @@ const usageSnapshot = async (selected, options, requestJson) => {
         }
         return [];
       })
-    );
-  }
+    : [];
+  const groups = [...primary, ...additional];
   return groups.length ? { groups } : undefined;
 };
 
@@ -257,14 +269,15 @@ const usageSnapshot = async (selected, options, requestJson) => {
  * @param {import("./types.ts").Snapshot | undefined} snapshot Cached or freshly fetched usage.
  * @returns {import("./types.ts").Snapshot | undefined} Snapshot with legacy quota metadata restored.
  */
-const preserveNativeQuotaDeduplication = (snapshot) => {
+const preserveNativeQuotaDeduplication = (
+  snapshot: import("./types.ts").Snapshot | undefined
+): import("./types.ts").Snapshot | undefined => {
   if (snapshot === undefined) {
     return snapshot;
   }
   const groups = snapshot.groups.map((group) => {
     if (
       group.deduplicateWithNativeQuota !== undefined ||
-      !Array.isArray(group.metrics) ||
       !group.metrics.some(
         (metric) =>
           metric.type === "percentage" &&
@@ -292,7 +305,10 @@ const preserveNativeQuotaDeduplication = (snapshot) => {
  * @param {import("./types.ts").UsageRuntime} runtime Host-provided usage helpers.
  * @returns {Promise<import("./types.ts").Snapshot | undefined>} Usage snapshot.
  */
-export const fetchUsage = async (options, { withUsageCache, requestJson }) => {
+export const fetchUsage = async (
+  options: import("./types.ts").UsageOptions,
+  { withUsageCache, requestJson }: import("./types.ts").UsageRuntime
+): Promise<import("./types.ts").Snapshot | undefined> => {
   const auth = await chatgptAuth(options);
   const explicit =
     typeof options.credential === "string" && options.credential !== ""

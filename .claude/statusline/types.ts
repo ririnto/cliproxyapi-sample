@@ -2,7 +2,7 @@ import type { StdioOptions } from "node:child_process";
 
 export type JsonRecord = Record<string, unknown>;
 
-export type Metric =
+export type Metric = Readonly<
   | {
       type: "percentage";
       label: string;
@@ -25,13 +25,14 @@ export type Metric =
       total: number;
       currency?: string;
       resetsInMs?: number;
-    };
+    }
+>;
 export interface Snapshot {
-  groups: {
+  readonly groups: readonly Readonly<{
     label?: string;
-    metrics: Metric[];
+    metrics: readonly Metric[];
     deduplicateWithNativeQuota?: boolean;
-  }[];
+  }>[];
 }
 export interface FetchOptions {
   headers: Record<string, string>;

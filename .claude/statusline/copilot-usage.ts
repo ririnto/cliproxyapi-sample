@@ -10,20 +10,20 @@ const COPILOT_API = "https://api.github.com";
  * @param {unknown} value Value to validate.
  * @returns {value is import("./types.ts").JsonRecord} Record check.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is import("./types.ts").JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * @param {unknown} value Value to validate.
  * @returns {value is number} Finite check.
  */
-const isFiniteNumber = (value) =>
+const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
 /**
  * @param {unknown} value - Timestamp.
  */
-const nowValue = (value) => {
+const nowValue = (value: unknown) => {
   if (value instanceof Date) {
     return value.getTime();
   }
@@ -33,7 +33,7 @@ const nowValue = (value) => {
 /**
  * @param {string} text - JSONC document.
  */
-const stripJsonc = (text) => {
+const stripJsonc = (text: string) => {
   let result = "";
   let inString = false;
   let escaped = false;
@@ -74,13 +74,16 @@ const stripJsonc = (text) => {
  * @param {boolean} [jsonc] - Strip comments.
  * @returns {Promise<Record<string,unknown>|undefined|null>} Valid result or absence.
  */
-const readJson = async (filePath, jsonc = false) => {
+const readJson = async (
+  filePath: string,
+  jsonc = false
+): Promise<Record<string, unknown> | undefined | null> => {
   try {
     const text = await readFile(filePath, "utf-8");
     /**
      * @type {unknown}
      */
-    const value = JSON.parse(jsonc ? stripJsonc(text) : text);
+    const value: unknown = JSON.parse(jsonc ? stripJsonc(text) : text);
     return isRecord(value) ? value : undefined;
   } catch {
     if (
@@ -97,7 +100,7 @@ const readJson = async (filePath, jsonc = false) => {
  * @param {unknown} timestamp - Reset timestamp.
  * @param {number} now - Current time.
  */
-const resetAfter = (timestamp, now) =>
+const resetAfter = (timestamp: unknown, now: number) =>
   isFiniteNumber(timestamp) && timestamp > 0
     ? Math.max(0, Math.trunc(timestamp - now))
     : 0;
@@ -106,7 +109,10 @@ const resetAfter = (timestamp, now) =>
  * @param {(import("./types.ts").Metric | undefined)[]} metrics - Candidate metrics.
  * @param {string} label - Group label.
  */
-const snapshot = (metrics, label) => {
+const snapshot = (
+  metrics: (import("./types.ts").Metric | undefined)[],
+  label: string
+) => {
   const validMetrics = metrics.filter((metric) => metric !== undefined);
   return validMetrics.length > 0
     ? {
@@ -126,7 +132,12 @@ const snapshot = (metrics, label) => {
  * @param {number} resetsInMs - Reset delay.
  * @returns {import("./types.ts").Metric | undefined} Valid metric.
  */
-const usageMetric = (label, used, total, resetsInMs) =>
+const usageMetric = (
+  label: string,
+  used: unknown,
+  total: unknown,
+  resetsInMs: number
+): import("./types.ts").Metric | undefined =>
   isFiniteNumber(used) && isFiniteNumber(total) && used >= 0 && total >= 0
     ? {
         label,
@@ -148,7 +159,10 @@ const ENVIRONMENT_TOKEN_NAMES = [
  * @param {number} [index] - Candidate index.
  * @returns {string[]} Ordered tokens.
  */
-const candidateEnvironmentTokens = (environment, index = 0) => {
+const candidateEnvironmentTokens = (
+  environment: Record<string, string | undefined> | undefined,
+  index = 0
+): string[] => {
   if (index >= ENVIRONMENT_TOKEN_NAMES.length) {
     return [];
   }
@@ -163,7 +177,7 @@ const candidateEnvironmentTokens = (environment, index = 0) => {
 /**
  * @param {unknown} host - Host input.
  */
-const normalizeHost = (host) => {
+const normalizeHost = (host: unknown) => {
   if (typeof host !== "string" || host === "") {
     return GITHUB_COM;
   }
@@ -174,7 +188,7 @@ const normalizeHost = (host) => {
 /**
  * @param {unknown} host - Host input.
  */
-const copilotApiHost = (host) => {
+const copilotApiHost = (host: unknown) => {
   const normalized = normalizeHost(host);
   return normalized === GITHUB_COM ? COPILOT_API : normalized;
 };
@@ -186,14 +200,16 @@ const copilotApiHost = (host) => {
  * @param {unknown} value - OAuth entry.
  * @returns {value is Record<string, unknown> & {accessToken: string}} Token-bearing record.
  */
-const hasAccessToken = (value) =>
+const hasAccessToken = (
+  value: unknown
+): value is Record<string, unknown> & { accessToken: string } =>
   isRecord(value) &&
   typeof value.accessToken === "string" &&
   value.accessToken !== "";
 /**
  * @param {string} home - Home directory.
  */
-const intellijCandidates = async (home) => {
+const intellijCandidates = async (home: string) => {
   const oauth = await readJson(
     path.join(home, ".config", "github-copilot", "oauth.json")
   );
@@ -215,7 +231,7 @@ const intellijCandidates = async (home) => {
 /**
  * @param {string} home - Home directory.
  */
-const openCodeCopilotCandidates = async (home) => {
+const openCodeCopilotCandidates = async (home: string) => {
   const auth = await readJson(
     path.join(home, ".local", "share", "opencode", "auth.json")
   );
@@ -239,7 +255,7 @@ const openCodeCopilotCandidates = async (home) => {
 /**
  * @param {string} home - Home directory.
  */
-const ghCliCandidates = async (home) => {
+const ghCliCandidates = async (home: string) => {
   const hosts = await readJson(path.join(home, ".config", "gh", "hosts.json"));
   return Object.entries(hosts ?? {}).flatMap(([authority, value]) => {
     const entry = isRecord(value) ? value : {};
@@ -262,7 +278,10 @@ const ghCliCandidates = async (home) => {
  * @param {import("./types.ts").UsageOptions} options - Lookup options.
  * @param {string} home - Home directory.
  */
-const keychainToken = (options, home) => {
+const keychainToken = (
+  options: import("./types.ts").UsageOptions,
+  home: string
+) => {
   if (
     (options.platform ?? process.platform) !== "darwin" ||
     !(home === homedir() || options.execFile !== undefined)
@@ -290,7 +309,10 @@ const keychainToken = (options, home) => {
  * @param {import("./types.ts").UsageOptions} options - Lookup options.
  * @param {string} credential - Explicit token.
  */
-const copilotCandidates = async (options, credential) => {
+const copilotCandidates = async (
+  options: import("./types.ts").UsageOptions,
+  credential: string
+) => {
   const home = options.home ?? homedir();
   const config = await readJson(
     path.join(home, ".copilot", "config.json"),
@@ -330,7 +352,7 @@ const copilotCandidates = async (options, credential) => {
  * @param {Record<string, unknown>} payload - Usage payload.
  * @param {number} now - Current time.
  */
-const copilotReset = (payload, now) => {
+const copilotReset = (payload: Record<string, unknown>, now: number) => {
   if (
     typeof payload.quota_reset_date_utc === "string" &&
     payload.quota_reset_date_utc !== ""
@@ -356,7 +378,7 @@ const COPILOT_PLANS = new Set([
 /**
  * @param {unknown} plan - Plan metadata.
  */
-const planLabel = (plan) => {
+const planLabel = (plan: unknown) => {
   const name =
     typeof plan === "string" && COPILOT_PLANS.has(plan)
       ? plan.replaceAll("_", " ")
@@ -367,7 +389,7 @@ const planLabel = (plan) => {
 /**
  * @param {Record<string, unknown>} payload - Usage payload.
  */
-const groupLabel = (payload) => {
+const groupLabel = (payload: Record<string, unknown>) => {
   if (payload.access_type_sku === "free_limited_copilot") {
     return "Copilot (Free)";
   }
@@ -386,7 +408,7 @@ const QUOTA_METRICS = [
  * @param {unknown} window - Quota payload.
  * @param {number} reset - Reset delay.
  */
-const quotaMetric = (label, window, reset) => {
+const quotaMetric = (label: string, window: unknown, reset: number) => {
   const entitlement =
     isRecord(window) && isFiniteNumber(window.entitlement)
       ? window.entitlement
@@ -420,7 +442,11 @@ const quotaMetric = (label, window, reset) => {
  * @param {number} [index] - Metric index.
  * @returns {import("./types.ts").Metric[]} Valid metrics.
  */
-const quotaMetrics = (payload, reset, index = 0) => {
+const quotaMetrics = (
+  payload: Record<string, unknown>,
+  reset: number,
+  index = 0
+): import("./types.ts").Metric[] => {
   if (index >= QUOTA_METRICS.length) {
     return [];
   }
@@ -443,7 +469,12 @@ const quotaMetrics = (payload, reset, index = 0) => {
  * @param {number} [index] - Candidate index.
  * @returns {Promise<import("./types.ts").Snapshot|undefined|null>} Available usage.
  */
-const fetchCandidate = async (candidates, options, requestJson, index = 0) => {
+const fetchCandidate = async (
+  candidates: { host: string; scheme: string; token: string }[],
+  options: import("./types.ts").UsageOptions,
+  requestJson: import("./types.ts").UsageRuntime["requestJson"],
+  index = 0
+): Promise<import("./types.ts").Snapshot | undefined | null> => {
   const candidate = candidates.at(index);
   if (candidate !== undefined) {
     const { status, payload } = await requestJson(
@@ -484,7 +515,10 @@ const fetchCandidate = async (candidates, options, requestJson, index = 0) => {
  * @param {import("./types.ts").UsageOptions} options Lookup options.
  * @param {import("./types.ts").UsageRuntime} runtime Host-provided usage helpers.
  */
-export const fetchUsage = async (options, { withUsageCache, requestJson }) => {
+export const fetchUsage = async (
+  options: import("./types.ts").UsageOptions,
+  { withUsageCache, requestJson }: import("./types.ts").UsageRuntime
+) => {
   const candidates = await copilotCandidates(
     options,
     typeof options.credential === "string" ? options.credential : ""

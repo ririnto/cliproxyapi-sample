@@ -154,8 +154,8 @@ Codex 사용자 디렉터리에 비어 있지 않은 `AGENTS.override.md`가 있
 ```sh
 dest="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 mkdir -p "$dest/statusline"
-cp .claude/statusline.mjs .claude/subagent-statusline.mjs "$dest/"
-cp .claude/statusline/*.mjs .claude/statusline/providers.json "$dest/statusline/"
+cp .claude/statusline.ts .claude/subagent-statusline.ts "$dest/"
+cp .claude/statusline/*.ts .claude/statusline/providers.json "$dest/statusline/"
 ```
 
 다음 항목을 사용자 [`settings.json`](.claude/settings.json)에 병합한다.
@@ -170,15 +170,16 @@ Claude Code를 재시작한다.
 ```sh
 codex_dir="${CODEX_HOME:-$HOME/.codex}"
 mkdir -p "$codex_dir/statusline"
-cp -i .codex/statusline.mjs "$codex_dir/statusline.mjs"
-cp -i .codex/statusline/*.mjs .codex/statusline/providers.json "$codex_dir/statusline/"
+cp -i .codex/statusline.ts "$codex_dir/statusline.ts"
+cp -i .codex/statusline/*.ts .codex/statusline/providers.json "$codex_dir/statusline/"
 ```
 
 저장소의 `.codex/statusline`은 `.claude/statusline`을 가리키는 심볼릭 링크다.
 설치 명령은 공급자 파일을 Codex 설정 디렉터리에 복사하므로 Claude Code를 설치하지 않아도 된다.
 
 Claude Code와 Codex CLI 상태줄은 `~/.cache/statusline/usage.sqlite`에서 사용량을 공유한다.
-같은 공급자와 계정의 갱신은 한 프로세스만 수행한다.
+같은 공급자와 인증 정보 조합의 갱신은 한 프로세스만 수행한다.
+기본 캐시 유효 시간은 30초이며, 서버가 더 늦은 재시도 시각을 반환하면 그 값을 우선한다.
 다른 세션은 갱신을 기다리지 않고 남아 있는 사용량을 표시한다.
 기존 설치를 갱신할 때는 두 상태줄과 `statusline/`의 모듈을 함께 다시 복사한다.
 
@@ -191,7 +192,7 @@ tui_extensions_statusline = true
 
 [mcp_servers.statusline]
 command = "sh"
-args = ["-c", 'exec node "${CODEX_HOME:-$HOME/.codex}/statusline.mjs"']
+args = ["-c", 'exec node "${CODEX_HOME:-$HOME/.codex}/statusline.ts"']
 env_vars = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "MINIMAX_API_KEY", "MISTRAL_API_KEY", "ZHIPU_API_KEY"]
 
 [mcp_servers.statusline.env]

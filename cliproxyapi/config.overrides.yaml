@@ -8,6 +8,12 @@
         - "your-api-key-3"
   comment: true
   insert: "  api-keys: []"
+- anchor: "  session-affinity: false # default: false"
+  comment: true
+  insert: "  session-affinity: true"
+- anchor: '  session-affinity-ttl: "1h"'
+  comment: true
+  insert: '  session-affinity-ttl: "24h"'
 - anchor: '  #         - ''input.#(type=="additional_tools")#.tools.#(name=="functions")#.tools.#(name=="apply_patch")#'''
   insert: |2-
       payload:
@@ -21,14 +27,21 @@
               - 'input.#(type=="reasoning" && encrypted_content%"gAAAA*")#'
               - 'input.#(type=="reasoning" && encrypted_content%"rsn_*")#'
               - 'input.#(type=="reasoning" && encrypted_content%"smry_*")#'
+              - 'input.#(type=="compaction" && encrypted_content%"gAAAA*")#'
+              - 'input.#(type=="compaction" && encrypted_content%"rsn_*")#'
+              - 'input.#(type=="compaction" && encrypted_content%"smry_*")#'
               - 'input.#(type=="message")#.id'
               - 'input.#(type=="function_call")#.id'
               - 'input.#(type=="custom_tool_call")#.id'
           - models:
-              - name: gpt-*
+              - name: openai/gpt-*
                 protocol: codex
             params:
               - 'input.#(type=="reasoning" && encrypted_content%"?*" && encrypted_content!%"gAAAA*" && encrypted_content!%"rsn_*" && encrypted_content!%"smry_*")#'
+              - 'input.#(type=="compaction" && encrypted_content%"?*" && encrypted_content!%"gAAAA*" && encrypted_content!%"rsn_*" && encrypted_content!%"smry_*")#'
+- anchor: "    optimize-multi-agent-v2: false"
+  comment: true
+  insert: "    optimize-multi-agent-v2: true"
 - anchor: |-
     #         - name: "kimi-k2.5"
     #           alias: "claude-opus-4.66"
@@ -44,3 +57,6 @@
       settings:
         codex:
           # @codex-context
+- anchor: "  disable-image-generation: false"
+  comment: true
+  insert: '  disable-image-generation: "chat"'

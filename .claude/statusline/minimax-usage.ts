@@ -5,21 +5,24 @@ const USAGE_URL =
  * @param {unknown} value Value to validate.
  * @returns {value is import("./types.ts").JsonRecord} Whether the value has the required shape.
  */
-const isRecord = (value) =>
+const isRecord = (value: unknown): value is import("./types.ts").JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
  * @param {unknown} value Value to validate.
  * @returns {value is number} Whether the value has the required shape.
  */
-const isFiniteNumber = (value) =>
+const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
 /**
  * @param {(import("./types.ts").Metric | undefined)[]} metrics Values.
  * @param {string} [label] Tier label.
  */
-const snapshot = (metrics, label) => {
+const snapshot = (
+  metrics: (import("./types.ts").Metric | undefined)[],
+  label?: string
+) => {
   const validMetrics = metrics.filter((metric) => metric !== undefined);
   return validMetrics.length
     ? {
@@ -39,7 +42,12 @@ const snapshot = (metrics, label) => {
  * @param {number} resetsInMs Reset delay.
  * @returns {import("./types.ts").Metric | undefined} Normalized metric.
  */
-const usageMetric = (label, used, total, resetsInMs) =>
+const usageMetric = (
+  label: string,
+  used: unknown,
+  total: unknown,
+  resetsInMs: number
+): import("./types.ts").Metric | undefined =>
   isFiniteNumber(used) && isFiniteNumber(total) && used >= 0 && total >= 0
     ? {
         label,
@@ -53,7 +61,7 @@ const usageMetric = (label, used, total, resetsInMs) =>
 /**
  * @param {import("./types.ts").JsonRecord} model Valid model record.
  */
-const usageSnapshot = (model) => {
+const usageSnapshot = (model: import("./types.ts").JsonRecord) => {
   const intervalTotal = isFiniteNumber(model.current_interval_total_count)
     ? Math.max(0, model.current_interval_total_count)
     : 0;
@@ -96,7 +104,10 @@ const usageSnapshot = (model) => {
  * @returns {Promise<import("./types.ts").Snapshot|undefined>} Result.
  * @param {import("./types.ts").UsageRuntime["requestJson"]} requestJson Host HTTP transport.
  */
-const fetchUsageUncached = async (options, requestJson) => {
+const fetchUsageUncached = async (
+  options: import("./types.ts").UsageOptions,
+  requestJson: import("./types.ts").UsageRuntime["requestJson"]
+): Promise<import("./types.ts").Snapshot | undefined> => {
   const credential =
     typeof options.credential === "string" ? options.credential : "";
   const { payload } = credential
@@ -113,7 +124,7 @@ const fetchUsageUncached = async (options, requestJson) => {
   /**
    * @type {unknown[] | null}
    */
-  const entries =
+  const entries: unknown[] | null =
     payload !== undefined &&
     isRecord(payload.base_resp) &&
     payload.base_resp.status_code === 0 &&
@@ -133,7 +144,10 @@ const fetchUsageUncached = async (options, requestJson) => {
  * @param {import("./types.ts").UsageOptions} options Lookup options.
  * @param {import("./types.ts").UsageRuntime} runtime Host-provided usage helpers.
  */
-export const fetchUsage = async (options, { withUsageCache, requestJson }) => {
+export const fetchUsage = async (
+  options: import("./types.ts").UsageOptions,
+  { withUsageCache, requestJson }: import("./types.ts").UsageRuntime
+) => {
   const credential =
     typeof options.credential === "string" ? options.credential : "";
   return credential

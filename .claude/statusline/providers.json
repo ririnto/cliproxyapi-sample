@@ -1,26 +1,26 @@
 [
   {
     "name": "Claude",
-    "module": "claude-usage.mjs",
+    "module": "claude-usage.ts",
     "primary": true,
     "skipWhenNativeUsage": true
   },
   {
     "name": "GLM",
-    "module": "glm-usage.mjs",
+    "module": "glm-usage.ts",
     "credentialEnv": "ZHIPU_API_KEY",
     "hideName": true
   },
-  { "name": "ChatGPT", "module": "codex-usage.mjs" },
-  { "name": "Copilot", "module": "copilot-usage.mjs" },
+  { "name": "ChatGPT", "module": "codex-usage.ts" },
+  { "name": "Copilot", "module": "copilot-usage.ts" },
   {
     "name": "Mistral",
-    "module": "mistral-usage.mjs",
+    "module": "mistral-usage.ts",
     "credentialEnv": "MISTRAL_API_KEY"
   },
   {
     "name": "MiniMax",
-    "module": "minimax-usage.mjs",
+    "module": "minimax-usage.ts",
     "credentialEnv": "MINIMAX_API_KEY"
   }
 ]
