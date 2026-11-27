@@ -38,23 +38,15 @@ const parseAgent = (markdown: string): AgentDefinition => {
   };
 };
 
-const fetchMarkdown = async (source: AgentSource) => {
-  const response = await fetch(source.url, {
-    headers: { accept: "text/plain" },
-    signal: AbortSignal.timeout(20_000)
-  });
-  assert.ok(
-    response.ok,
-    `Could not fetch ${source.url}: HTTP ${response.status}`
-  );
-  return await response.text();
-};
-
 const outputs = await Promise.all(
-  sources.map(async (source) => ({
-    path: source.path,
-    contents: stringify(parseAgent(await fetchMarkdown(source)))
-  }))
+  sources.map(async ({ url, path }) => {
+    const response = await fetch(url, {
+      headers: { accept: "text/plain" },
+      signal: AbortSignal.timeout(20_000)
+    });
+    assert.ok(response.ok, `Could not fetch ${url}: HTTP ${response.status}`);
+    return { path, contents: stringify(parseAgent(await response.text())) };
+  })
 );
 await Promise.all(
   outputs.map(async ({ path, contents }) => {

@@ -198,9 +198,7 @@ visit(modelsDocument, {
     }
   }
 });
-/** @type {unknown} */
-const rawConfig: unknown = modelsDocument.toJS();
-const modelConfig = readMap(rawConfig);
+const modelConfig = readMap(modelsDocument.toJS());
 const defaultContextWindow = readWindow(modelConfig.default_context_window);
 const zai = readMap(readMap(readMap(modelConfig.routes).claude).zai);
 const sources = readList(modelConfig.sources).map(readMap);
@@ -306,11 +304,12 @@ const renderConfig = (template: string, catalog: CatalogModel[]) => {
     ...Object.keys(aliases)
   ].map((slug) => {
     const target = entries.get(aliases[slug] ?? slug);
-    const maximum = target?.max_context_window ?? target?.context_window;
-    const context = readWindow(maximum);
     return {
       name: slug,
-      "max-context-length": Math.min(context, defaultContextWindow)
+      "max-context-length": Math.min(
+        readWindow(target?.max_context_window ?? target?.context_window),
+        defaultContextWindow
+      )
     };
   });
   const sections = [
