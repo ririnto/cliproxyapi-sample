@@ -241,7 +241,7 @@ const taskLabel = (
  * @param {unknown} input - input input.
  * @param {number} nowMs - nowMs input.
  */
-export const renderRows = (input: unknown, nowMs: number) => {
+const renderRows = (input: unknown, nowMs: number) => {
   if (!isRecord(input)) {
     throw new TypeError("Status payload must be an object");
   }
@@ -376,7 +376,7 @@ export const renderRows = (input: unknown, nowMs: number) => {
     });
 };
 
-export const main = () => {
+if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
   const rows = renderRows(
     record(parseJson(readFileSync(0, "utf-8"))),
     Date.now()
@@ -384,8 +384,4 @@ export const main = () => {
   if (rows.length) {
     process.stdout.write(`${rows.join("\n")}\n`);
   }
-};
-
-if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
-  main();
 }

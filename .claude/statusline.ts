@@ -12,14 +12,7 @@ import { stripVTControlCharacters } from "node:util";
 import { withUsageCache } from "./statusline/usage-cache.ts";
 
 type RecordValue = Record<string, unknown>;
-interface RenderOptions {
-  addons?: unknown;
-  branch?: string;
-  cwd?: string;
-  nowMs?: number;
-  nativeUsage?: boolean | null;
-  importModule?: (url: URL) => unknown;
-}
+type ProviderAddon = RecordValue & { script: string; credential: string };
 /**
  * @param {unknown} value - Untrusted input.
  * @returns {RecordValue} Object fields or an empty record.
@@ -244,7 +237,7 @@ const isFiniteNumber = (value: unknown): value is number =>
 /**
  * @param {unknown} window - window input.
  */
-const windowPercentage = (window: unknown) => {
+const usedPercentage = (window: unknown) => {
   const percentage = record(window).used_percentage;
   return isFiniteNumber(percentage) && percentage >= 0 ? percentage : null;
 };
@@ -261,25 +254,17 @@ const spendDollarPair = (window: unknown) => {
 };
 
 /**
- * @param {unknown} window - window input.
- */
-const spendPercentage = (window: unknown) => {
-  const percentage = record(window).used_percentage;
-  return isFiniteNumber(percentage) && percentage >= 0 ? percentage : null;
-};
-
-/**
  * @param {unknown} rateLimits - rateLimits input.
  */
 const nativeUsageFor = (rateLimits: unknown) => {
   if (!isRecord(rateLimits)) {
-    return null;
+    return false;
   }
   return (
     [rateLimits.five_hour, rateLimits.seven_day].some(
-      (window) => windowPercentage(window) !== null
+      (window) => usedPercentage(window) !== null
     ) ||
-    spendPercentage(rateLimits.spend_limit) !== null ||
+    usedPercentage(rateLimits.spend_limit) !== null ||
     spendDollarPair(rateLimits.spend_limit) !== null
   );
 };
@@ -297,7 +282,7 @@ const windowRow = (
   nowMs: number
 ) => {
   const window = rateLimits?.[key];
-  const percentage = windowPercentage(window);
+  const percentage = usedPercentage(window);
   if (percentage === null) {
     return "";
   }
@@ -312,24 +297,6 @@ const windowRow = (
 };
 
 /**
- * @param {{used:number,limit:number} | null} dollars - dollars input.
- * @param {number} percentage - percentage input.
- */
-const spendMetric = (
-  dollars: { used: number; limit: number } | null,
-  percentage: number
-) =>
-  dollars
-    ? {
-        label: "spend",
-        percentage: (dollars.used / dollars.limit) * 100,
-        total: dollars.limit,
-        type: "budget",
-        used: dollars.used
-      }
-    : { label: "spend", percentage, type: "percentage" };
-
-/**
  * @param {RecordValue} rateLimits - rateLimits input.
  * @param {number} nowMs - nowMs input.
  */
@@ -338,11 +305,19 @@ const spendRow = (rateLimits: RecordValue, nowMs: number) => {
   const dollars = spendDollarPair(spend);
   const percentage = dollars
     ? (dollars.used / dollars.limit) * 100
-    : spendPercentage(spend);
+    : usedPercentage(spend);
   if (percentage === null) {
     return "";
   }
-  const metric = spendMetric(dollars, percentage);
+  const metric = dollars
+    ? {
+        label: "spend",
+        percentage,
+        total: dollars.limit,
+        type: "budget",
+        used: dollars.used
+      }
+    : { label: "spend", percentage, type: "percentage" };
   return renderMetric(
     isFiniteNumber(spend?.resets_at)
       ? { ...metric, resetsInMs: Math.trunc(spend.resets_at * 1000 - nowMs) }
@@ -365,7 +340,7 @@ const renderRateLimits = (rateLimits: RecordValue, nowMs: number) =>
  * @param {RecordValue} addon - addon input.
  * @param {unknown} snapshot - snapshot input.
  */
-export const renderSnapshot = (addon: RecordValue, snapshot: unknown) => {
+const renderSnapshot = (addon: RecordValue, snapshot: unknown) => {
   if (!isRecord(snapshot) || !Array.isArray(snapshot.groups)) {
     return "";
   }
@@ -407,23 +382,6 @@ export const renderSnapshot = (addon: RecordValue, snapshot: unknown) => {
     .filter(Boolean)
     .join(GROUP_SEPARATOR);
 };
-
-/**
- * @param {unknown} addons - addons input.
- * @returns {(RecordValue & {script:string})[]} Enabled script definitions.
- */
-const addonSettings = (addons: unknown): (RecordValue & { script: string })[] =>
-  array(addons).flatMap((addon) => {
-    if (
-      !isRecord(addon) ||
-      addon.enabled === false ||
-      typeof addon.script !== "string" ||
-      addon.script.trim() === ""
-    ) {
-      return [];
-    }
-    return [{ ...addon, script: addon.script.trim() }];
-  });
 
 /**
  * @param {string} script - script input.
@@ -494,29 +452,13 @@ const requestJson: import("./statusline/types.ts").UsageRuntime["requestJson"] =
     }
   };
 
-export const usageRuntime = { withUsageCache, requestJson };
+const usageRuntime = { withUsageCache, requestJson };
 
-/**
- * @param {{script:string}} addon - addon input.
- * @param {RenderOptions} options - options input.
- */
-const importAddonModule = async (
-  addon: { script: string },
-  options: RenderOptions
-) => {
+const importAddonModule = async (script: string) => {
   /**
    * @type {unknown}
    */
-  const module: unknown = await (
-    options.importModule ??
-    (async (url) => {
-      /**
-       * @type {unknown}
-       */
-      const imported: unknown = await import(url.href);
-      return imported;
-    })
-  )(pathToFileURL(scriptPath(addon.script)));
+  const module: unknown = await import(pathToFileURL(scriptPath(script)).href);
   if (!isRecord(module) || typeof module.fetchUsage !== "function") {
     return null;
   }
@@ -529,31 +471,21 @@ const importAddonModule = async (
     Reflect.apply(fetchUsage, module, [input, usageRuntime]);
 };
 
-/**
- * @param {unknown} addons - addons input.
- * @param {RenderOptions} options - options input.
- */
 const renderAddonResults = async (
-  addons: unknown,
-  options: RenderOptions = {}
+  addons: ProviderAddon[],
+  nativeUsage: boolean
 ) => {
   const results = await Promise.all(
-    addonSettings(addons)
-      .filter(
-        (addon) =>
-          !(options.nativeUsage === true && addon.skipWhenNativeUsage === true)
-      )
+    addons
+      .filter((addon) => !(nativeUsage && addon.skipWhenNativeUsage === true))
       .map(async (addon) => {
         try {
-          const module = await importAddonModule(addon, options);
+          const fetchUsage = await importAddonModule(addon.script);
           /**
            * @type {unknown}
            */
-          const snapshot: unknown = module
-            ? await module({
-                credential:
-                  typeof addon.credential === "string" ? addon.credential : ""
-              })
+          const snapshot: unknown = fetchUsage
+            ? await fetchUsage({ credential: addon.credential })
             : undefined;
           const line = renderSnapshot(addon, snapshot);
           return line ? { line, primary: Boolean(addon.primary) } : null;
@@ -563,21 +495,6 @@ const renderAddonResults = async (
       })
   );
   return results.filter((result) => result !== null);
-};
-
-/**
- * @param {RecordValue} workspace - workspace input.
- */
-const projectDisplay = (workspace: RecordValue) => {
-  const currentDir = textOr(
-    workspace.current_dir,
-    textOr(workspace.project_dir, process.cwd())
-  );
-  const projectDir = textOr(workspace.project_dir, currentDir);
-  const projectName = path.basename(projectDir);
-  return currentDir === projectDir
-    ? projectName
-    : `${projectName}/${path.basename(currentDir)}`;
 };
 
 /**
@@ -597,11 +514,7 @@ const renderContext = (input: RecordValue) => {
     : `Context ${DIM}${size ? numberText(size) : "waiting"}${RESET}`;
 };
 
-/**
- * @param {RecordValue} input - input input.
- * @param {RenderOptions} options - options input.
- */
-const renderHeader = (input: RecordValue, options: RenderOptions) => {
+const renderHeader = (input: RecordValue, cwd: string) => {
   const model = record(input.model);
   const displayName = model.display_name;
   const modelName = truthy(displayName)
@@ -621,14 +534,16 @@ const renderHeader = (input: RecordValue, options: RenderOptions) => {
       ? [seconds < 60 ? `${seconds}s` : `${Math.trunc(seconds / 60)}m`]
       : [])
   ];
-  const branch =
-    options.branch ??
-    gitBranch(
-      textOr(options.cwd, textOr(workspace.current_dir, process.cwd()))
-    );
+  const branch = gitBranch(cwd);
+  const currentDir = textOr(
+    workspace.current_dir,
+    textOr(workspace.project_dir, process.cwd())
+  );
+  const projectDir = textOr(workspace.project_dir, currentDir);
+  const projectName = path.basename(projectDir);
   return [
     `${MODEL_COLOR}${BOLD}${displayText(modelName)}${RESET}${truthy(effort) ? ` ${DIM}${displayText(effort)}${RESET}` : ""}`,
-    `${GREEN}${displayText(projectDisplay(workspace))}${RESET}`,
+    `${GREEN}${displayText(currentDir === projectDir ? projectName : `${projectName}/${path.basename(currentDir)}`)}${RESET}`,
     ...(branch ? [`${BLUE}${displayText(branch)}${RESET}`] : []),
     ...(details.length ? [`${DIM}${details.join(" · ")}${RESET}`] : []),
     renderContext(input)
@@ -691,31 +606,26 @@ const packProviderRows = (rows: string[]) => {
   });
 };
 
-/**
- * @param {RecordValue} input - input input.
- * @param {RenderOptions} options - options input.
- */
-export const renderStatusline = async (
+const renderStatusline = async (
   input: RecordValue,
-  options: RenderOptions = {}
+  addons: ProviderAddon[],
+  cwd: string
 ) => {
-  const nowMs = options.nowMs ?? Date.now();
-  const nativeRate = renderRateLimits(record(input.rate_limits), nowMs);
-  const addonResults = await renderAddonResults(options.addons ?? [], {
-    ...options,
-    nativeUsage: nativeUsageFor(input.rate_limits)
-  });
+  const nativeRate = renderRateLimits(record(input.rate_limits), Date.now());
+  const addonResults = await renderAddonResults(
+    addons,
+    nativeUsageFor(input.rate_limits)
+  );
   const primaryIndex = nativeRate.length
     ? -1
     : addonResults.findIndex((result) => result.primary);
-  const header = [renderHeader(input, options), renderTokens(input)]
-    .filter(Boolean)
-    .join(SEPARATOR);
   const primary = nativeRate.length
     ? `${PROVIDER}Claude${RESET}  ${nativeRate.join(SEPARATOR)}`
     : addonResults[primaryIndex]?.line || "";
   return [
-    header,
+    [renderHeader(input, cwd), renderTokens(input)]
+      .filter(Boolean)
+      .join(SEPARATOR),
     ...packProviderRows(
       [
         primary,
@@ -727,7 +637,7 @@ export const renderStatusline = async (
   ];
 };
 
-const readProviderAddons = async () => {
+const readProviderAddons = async (): Promise<ProviderAddon[]> => {
   /**
    * @type {unknown}
    */
@@ -747,8 +657,9 @@ const readProviderAddons = async () => {
   }
   return array(registry).flatMap((entry) => {
     const provider = record(entry);
-    const { name, module, credentialEnv } = provider;
+    const { enabled, name, module, credentialEnv } = provider;
     if (
+      enabled === false ||
       typeof name !== "string" ||
       typeof module !== "string" ||
       path.basename(module) !== module ||
@@ -770,17 +681,18 @@ const readProviderAddons = async () => {
   });
 };
 
-export const main = async () => {
+const main = async () => {
   try {
     /**
      * @type {unknown}
      */
     const parsed: unknown = JSON.parse(readFileSync(0, "utf-8"));
     const input = record(parsed);
-    const rows = await renderStatusline(input, {
-      addons: await readProviderAddons(),
-      cwd: textOr(record(input.workspace).current_dir, process.cwd())
-    });
+    const rows = await renderStatusline(
+      input,
+      await readProviderAddons(),
+      textOr(record(input.workspace).current_dir, process.cwd())
+    );
     process.stdout.write(`${rows.join("\n")}\n`);
   } catch (error) {
     if (truthy(process.env.STATUSLINE_DEBUG)) {

@@ -655,13 +655,9 @@ const runServer = async () => {
      * @type {ProviderRow[]}
      */
     let lines: ProviderRow[] = [];
-    /**
-     * @param {ProviderRow[]} result Rendered addon lines sent by the worker.
-     */
-    const receiveLines = (result: ProviderRow[]) => {
+    current.once("message", (result: ProviderRow[]) => {
       lines = result;
-    };
-    current.once("message", receiveLines);
+    });
     current.once("error", reportAddonFailure);
     current.once("exit", () => {
       clearTimeout(deadline);
