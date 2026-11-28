@@ -1,11 +1,12 @@
-import { execFileSync } from "node:child_process";
+import { fork, spawn } from "node:child_process";
+import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delayMs } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
-import { isMainThread, parentPort, Worker } from "node:worker_threads";
 
+import type { UsageRuntime } from "./statusline/types.ts";
 import { withUsageCache } from "./statusline/usage-cache.ts";
 
 /**
@@ -95,6 +96,16 @@ interface ProviderRow {
   spans: Span[];
   codexWindows: QuotaWindow[];
 }
+interface ProviderUpdate {
+  index: number;
+  key: string | null;
+  rows: ProviderRow[] | null;
+  fetchedAt: number | null;
+}
+type RefreshMessage = ProviderUpdate | { providerCount: number };
+
+const responseBudgetMs = 800;
+const staleUsageMs = 30 * 60_000;
 
 /**
  * @param {string} value Text to display.
@@ -124,58 +135,62 @@ const quota = (value: string, percent: number): Span => {
   return colored(value, percent < 30 ? "#F2B590" : "#ABDFA7");
 };
 
-/** @type {import("./statusline/types.ts").UsageRuntime["requestJson"]} */
-const requestJson: import("./statusline/types.ts").UsageRuntime["requestJson"] =
-  async (url, headers, fetchFunction, onUsageError) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, 3000);
-    try {
-      const response = await fetchFunction(url, {
-        headers,
-        method: "GET",
-        signal: controller.signal
-      });
-      if (!Number.isFinite(response.status)) {
-        return { status: undefined };
-      }
-      if (response.status < 200 || response.status >= 300) {
-        try {
-          await Promise.race([
-            response.body?.cancel(),
-            delayMs(3000, undefined, { signal: controller.signal })
-          ]);
-        } catch {
-          if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
-            console.error(
-              `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
-            );
-          }
-        }
-        controller.abort();
-        return { status: response.status };
-      }
+/** @type {UsageRuntime["requestJson"]} */
+const requestJson: UsageRuntime["requestJson"] = async (
+  url,
+  headers,
+  fetchFunction,
+  onUsageError
+) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 3000);
+  try {
+    const response = await fetchFunction(url, {
+      headers,
+      method: "GET",
+      signal: controller.signal
+    });
+    if (!Number.isFinite(response.status)) {
+      return { status: undefined };
+    }
+    if (response.status < 200 || response.status >= 300) {
       try {
-        /**
-         * @type {unknown}
-         */
-        const payload: unknown = await response.json();
-        if (!isRecord(payload)) {
-          onUsageError?.();
-          return { status: response.status };
-        }
-        return { payload, status: response.status };
+        await Promise.race([
+          response.body?.cancel(),
+          delayMs(3000, undefined, { signal: controller.signal })
+        ]);
       } catch {
+        if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
+          console.error(
+            `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
+          );
+        }
+      }
+      controller.abort();
+      return { status: response.status };
+    }
+    try {
+      /**
+       * @type {unknown}
+       */
+      const payload: unknown = await response.json();
+      if (!isRecord(payload)) {
         onUsageError?.();
         return { status: response.status };
       }
+      return { payload, status: response.status };
     } catch {
-      return { status: undefined };
-    } finally {
-      clearTimeout(timeout);
+      onUsageError?.();
+      return { status: response.status };
     }
-  };
+  } catch {
+    return { status: undefined };
+  } finally {
+    clearTimeout(timeout);
+  }
+};
 
 const usageRuntime = { withUsageCache, requestJson };
 
@@ -308,7 +323,13 @@ const renderGroup = (
 /**
  * @param {unknown} rawProvider One entry from the Codex provider list.
  */
-const collectProvider = async (rawProvider: unknown) => {
+const collectProvider = async (rawProvider: unknown, index: number) => {
+  const noUsage: ProviderUpdate = {
+    index,
+    key: null,
+    rows: null,
+    fetchedAt: null
+  };
   const { module, name, credentialEnv, enabled, showAbove } =
     record(rawProvider);
   if (
@@ -318,7 +339,8 @@ const collectProvider = async (rawProvider: unknown) => {
     path.basename(module) !== module ||
     !module.endsWith(".ts")
   ) {
-    return [];
+    process.send?.(noUsage);
+    return;
   }
   const credential =
     typeof credentialEnv === "string" ? process.env[credentialEnv] : undefined;
@@ -326,26 +348,45 @@ const collectProvider = async (rawProvider: unknown) => {
     typeof credentialEnv === "string" &&
     (credential === undefined || credential.length === 0)
   ) {
-    return [];
+    process.send?.(noUsage);
+    return;
   }
   try {
     const { fetchUsage } = record(
       await import(new URL(`statusline/${module}`, import.meta.url).href)
     );
     if (typeof fetchUsage !== "function") {
-      return [];
+      process.send?.(noUsage);
+      return;
     }
-    const { groups } = record(
-      await Reflect.apply(fetchUsage, undefined, [{ credential }, usageRuntime])
-    );
-    return list(groups).flatMap((group) =>
-      renderGroup(group, display(name), finite(showAbove) ?? 0.001)
-    );
+    let cacheKey: string | null = null;
+    const publish = (key: string | null, snapshot: unknown) => {
+      cacheKey = key;
+      if (process.connected) {
+        const update: ProviderUpdate = {
+          index,
+          key,
+          fetchedAt: finite(record(snapshot).fetchedAt),
+          rows: isRecord(snapshot)
+            ? list(snapshot.groups)
+                .slice(0, 12)
+                .flatMap((group) =>
+                  renderGroup(group, display(name), finite(showAbove) ?? 0.001)
+                )
+            : null
+        };
+        process.send?.(update);
+      }
+    };
+    const snapshot: unknown = await Reflect.apply(fetchUsage, undefined, [
+      { credential, onCachedUsage: publish },
+      usageRuntime
+    ]);
+    publish(cacheKey, snapshot);
   } catch {
     if (process.env.STATUSLINE_DEBUG === "1") {
       console.error("[statusline] provider usage unavailable");
     }
-    return [];
   }
 };
 
@@ -364,10 +405,10 @@ const collectAddons = async () => {
     if (process.env.STATUSLINE_DEBUG === "1") {
       console.error("[statusline] provider registry unavailable");
     }
-    return [];
+    return;
   }
-  const rows = await Promise.all(providers.map(collectProvider));
-  return rows.flat().slice(0, 12);
+  process.send?.({ providerCount: providers.length } satisfies RefreshMessage);
+  await Promise.all(providers.map(collectProvider));
 };
 
 const graphemes = new Intl.Segmenter();
@@ -390,25 +431,30 @@ const preventSoftWrap = (line: Span[]) =>
 /**
  * @param {unknown} cwd Active thread working directory.
  */
-const workspaceItems = (cwd: unknown) => {
+const workspaceBranch = async (cwd: unknown) => {
   if (typeof cwd !== "string" || cwd.length === 0) {
-    return [];
+    return "";
   }
-  const items = [colored(display(path.basename(cwd) || cwd), "#ABDFA7")];
   try {
-    const branch = execFileSync("git", ["branch", "--show-current"], {
+    const git = spawn("git", ["branch", "--show-current"], {
       cwd,
-      encoding: "utf-8",
+      killSignal: "SIGKILL",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 150
-    }).trim();
-    if (branch.length > 0) {
-      items.push(colored(display(branch), "#8FB3EF"));
-    }
+    });
+    let stdout = "";
+    git.stdout.setEncoding("utf-8").on("data", (chunk: string) => {
+      stdout += chunk;
+      if (stdout.length > 4096) {
+        git.kill("SIGKILL");
+      }
+    });
+    const result: unknown[] = await once(git, "close");
+    const [code] = result;
+    return code === 0 ? display(stdout.trim()) : "";
   } catch {
-    return items;
+    return "";
   }
-  return items;
 };
 
 /**
@@ -564,9 +610,15 @@ const pack = (groups: Span[][]) => {
  * @param {unknown} state Codex statusline snapshot.
  * @param {ProviderRow[]} addonRows Rendered usage from installed addons.
  */
-const render = (state: unknown, addonRows: ProviderRow[]) => {
+const render = (
+  state: unknown,
+  branch: string,
+  addonRows: ProviderRow[],
+  oldestCachedAt: string
+) => {
   const { thread, account } = record(state);
   const { model, workspace, usage } = record(thread);
+  const { cwd } = record(workspace);
   const { display_name: name, reasoning_level: effort } = record(model);
   const modelSpans = [colored(display(name) || "Codex", "#F6E2B7", "bold")];
   if (typeof effort === "string" && effort.length > 0) {
@@ -574,7 +626,13 @@ const render = (state: unknown, addonRows: ProviderRow[]) => {
   }
   const header = [
     modelSpans,
-    ...workspaceItems(record(workspace).cwd).map((item) => [item]),
+    ...(oldestCachedAt.length > 0
+      ? [[colored(`oldest cached ${oldestCachedAt}`, dim)]]
+      : []),
+    ...(typeof cwd === "string" && cwd.length > 0
+      ? [[colored(display(path.basename(cwd) || cwd), "#ABDFA7")]]
+      : []),
+    ...(branch.length > 0 ? [[colored(branch, "#8FB3EF")]] : []),
     ...usageItems(usage)
   ].flatMap((group, index) =>
     index === 0 ? group : [colored(" · ", dim), ...group]
@@ -619,6 +677,9 @@ const tool = {
 };
 const resource = { name: "footer", uri, mimeType: "application/json" };
 
+const formatFetchedAt = (fetchedAt: number) =>
+  `${new Date(fetchedAt).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+
 const reportAddonFailure = () => {
   if (process.env.STATUSLINE_DEBUG === "1") {
     console.error("[statusline] provider usage collection unavailable");
@@ -626,53 +687,110 @@ const reportAddonFailure = () => {
 };
 
 const runServer = async () => {
-  /**
-   * @type {Worker | null}
-   */
-  let worker: Worker | null = null;
+  let refresh: Promise<void> | null = null;
   let nextRefresh = 0;
-  /**
-   * @type {ProviderRow[]}
-   */
-  let addonRows: ProviderRow[] = [];
+  const providers: ProviderUpdate[] = [];
 
-  const refreshAddons = () => {
-    if (worker !== null || performance.now() < nextRefresh) {
-      return;
+  const refreshAddons = async () => {
+    if (refresh === null && performance.now() >= nextRefresh) {
+      const collect = async () => {
+        const child = fork(import.meta.filename, ["--refresh-usage"], {
+          detached: true,
+          stdio: ["ignore", "ignore", "ignore", "ipc"]
+        });
+        child.on("message", (update: RefreshMessage) => {
+          if ("providerCount" in update) {
+            providers.length = update.providerCount;
+            return;
+          }
+          const previous = providers[update.index];
+          if (update.rows !== null || update.key !== (previous?.key ?? null)) {
+            providers[update.index] = update;
+          }
+        });
+        child.channel?.unref();
+        child.unref();
+        await once(child, "close");
+      };
+      refresh = collect()
+        .catch(reportAddonFailure)
+        .finally(() => {
+          nextRefresh = performance.now() + 15_000;
+          refresh = null;
+        });
     }
-    // Keep Keychain and network calls outside the MCP resource deadline.
-    const current = new Worker(new URL(import.meta.url), {
-      stdout: true,
-      stderr: true
-    });
-    worker = current;
-    current.stdout.resume();
-    current.stderr.resume();
-    const deadline = setTimeout(() => {
-      current.terminate().catch(reportAddonFailure);
-    }, 12_000).unref();
-    /**
-     * @type {ProviderRow[]}
-     */
-    let lines: ProviderRow[] = [];
-    current.once("message", (result: ProviderRow[]) => {
-      lines = result;
-    });
-    current.once("error", reportAddonFailure);
-    current.once("exit", () => {
-      clearTimeout(deadline);
-      addonRows = lines;
-      nextRefresh = performance.now() + 15_000;
-      worker = null;
-    });
-    current.unref();
+    await refresh;
+  };
+
+  const readFooter = async (state: unknown, deadline: number) => {
+    let branch = "";
+    const lookupBranch = async () => {
+      branch = await workspaceBranch(
+        record(record(record(state).thread).workspace).cwd
+      );
+    };
+    const timer = new AbortController();
+    try {
+      await Promise.race([
+        delayMs(Math.max(0, deadline - performance.now()), undefined, {
+          signal: timer.signal
+        }),
+        Promise.all([lookupBranch(), refreshAddons()])
+      ]);
+    } finally {
+      timer.abort();
+    }
+    const now = Date.now();
+    let oldestCachedAt = Number.POSITIVE_INFINITY;
+    const addonRows = providers
+      .flatMap(({ rows, fetchedAt }) => {
+        if (rows === null) {
+          return [];
+        }
+        if (fetchedAt === null || now - fetchedAt <= staleUsageMs) {
+          return rows;
+        }
+        if (rows.length > 0) {
+          oldestCachedAt = Math.min(oldestCachedAt, fetchedAt);
+        }
+        return rows.map((row) => ({
+          ...row,
+          spans: [
+            ...row.spans,
+            colored(` · cached ${formatFetchedAt(fetchedAt)}`, dim)
+          ]
+        }));
+      })
+      .slice(0, 12);
+    return {
+      contents: [
+        {
+          uri,
+          mimeType: resource.mimeType,
+          text: JSON.stringify(
+            render(
+              state,
+              branch,
+              addonRows,
+              oldestCachedAt === Number.POSITIVE_INFINITY
+                ? ""
+                : formatFetchedAt(oldestCachedAt)
+            )
+          )
+        }
+      ]
+    };
   };
 
   /**
    * @param {string} method MCP request method.
    * @param {unknown} rawParams MCP request parameters.
    */
-  const respond = (method: string, rawParams: unknown) => {
+  const respond = async (
+    method: string,
+    rawParams: unknown,
+    deadline: number
+  ) => {
     const params = record(rawParams);
     switch (method) {
       case "initialize": {
@@ -704,21 +822,9 @@ const runServer = async () => {
         return { resourceTemplates: [] };
       }
       case "resources/read": {
-        if (params.uri !== uri) {
-          return null;
-        }
-        refreshAddons();
-        return {
-          contents: [
-            {
-              uri,
-              mimeType: resource.mimeType,
-              text: JSON.stringify(
-                render(record(params._meta)[stateKey], addonRows)
-              )
-            }
-          ]
-        };
+        return params.uri === uri
+          ? await readFooter(record(params._meta)[stateKey], deadline)
+          : null;
       }
       default: {
         return null;
@@ -726,10 +832,8 @@ const runServer = async () => {
     }
   };
 
-  for await (const line of createInterface({
-    input: process.stdin,
-    crlfDelay: Number.POSITIVE_INFINITY
-  })) {
+  const handleRequest = async (line: string) => {
+    const deadline = performance.now() + responseBudgetMs;
     let request;
     try {
       request = record(JSON.parse(line));
@@ -740,13 +844,13 @@ const runServer = async () => {
       process.stdout.write(
         `${JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32_700, message: "Parse error" } })}\n`
       );
-      continue;
+      return;
     }
     let reply;
     if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
       reply = { error: { code: -32_600, message: "Invalid request" } };
     } else if (Object.hasOwn(request, "id")) {
-      const result = respond(request.method, request.params);
+      const result = await respond(request.method, request.params, deadline);
       if (result !== null) {
         reply = { result };
       } else if (
@@ -763,11 +867,24 @@ const runServer = async () => {
         `${JSON.stringify({ jsonrpc: "2.0", id: request.id ?? null, ...reply })}\n`
       );
     }
+  };
+
+  for await (const line of createInterface({
+    input: process.stdin,
+    crlfDelay: Number.POSITIVE_INFINITY
+  })) {
+    handleRequest(line).catch(() => {
+      if (process.env.STATUSLINE_DEBUG === "1") {
+        console.error("[statusline] MCP response unavailable");
+      }
+    });
   }
 };
 
-if (isMainThread) {
-  await runServer();
+if (process.argv[2] === "--refresh-usage") {
+  process.on("error", reportAddonFailure);
+  setTimeout(() => process.exit(1), 20_000).unref();
+  await collectAddons();
 } else {
-  parentPort?.postMessage(await collectAddons(), []);
+  await runServer();
 }

@@ -28,6 +28,7 @@ export type Metric = Readonly<
     }
 >;
 export interface Snapshot {
+  readonly fetchedAt?: number;
   readonly groups: readonly Readonly<{
     label?: string;
     metrics: readonly Metric[];
@@ -49,6 +50,7 @@ export interface UsageOptions {
   now?: number | Date;
   fetch?: Fetch;
   onUsageError?: () => void;
+  onCachedUsage?: (key: string, snapshot: Snapshot | null) => void;
   cache?: boolean;
   cacheDir?: string;
   cacheTtlMs?: number;

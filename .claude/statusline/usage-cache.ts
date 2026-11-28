@@ -3,6 +3,9 @@ import { closeSync, mkdirSync, openSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { setTimeout as delay } from "node:timers/promises";
+
+import type { Metric, Snapshot, UsageRuntime } from "./types.ts";
 
 /**
  * @param {unknown} value Candidate object.
@@ -23,12 +26,14 @@ const DEFAULT_USAGE_CACHE_TTL_MS = 30_000;
 const REFRESH_LEASE_MS = 15_000;
 const REFRESH_DEADLINE_MS = 9000;
 const PUBLISH_WAIT_MS = 40;
+const CONTENTION_WAIT_MS = 4000;
+const CONTENTION_RETRY_MS = 100;
 
 /**
  * @param {unknown} value Untrusted metric.
- * @returns {value is import("./types.ts").Metric} A normalized metric.
+ * @returns {value is Metric} A normalized metric.
  */
-const isMetric = (value: unknown): value is import("./types.ts").Metric => {
+const isMetric = (value: unknown): value is Metric => {
   if (
     !isRecord(value) ||
     typeof value.label !== "string" ||
@@ -61,9 +66,9 @@ const isMetric = (value: unknown): value is import("./types.ts").Metric => {
 };
 /**
  * @param {unknown} value Persisted snapshot.
- * @returns {value is import("./types.ts").Snapshot} A normalized snapshot.
+ * @returns {value is Snapshot} A normalized snapshot.
  */
-const isSnapshot = (value: unknown): value is import("./types.ts").Snapshot =>
+const isSnapshot = (value: unknown): value is Snapshot =>
   isRecord(value) &&
   Array.isArray(value.groups) &&
   value.groups.every(
@@ -84,38 +89,17 @@ const nowValue = (value: unknown) => {
   return isFiniteNumber(time) ? time : Date.now();
 };
 
-/**
- * @type {(
- *   snapshot: import("./types.ts").Snapshot | undefined,
- *   elapsed: number,
- *   maxAge: number
- * ) => import("./types.ts").Snapshot | undefined}
- */
-const adjustedSnapshot: (
-  snapshot: import("./types.ts").Snapshot | undefined,
-  elapsed: number,
-  maxAge: number
-) => import("./types.ts").Snapshot | undefined = (
-  snapshot,
-  elapsed,
-  maxAge
-): import("./types.ts").Snapshot | undefined =>
-  snapshot !== undefined && elapsed <= maxAge
-    ? {
-        ...snapshot,
-        groups: snapshot.groups.map((group) => ({
-          ...group,
-          metrics: group.metrics.map((metric) =>
-            "resetsInMs" in metric && isFiniteNumber(metric.resetsInMs)
-              ? {
-                  ...metric,
-                  resetsInMs: Math.max(0, metric.resetsInMs - elapsed)
-                }
-              : metric
-          )
-        }))
-      }
-    : undefined;
+const adjustedSnapshot = (snapshot: Snapshot, elapsed: number): Snapshot => ({
+  ...snapshot,
+  groups: snapshot.groups.map((group) => ({
+    ...group,
+    metrics: group.metrics.map((metric) =>
+      "resetsInMs" in metric && isFiniteNumber(metric.resetsInMs)
+        ? { ...metric, resetsInMs: Math.max(0, metric.resetsInMs - elapsed) }
+        : metric
+    )
+  }))
+});
 
 /**
  * @param {string | null | undefined} value Retry header.
@@ -158,29 +142,49 @@ const readRow = (db: DatabaseSync, key: string) =>
 /**
  * @param {ReturnType<typeof readRow>} row Persisted usage row.
  * @param {number} now Current cache time.
- * @returns {import("./types.ts").Snapshot | undefined} Usable cached snapshot.
+ * @returns {Snapshot | null} Usable cached snapshot.
  */
 const readSnapshot = (
   row: ReturnType<typeof readRow>,
-  now: number
-): import("./types.ts").Snapshot | undefined => {
-  let snapshot;
-  if (typeof row?.snapshot === "string" && isFiniteNumber(row.fetched_at)) {
-    try {
-      /** @type {unknown} */
-      const parsed: unknown = JSON.parse(row.snapshot);
-      snapshot = isSnapshot(parsed)
-        ? adjustedSnapshot(
-            parsed,
-            Math.max(0, now - row.fetched_at),
-            MAX_STALE_MS
-          )
-        : undefined;
-    } catch {
-      snapshot = undefined;
-    }
+  now: number,
+  maxAge: number
+): Snapshot | null => {
+  if (
+    typeof row?.snapshot !== "string" ||
+    !isFiniteNumber(row.fetched_at) ||
+    !Number.isFinite(new Date(row.fetched_at).getTime())
+  ) {
+    return null;
   }
-  return snapshot;
+  const elapsed = Math.max(0, now - row.fetched_at);
+  if (elapsed > maxAge) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(row.snapshot);
+    return isSnapshot(parsed)
+      ? adjustedSnapshot({ ...parsed, fetchedAt: row.fetched_at }, elapsed)
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const isBusy = (error: unknown) =>
+  isRecord(error) &&
+  isFiniteNumber(error.errcode) &&
+  [5, 6].includes(error.errcode % 256);
+
+const retryBusy = async <T extends { busy: boolean }>(
+  attempt: () => T,
+  deadline: number
+): Promise<T> => {
+  const result = attempt();
+  if (result.busy && performance.now() < deadline) {
+    await delay(CONTENTION_RETRY_MS);
+    return await retryBusy(attempt, deadline);
+  }
+  return result;
 };
 
 /**
@@ -193,9 +197,10 @@ const claimRefresh = (
   file: string,
   key: string,
   now: number,
-  token: string
+  token: string,
+  maxAge: number
 ) => {
-  let snapshot;
+  let snapshot: Snapshot | null = null;
   let claimed = false;
   try {
     mkdirSync(path.dirname(file), { mode: 0o700, recursive: true });
@@ -203,7 +208,7 @@ const claimRefresh = (
     using db = new DatabaseSync(file, { timeout: 0 });
     db.exec(schema);
     const row = readRow(db, key);
-    snapshot = readSnapshot(row, now);
+    snapshot = readSnapshot(row, now, maxAge);
     const clock = Date.now();
     if (
       !row ||
@@ -224,13 +229,13 @@ const claimRefresh = (
         `)
           .run(key, token, clock + REFRESH_LEASE_MS, now, clock).changes === 1;
       if (!claimed) {
-        snapshot = readSnapshot(readRow(db, key), now);
+        snapshot = readSnapshot(readRow(db, key), now, maxAge);
       }
     }
-  } catch {
-    return { claimed: false, snapshot };
+  } catch (error) {
+    return { busy: isBusy(error), claimed: false, snapshot };
   }
-  return { claimed, snapshot };
+  return { busy: false, claimed, snapshot };
 };
 
 /**
@@ -239,7 +244,7 @@ const claimRefresh = (
  * @param {string} token Active lease token.
  * @param {number} now Timestamp of a successful sample.
  * @param {number} nextAttemptAt Cache expiry or server retry deadline.
- * @param {import("./types.ts").Snapshot | undefined} snapshot New normalized usage on success.
+ * @param {Snapshot | null} snapshot New normalized usage on success.
  */
 const finishRefresh = (
   file: string,
@@ -247,8 +252,10 @@ const finishRefresh = (
   token: string,
   now: number,
   nextAttemptAt: number,
-  snapshot: import("./types.ts").Snapshot | undefined
+  snapshot: Snapshot | null,
+  maxAge: number
 ) => {
+  const fetched = snapshot === null ? null : { ...snapshot, fetchedAt: now };
   try {
     using db = new DatabaseSync(file, { timeout: PUBLISH_WAIT_MS });
     const result = db
@@ -262,90 +269,123 @@ const finishRefresh = (
       WHERE cache_key = ? AND lease_token = ? AND lease_until > ?
     `)
       .run(
-        snapshot === undefined ? null : now,
-        snapshot === undefined ? null : JSON.stringify(snapshot),
+        snapshot === null ? null : now,
+        snapshot === null ? null : JSON.stringify(snapshot),
         nextAttemptAt,
         key,
         token,
         Date.now()
       );
-    return result.changes === 1
-      ? snapshot
-      : readSnapshot(readRow(db, key), now);
-  } catch {
-    return snapshot;
+    return {
+      busy: false,
+      snapshot:
+        result.changes === 1
+          ? fetched
+          : readSnapshot(readRow(db, key), now, maxAge)
+    };
+  } catch (error) {
+    return { busy: isBusy(error), snapshot: fetched };
   }
 };
 
-/** @type {import("./types.ts").UsageRuntime["withUsageCache"]} */
-export const withUsageCache: import("./types.ts").UsageRuntime["withUsageCache"] =
-  async (provider, credentialIdentity, options, fetchSnapshot) => {
-    if (options.cache === false || !/^[a-z0-9_-]+$/u.test(provider)) {
-      return await fetchSnapshot(options);
-    }
-    const now = nowValue(options.now);
-    const ttl = isFiniteNumber(options.cacheTtlMs)
-      ? Math.max(0, options.cacheTtlMs)
-      : DEFAULT_USAGE_CACHE_TTL_MS;
-    const file = path.join(
-      options.cacheDir ??
-        path.join(options.home ?? homedir(), ".cache", "statusline"),
-      "usage.sqlite"
-    );
-    const key = createHash("sha256")
-      .update(JSON.stringify([provider, credentialIdentity]))
-      .digest("hex");
-    const token = randomUUID();
-    const prior = claimRefresh(file, key, now, token);
-    if (!prior.claimed) {
-      return prior.snapshot;
-    }
-    let goodResponse = false;
-    let usageError = false;
-    let retryAt = now;
-    const fetch = options.fetch ?? globalThis.fetch;
-    const deadline = AbortSignal.timeout(REFRESH_DEADLINE_MS);
-    let snapshot;
-    try {
-      const candidate = await fetchSnapshot({
-        ...options,
-        fetch: async (url, init) => {
-          goodResponse = false;
-          usageError = false;
-          deadline.throwIfAborted();
-          const response = await fetch(url, {
-            ...init,
-            signal: AbortSignal.any([init.signal, deadline])
-          });
-          goodResponse = response.ok;
-          const seenAt = nowValue(options.now);
-          retryAt = Math.max(
-            retryAt,
-            seenAt + retryDelay(response.headers.get("retry-after"), seenAt)
-          );
-          return response;
-        },
-        onUsageError: () => {
-          usageError = true;
-        }
-      });
-      snapshot =
-        !deadline.aborted &&
-        goodResponse &&
-        !usageError &&
-        isSnapshot(candidate)
-          ? candidate
-          : undefined;
-    } catch {
-      snapshot = undefined;
-    }
-    const result = finishRefresh(
+/** @type {UsageRuntime["withUsageCache"]} */
+export const withUsageCache: UsageRuntime["withUsageCache"] = async (
+  provider,
+  credentialIdentity,
+  options,
+  fetchSnapshot
+) => {
+  if (options.cache === false || !/^[a-z0-9_-]+$/u.test(provider)) {
+    return await fetchSnapshot(options);
+  }
+  const { onCachedUsage } = options;
+  const keepLastKnown = onCachedUsage !== undefined;
+  const maxAge = keepLastKnown ? Number.POSITIVE_INFINITY : MAX_STALE_MS;
+  const contentionWait = keepLastKnown ? CONTENTION_WAIT_MS : 0;
+  const ttl = isFiniteNumber(options.cacheTtlMs)
+    ? Math.max(0, options.cacheTtlMs)
+    : DEFAULT_USAGE_CACHE_TTL_MS;
+  const file = path.join(
+    options.cacheDir ??
+      path.join(options.home ?? homedir(), ".cache", "statusline"),
+    "usage.sqlite"
+  );
+  const key = createHash("sha256")
+    .update(JSON.stringify([provider, credentialIdentity]))
+    .digest("hex");
+  const token = randomUUID();
+  let cached: Snapshot | null = null;
+  onCachedUsage?.(key, null);
+  const prior = await retryBusy(() => {
+    const attempt = claimRefresh(
       file,
       key,
+      nowValue(options.now),
       token,
-      now,
-      Math.max(nowValue(options.now) + ttl, retryAt),
-      snapshot
+      maxAge
     );
-    return result ?? prior.snapshot;
-  };
+    if (
+      attempt.snapshot !== null &&
+      attempt.snapshot.fetchedAt !== cached?.fetchedAt
+    ) {
+      cached = attempt.snapshot;
+      onCachedUsage?.(key, cached);
+    }
+    return attempt;
+  }, performance.now() + contentionWait);
+  if (!prior.claimed) {
+    return cached ?? undefined;
+  }
+  let goodResponse = false;
+  let usageError = false;
+  let retryAt = nowValue(options.now);
+  const fetch = options.fetch ?? globalThis.fetch;
+  const deadline = AbortSignal.timeout(REFRESH_DEADLINE_MS);
+  let snapshot: Snapshot | null;
+  try {
+    const candidate = await fetchSnapshot({
+      ...options,
+      fetch: async (url, init) => {
+        goodResponse = false;
+        usageError = false;
+        deadline.throwIfAborted();
+        const response = await fetch(url, {
+          ...init,
+          signal: AbortSignal.any([init.signal, deadline])
+        });
+        goodResponse = response.ok;
+        const seenAt = nowValue(options.now);
+        retryAt = Math.max(
+          retryAt,
+          seenAt + retryDelay(response.headers.get("retry-after"), seenAt)
+        );
+        return response;
+      },
+      onUsageError: () => {
+        usageError = true;
+      }
+    });
+    snapshot =
+      !deadline.aborted && goodResponse && !usageError && isSnapshot(candidate)
+        ? candidate
+        : null;
+  } catch {
+    snapshot = null;
+  }
+  const fetchedAt = nowValue(options.now);
+  const nextAttemptAt = Math.max(fetchedAt + ttl, retryAt);
+  const result = await retryBusy(
+    () =>
+      finishRefresh(
+        file,
+        key,
+        token,
+        fetchedAt,
+        nextAttemptAt,
+        snapshot,
+        maxAge
+      ),
+    performance.now() + contentionWait
+  );
+  return result.snapshot ?? cached ?? undefined;
+};
