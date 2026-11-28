@@ -2,13 +2,21 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import type {
+  JsonRecord,
+  Metric,
+  Snapshot,
+  UsageOptions,
+  UsageRuntime
+} from "./types.ts";
+
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 
 /**
  * @param {unknown} value Value to validate.
- * @returns {value is import("./types.ts").JsonRecord} Whether the value has the required shape.
+ * @returns {value is JsonRecord} Whether the value has the required shape.
  */
-const isRecord = (value: unknown): value is import("./types.ts").JsonRecord =>
+const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
@@ -48,13 +56,13 @@ const secondsToMs = (value: unknown) =>
  * @param {string} label Window.
  * @param {unknown} percentage Usage.
  * @param {number} resetsInMs Delay.
- * @returns {import("./types.ts").Metric | undefined} Metric.
+ * @returns {Metric | undefined} Metric.
  */
 const percentageMetric = (
   label: string,
   percentage: unknown,
   resetsInMs: number
-): import("./types.ts").Metric | undefined =>
+): Metric | undefined =>
   isFiniteNumber(percentage) && percentage >= 0 && percentage <= 100
     ? {
         label,
@@ -96,9 +104,9 @@ const readOpenCodeOpenAiAuth = (data: unknown) => {
 };
 
 /**
- * @param {import("./types.ts").UsageOptions} options Auth options.
+ * @param {UsageOptions} options Auth options.
  */
-const chatgptAuth = async (options: import("./types.ts").UsageOptions) => {
+const chatgptAuth = async (options: UsageOptions) => {
   const home = options.home ?? homedir();
   const codex = readChatgptAuth(
     await readJson(path.join(home, ".codex", "auth.json"))
@@ -150,13 +158,9 @@ const chatgptWindow = (window: unknown, fallback: string) =>
 /**
  * @param {unknown} rateLimit Untrusted limit.
  * @param {string} label Label.
- * @param {import("./types.ts").Metric} [credit] Credit.
+ * @param {Metric} [credit] Credit.
  */
-const chatgptGroup = (
-  rateLimit: unknown,
-  label: string,
-  credit?: import("./types.ts").Metric
-) => {
+const chatgptGroup = (rateLimit: unknown, label: string, credit?: Metric) => {
   const metrics = (
     isRecord(rateLimit)
       ? [
@@ -173,11 +177,9 @@ const chatgptGroup = (
 
 /**
  * @param {unknown} credits Untrusted balance.
- * @returns {import("./types.ts").Metric | undefined} Metric.
+ * @returns {Metric | undefined} Metric.
  */
-const chatgptCredit = (
-  credits: unknown
-): import("./types.ts").Metric | undefined => {
+const chatgptCredit = (credits: unknown): Metric | undefined => {
   const creditBalance =
     isRecord(credits) && credits.has_credits === true
       ? credits.balance
@@ -207,13 +209,13 @@ const chatgptPlanLabel = (planType: unknown) => {
 
 /**
  * @param {{ token: string, accountId: string }} selected Auth.
- * @param {import("./types.ts").UsageOptions} options Options.
- * @param {import("./types.ts").UsageRuntime["requestJson"]} requestJson Host HTTP transport.
+ * @param {UsageOptions} options Options.
+ * @param {UsageRuntime["requestJson"]} requestJson Host HTTP transport.
  */
 const usageSnapshot = async (
   selected: { token: string; accountId: string },
-  options: import("./types.ts").UsageOptions,
-  requestJson: import("./types.ts").UsageRuntime["requestJson"]
+  options: UsageOptions,
+  requestJson: UsageRuntime["requestJson"]
 ) => {
   let { payload } = await requestJson(
     USAGE_URL,
@@ -266,15 +268,10 @@ const usageSnapshot = async (
 };
 
 /**
- * @param {import("./types.ts").Snapshot | undefined} snapshot Cached or freshly fetched usage.
- * @returns {import("./types.ts").Snapshot | undefined} Snapshot with legacy quota metadata restored.
+ * @param {Snapshot} snapshot Cached or freshly fetched usage.
+ * @returns {Snapshot} Snapshot with legacy quota metadata restored.
  */
-const preserveNativeQuotaDeduplication = (
-  snapshot: import("./types.ts").Snapshot | undefined
-): import("./types.ts").Snapshot | undefined => {
-  if (snapshot === undefined) {
-    return snapshot;
-  }
+const preserveNativeQuotaDeduplication = (snapshot: Snapshot): Snapshot => {
   const groups = snapshot.groups.map((group) => {
     if (
       group.deduplicateWithNativeQuota !== undefined ||
@@ -301,14 +298,14 @@ const preserveNativeQuotaDeduplication = (
 };
 
 /**
- * @param {import("./types.ts").UsageOptions} options Lookup options.
- * @param {import("./types.ts").UsageRuntime} runtime Host-provided usage helpers.
- * @returns {Promise<import("./types.ts").Snapshot | undefined>} Usage snapshot.
+ * @param {UsageOptions} options Lookup options.
+ * @param {UsageRuntime} runtime Host-provided usage helpers.
+ * @returns {Promise<Snapshot | undefined>} Usage snapshot.
  */
 export const fetchUsage = async (
-  options: import("./types.ts").UsageOptions,
-  { withUsageCache, requestJson }: import("./types.ts").UsageRuntime
-): Promise<import("./types.ts").Snapshot | undefined> => {
+  options: UsageOptions,
+  { withUsageCache, requestJson }: UsageRuntime
+): Promise<Snapshot | undefined> => {
   const auth = await chatgptAuth(options);
   const explicit =
     typeof options.credential === "string" && options.credential !== ""
@@ -317,25 +314,28 @@ export const fetchUsage = async (
   const selected = explicit
     ? { accountId: auth.accountId, token: explicit }
     : (auth.codex ?? auth.openCode);
-  return selected !== undefined && selected.token !== ""
-    ? preserveNativeQuotaDeduplication(
-        await withUsageCache(
-          "chatgpt",
-          { accountId: selected.accountId, token: selected.token },
-          {
-            ...options,
-            onCachedUsage:
-              options.onCachedUsage === undefined
-                ? undefined
-                : (key, snapshot) =>
-                    options.onCachedUsage?.(
-                      key,
-                      preserveNativeQuotaDeduplication(snapshot)
-                    )
-          },
-          async (fetchOptions) =>
-            await usageSnapshot(selected, fetchOptions, requestJson)
-        )
-      )
-    : undefined;
+  if (selected === undefined || selected.token === "") {
+    return undefined;
+  }
+  const { onCachedUsage } = options;
+  const snapshot = await withUsageCache(
+    "chatgpt",
+    { accountId: selected.accountId, token: selected.token },
+    onCachedUsage === undefined
+      ? options
+      : {
+          ...options,
+          onCachedUsage: (key, cached) => {
+            onCachedUsage(
+              key,
+              cached === null ? null : preserveNativeQuotaDeduplication(cached)
+            );
+          }
+        },
+    async (fetchOptions) =>
+      await usageSnapshot(selected, fetchOptions, requestJson)
+  );
+  return snapshot === undefined
+    ? undefined
+    : preserveNativeQuotaDeduplication(snapshot);
 };

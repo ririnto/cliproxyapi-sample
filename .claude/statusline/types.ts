@@ -50,7 +50,7 @@ export interface UsageOptions {
   now?: number | Date;
   fetch?: Fetch;
   onUsageError?: () => void;
-  onCachedUsage?: (key: string, snapshot: Snapshot | undefined) => void;
+  onCachedUsage?: (key: string, snapshot: Snapshot | null) => void;
   cache?: boolean;
   cacheDir?: string;
   cacheTtlMs?: number;

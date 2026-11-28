@@ -6,6 +6,7 @@ import { createInterface } from "node:readline";
 import { setTimeout as delayMs } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 
+import type { UsageRuntime } from "./statusline/types.ts";
 import { withUsageCache } from "./statusline/usage-cache.ts";
 
 /**
@@ -97,9 +98,9 @@ interface ProviderRow {
 }
 interface ProviderUpdate {
   index: number;
-  key?: string;
-  rows?: ProviderRow[];
-  fetchedAt?: number;
+  key: string | null;
+  rows: ProviderRow[] | null;
+  fetchedAt: number | null;
 }
 type RefreshMessage = ProviderUpdate | { providerCount: number };
 
@@ -134,58 +135,62 @@ const quota = (value: string, percent: number): Span => {
   return colored(value, percent < 30 ? "#F2B590" : "#ABDFA7");
 };
 
-/** @type {import("./statusline/types.ts").UsageRuntime["requestJson"]} */
-const requestJson: import("./statusline/types.ts").UsageRuntime["requestJson"] =
-  async (url, headers, fetchFunction, onUsageError) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, 3000);
-    try {
-      const response = await fetchFunction(url, {
-        headers,
-        method: "GET",
-        signal: controller.signal
-      });
-      if (!Number.isFinite(response.status)) {
-        return { status: undefined };
-      }
-      if (response.status < 200 || response.status >= 300) {
-        try {
-          await Promise.race([
-            response.body?.cancel(),
-            delayMs(3000, undefined, { signal: controller.signal })
-          ]);
-        } catch {
-          if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
-            console.error(
-              `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
-            );
-          }
-        }
-        controller.abort();
-        return { status: response.status };
-      }
+/** @type {UsageRuntime["requestJson"]} */
+const requestJson: UsageRuntime["requestJson"] = async (
+  url,
+  headers,
+  fetchFunction,
+  onUsageError
+) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 3000);
+  try {
+    const response = await fetchFunction(url, {
+      headers,
+      method: "GET",
+      signal: controller.signal
+    });
+    if (!Number.isFinite(response.status)) {
+      return { status: undefined };
+    }
+    if (response.status < 200 || response.status >= 300) {
       try {
-        /**
-         * @type {unknown}
-         */
-        const payload: unknown = await response.json();
-        if (!isRecord(payload)) {
-          onUsageError?.();
-          return { status: response.status };
-        }
-        return { payload, status: response.status };
+        await Promise.race([
+          response.body?.cancel(),
+          delayMs(3000, undefined, { signal: controller.signal })
+        ]);
       } catch {
+        if ((process.env.STATUSLINE_DEBUG ?? "") !== "") {
+          console.error(
+            `[statusline-usage] Failed to cancel HTTP ${response.status} response body.`
+          );
+        }
+      }
+      controller.abort();
+      return { status: response.status };
+    }
+    try {
+      /**
+       * @type {unknown}
+       */
+      const payload: unknown = await response.json();
+      if (!isRecord(payload)) {
         onUsageError?.();
         return { status: response.status };
       }
+      return { payload, status: response.status };
     } catch {
-      return { status: undefined };
-    } finally {
-      clearTimeout(timeout);
+      onUsageError?.();
+      return { status: response.status };
     }
-  };
+  } catch {
+    return { status: undefined };
+  } finally {
+    clearTimeout(timeout);
+  }
+};
 
 const usageRuntime = { withUsageCache, requestJson };
 
@@ -319,6 +324,12 @@ const renderGroup = (
  * @param {unknown} rawProvider One entry from the Codex provider list.
  */
 const collectProvider = async (rawProvider: unknown, index: number) => {
+  const noUsage: ProviderUpdate = {
+    index,
+    key: null,
+    rows: null,
+    fetchedAt: null
+  };
   const { module, name, credentialEnv, enabled, showAbove } =
     record(rawProvider);
   if (
@@ -328,7 +339,7 @@ const collectProvider = async (rawProvider: unknown, index: number) => {
     path.basename(module) !== module ||
     !module.endsWith(".ts")
   ) {
-    process.send?.({ index } satisfies ProviderUpdate);
+    process.send?.(noUsage);
     return;
   }
   const credential =
@@ -337,7 +348,7 @@ const collectProvider = async (rawProvider: unknown, index: number) => {
     typeof credentialEnv === "string" &&
     (credential === undefined || credential.length === 0)
   ) {
-    process.send?.({ index } satisfies ProviderUpdate);
+    process.send?.(noUsage);
     return;
   }
   try {
@@ -345,24 +356,24 @@ const collectProvider = async (rawProvider: unknown, index: number) => {
       await import(new URL(`statusline/${module}`, import.meta.url).href)
     );
     if (typeof fetchUsage !== "function") {
-      process.send?.({ index } satisfies ProviderUpdate);
+      process.send?.(noUsage);
       return;
     }
-    let cacheKey: string | undefined;
-    const publish = (key: string | undefined, snapshot: unknown) => {
+    let cacheKey: string | null = null;
+    const publish = (key: string | null, snapshot: unknown) => {
       cacheKey = key;
       if (process.connected) {
         const update: ProviderUpdate = {
           index,
           key,
-          fetchedAt: finite(record(snapshot).fetchedAt) ?? undefined,
+          fetchedAt: finite(record(snapshot).fetchedAt),
           rows: isRecord(snapshot)
             ? list(snapshot.groups)
                 .slice(0, 12)
                 .flatMap((group) =>
                   renderGroup(group, display(name), finite(showAbove) ?? 0.001)
                 )
-            : undefined
+            : null
         };
         process.send?.(update);
       }
@@ -676,12 +687,12 @@ const reportAddonFailure = () => {
 };
 
 const runServer = async () => {
-  let refresh: Promise<void> | undefined;
+  let refresh: Promise<void> | null = null;
   let nextRefresh = 0;
   const providers: ProviderUpdate[] = [];
 
   const refreshAddons = async () => {
-    if (refresh === undefined && performance.now() >= nextRefresh) {
+    if (refresh === null && performance.now() >= nextRefresh) {
       const collect = async () => {
         const child = fork(import.meta.filename, ["--refresh-usage"], {
           detached: true,
@@ -693,7 +704,7 @@ const runServer = async () => {
             return;
           }
           const previous = providers[update.index];
-          if (update.rows !== undefined || update.key !== previous?.key) {
+          if (update.rows !== null || update.key !== (previous?.key ?? null)) {
             providers[update.index] = update;
           }
         });
@@ -705,7 +716,7 @@ const runServer = async () => {
         .catch(reportAddonFailure)
         .finally(() => {
           nextRefresh = performance.now() + 15_000;
-          refresh = undefined;
+          refresh = null;
         });
     }
     await refresh;
@@ -733,10 +744,10 @@ const runServer = async () => {
     let oldestCachedAt = Number.POSITIVE_INFINITY;
     const addonRows = providers
       .flatMap(({ rows, fetchedAt }) => {
-        if (rows === undefined) {
+        if (rows === null) {
           return [];
         }
-        if (fetchedAt === undefined || now - fetchedAt <= staleUsageMs) {
+        if (fetchedAt === null || now - fetchedAt <= staleUsageMs) {
           return rows;
         }
         if (rows.length > 0) {
