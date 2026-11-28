@@ -165,6 +165,11 @@ cp .claude/statusline/*.ts .claude/statusline/providers.json "$dest/statusline/"
 
 Claude Code를 재시작한다.
 
+Claude Code 상태줄은 조회 결과를 최대 800ms 동안 기다린다.
+조회가 늦으면 마지막으로 저장한 사용량을 표시하고, 캐시가 비어 있으면 기본 상태줄을 표시한다.
+별도 프로세스가 상태줄을 표시한 뒤에도 캐시 갱신을 이어간다.
+30분이 지난 사용량에는 조회 시각을 UTC로 표시한다.
+
 ## Codex CLI 상태줄 설치
 
 ```sh

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
+import { fork, spawn } from "node:child_process";
+import { once } from "node:events";
 import { readFileSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -9,10 +10,24 @@ import { setTimeout as delayMs } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 
+import type { Snapshot } from "./statusline/types.ts";
 import { withUsageCache } from "./statusline/usage-cache.ts";
 
 type RecordValue = Record<string, unknown>;
 type ProviderAddon = RecordValue & { script: string; credential: string };
+interface ProviderLine {
+  line: string;
+  primary: boolean;
+  fetchedAt: number | null;
+}
+interface ProviderUpdate {
+  index: number;
+  result: ProviderLine;
+}
+
+const responseBudgetMs = 800;
+const staleUsageMs = 30 * 60_000;
+
 /**
  * @param {unknown} value - Untrusted input.
  * @returns {RecordValue} Object fields or an empty record.
@@ -155,13 +170,24 @@ const usageBar = (percentage: number) => {
 /**
  * @param {string} cwd - cwd input.
  */
-const gitBranch = (cwd: string) => {
+const gitBranch = async (cwd: string) => {
   try {
-    return execFileSync("git", ["branch", "--show-current"], {
+    const git = spawn("git", ["branch", "--show-current"], {
       cwd,
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "ignore"]
-    }).trim();
+      killSignal: "SIGKILL",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 150
+    });
+    let stdout = "";
+    git.stdout.setEncoding("utf-8").on("data", (chunk: string) => {
+      stdout += chunk;
+      if (stdout.length > 4096) {
+        git.kill("SIGKILL");
+      }
+    });
+    const result: unknown[] = await once(git, "close");
+    const [code] = result;
+    return code === 0 ? stdout.trim() : "";
   } catch {
     return "";
   }
@@ -471,30 +497,61 @@ const importAddonModule = async (script: string) => {
     Reflect.apply(fetchUsage, module, [input, usageRuntime]);
 };
 
-const renderAddonResults = async (
-  addons: ProviderAddon[],
-  nativeUsage: boolean
-) => {
-  const results = await Promise.all(
-    addons
-      .filter((addon) => !(nativeUsage && addon.skipWhenNativeUsage === true))
-      .map(async (addon) => {
+const refreshAddons = async (nativeUsage: boolean) => {
+  const addons = await readProviderAddons();
+  await Promise.all(
+    addons.map(async (addon, index) => {
+      if (!(nativeUsage && addon.skipWhenNativeUsage === true)) {
+        const publish = (snapshot: unknown) => {
+          if (isRecord(snapshot) && process.connected) {
+            const { fetchedAt } = snapshot;
+            process.send?.(
+              {
+                index,
+                result: {
+                  line: renderSnapshot(addon, snapshot),
+                  primary: Boolean(addon.primary),
+                  fetchedAt:
+                    isFiniteNumber(fetchedAt) &&
+                    Number.isFinite(new Date(fetchedAt).getTime())
+                      ? fetchedAt
+                      : null
+                }
+              } satisfies ProviderUpdate,
+              (error) => {
+                if (
+                  error &&
+                  process.connected &&
+                  process.env.STATUSLINE_DEBUG === "1"
+                ) {
+                  console.error(
+                    "[statusline] provider usage update unavailable"
+                  );
+                }
+              }
+            );
+          }
+        };
         try {
           const fetchUsage = await importAddonModule(addon.script);
-          /**
-           * @type {unknown}
-           */
-          const snapshot: unknown = fetchUsage
-            ? await fetchUsage({ credential: addon.credential })
-            : undefined;
-          const line = renderSnapshot(addon, snapshot);
-          return line ? { line, primary: Boolean(addon.primary) } : null;
+          if (fetchUsage !== null) {
+            publish(
+              await fetchUsage({
+                credential: addon.credential,
+                onCachedUsage: (_key: string, snapshot: Snapshot | null) => {
+                  publish(snapshot);
+                }
+              })
+            );
+          }
         } catch {
-          return null;
+          if (process.env.STATUSLINE_DEBUG === "1") {
+            console.error("[statusline] provider usage unavailable");
+          }
         }
-      })
+      }
+    })
   );
-  return results.filter((result) => result !== null);
 };
 
 /**
@@ -514,7 +571,7 @@ const renderContext = (input: RecordValue) => {
     : `Context ${DIM}${size ? numberText(size) : "waiting"}${RESET}`;
 };
 
-const renderHeader = (input: RecordValue, cwd: string) => {
+const renderHeader = (input: RecordValue, branch: string) => {
   const model = record(input.model);
   const displayName = model.display_name;
   const modelName = truthy(displayName)
@@ -534,7 +591,6 @@ const renderHeader = (input: RecordValue, cwd: string) => {
       ? [seconds < 60 ? `${seconds}s` : `${Math.trunc(seconds / 60)}m`]
       : [])
   ];
-  const branch = gitBranch(cwd);
   const currentDir = textOr(
     workspace.current_dir,
     textOr(workspace.project_dir, process.cwd())
@@ -606,24 +662,28 @@ const packProviderRows = (rows: string[]) => {
   });
 };
 
-const renderStatusline = async (
+const renderStatusline = (
   input: RecordValue,
-  addons: ProviderAddon[],
-  cwd: string
+  addonResults: ProviderLine[],
+  branch: string
 ) => {
-  const nativeRate = renderRateLimits(record(input.rate_limits), Date.now());
-  const addonResults = await renderAddonResults(
-    addons,
-    nativeUsageFor(input.rate_limits)
-  );
+  const now = Date.now();
+  const nativeRate = renderRateLimits(record(input.rate_limits), now);
+  const addonLine = ({ line, fetchedAt }: ProviderLine) =>
+    fetchedAt !== null && now - fetchedAt > staleUsageMs
+      ? `${line} ${DIM}· cached ${new Date(fetchedAt).toISOString().slice(0, 16).replace("T", " ")} UTC${RESET}`
+      : line;
   const primaryIndex = nativeRate.length
     ? -1
     : addonResults.findIndex((result) => result.primary);
-  const primary = nativeRate.length
-    ? `${PROVIDER}Claude${RESET}  ${nativeRate.join(SEPARATOR)}`
-    : addonResults[primaryIndex]?.line || "";
+  let primary = "";
+  if (nativeRate.length > 0) {
+    primary = `${PROVIDER}Claude${RESET}  ${nativeRate.join(SEPARATOR)}`;
+  } else if (primaryIndex >= 0) {
+    primary = addonLine(addonResults[primaryIndex]);
+  }
   return [
-    [renderHeader(input, cwd), renderTokens(input)]
+    [renderHeader(input, branch), renderTokens(input)]
       .filter(Boolean)
       .join(SEPARATOR),
     ...packProviderRows(
@@ -631,7 +691,7 @@ const renderStatusline = async (
         primary,
         ...addonResults
           .filter((_, index) => index !== primaryIndex)
-          .map((result) => result.line)
+          .map(addonLine)
       ].filter(Boolean)
     )
   ];
@@ -688,10 +748,46 @@ const main = async () => {
      */
     const parsed: unknown = JSON.parse(readFileSync(0, "utf-8"));
     const input = record(parsed);
-    const rows = await renderStatusline(
+    const deadline = performance.now() + responseBudgetMs;
+    const results: ProviderLine[] = [];
+    const child = fork(
+      import.meta.filename,
+      ["--refresh-usage", String(nativeUsageFor(input.rate_limits))],
+      { detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"] }
+    );
+    child.on("message", ({ index, result }: ProviderUpdate) => {
+      results[index] = result;
+    });
+    child.unref();
+    const refresh = once(child, "close").catch(() => {
+      if (process.env.STATUSLINE_DEBUG === "1") {
+        console.error("[statusline] provider usage collection unavailable");
+      }
+    });
+    let branch = "";
+    const lookupBranch = async () => {
+      branch = await gitBranch(
+        textOr(record(input.workspace).current_dir, process.cwd())
+      );
+    };
+    const timer = new AbortController();
+    try {
+      await Promise.race([
+        delayMs(Math.max(0, deadline - performance.now()), null, {
+          signal: timer.signal
+        }),
+        Promise.all([lookupBranch(), refresh])
+      ]);
+    } finally {
+      timer.abort();
+      if (child.connected) {
+        child.disconnect();
+      }
+    }
+    const rows = renderStatusline(
       input,
-      await readProviderAddons(),
-      textOr(record(input.workspace).current_dir, process.cwd())
+      results.filter(({ line }) => line.length > 0),
+      branch
     );
     process.stdout.write(`${rows.join("\n")}\n`);
   } catch (error) {
@@ -711,6 +807,11 @@ if (process.argv[1]) {
     isEntrypoint = false;
   }
   if (isEntrypoint) {
-    await main();
+    if (process.argv[2] === "--refresh-usage") {
+      setTimeout(() => process.exit(1), 20_000).unref();
+      await refreshAddons(process.argv[3] === "true");
+    } else {
+      await main();
+    }
   }
 }
