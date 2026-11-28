@@ -355,34 +355,38 @@ const collectProvider = async (rawProvider: unknown, index: number) => {
     const { fetchUsage } = record(
       await import(new URL(`statusline/${module}`, import.meta.url).href)
     );
-    if (typeof fetchUsage !== "function") {
+    if (typeof fetchUsage === "function") {
+      let cacheKey: string | null = null;
+      const publish = (key: string | null, snapshot: unknown) => {
+        cacheKey = key;
+        if (process.connected) {
+          const update: ProviderUpdate = {
+            index,
+            key,
+            fetchedAt: finite(record(snapshot).fetchedAt),
+            rows: isRecord(snapshot)
+              ? list(snapshot.groups)
+                  .slice(0, 12)
+                  .flatMap((group) =>
+                    renderGroup(
+                      group,
+                      display(name),
+                      finite(showAbove) ?? 0.001
+                    )
+                  )
+              : null
+          };
+          process.send?.(update);
+        }
+      };
+      const snapshot: unknown = await Reflect.apply(fetchUsage, undefined, [
+        { credential, onCachedUsage: publish },
+        usageRuntime
+      ]);
+      publish(cacheKey, snapshot);
+    } else {
       process.send?.(noUsage);
-      return;
     }
-    let cacheKey: string | null = null;
-    const publish = (key: string | null, snapshot: unknown) => {
-      cacheKey = key;
-      if (process.connected) {
-        const update: ProviderUpdate = {
-          index,
-          key,
-          fetchedAt: finite(record(snapshot).fetchedAt),
-          rows: isRecord(snapshot)
-            ? list(snapshot.groups)
-                .slice(0, 12)
-                .flatMap((group) =>
-                  renderGroup(group, display(name), finite(showAbove) ?? 0.001)
-                )
-            : null
-        };
-        process.send?.(update);
-      }
-    };
-    const snapshot: unknown = await Reflect.apply(fetchUsage, undefined, [
-      { credential, onCachedUsage: publish },
-      usageRuntime
-    ]);
-    publish(cacheKey, snapshot);
   } catch {
     if (process.env.STATUSLINE_DEBUG === "1") {
       console.error("[statusline] provider usage unavailable");
@@ -391,7 +395,7 @@ const collectProvider = async (rawProvider: unknown, index: number) => {
 };
 
 const collectAddons = async () => {
-  let providers;
+  let providers: unknown[] | null = null;
   try {
     providers = list(
       JSON.parse(
@@ -405,10 +409,13 @@ const collectAddons = async () => {
     if (process.env.STATUSLINE_DEBUG === "1") {
       console.error("[statusline] provider registry unavailable");
     }
-    return;
   }
-  process.send?.({ providerCount: providers.length } satisfies RefreshMessage);
-  await Promise.all(providers.map(collectProvider));
+  if (providers !== null) {
+    process.send?.({
+      providerCount: providers.length
+    } satisfies RefreshMessage);
+    await Promise.all(providers.map(collectProvider));
+  }
 };
 
 const graphemes = new Intl.Segmenter();
@@ -690,7 +697,6 @@ const runServer = async () => {
   let refresh: Promise<void> | null = null;
   let nextRefresh = 0;
   const providers: ProviderUpdate[] = [];
-
   const refreshAddons = async () => {
     if (refresh === null && performance.now() >= nextRefresh) {
       const collect = async () => {
@@ -701,11 +707,14 @@ const runServer = async () => {
         child.on("message", (update: RefreshMessage) => {
           if ("providerCount" in update) {
             providers.length = update.providerCount;
-            return;
-          }
-          const previous = providers[update.index];
-          if (update.rows !== null || update.key !== (previous?.key ?? null)) {
-            providers[update.index] = update;
+          } else {
+            const previous = providers[update.index];
+            if (
+              update.rows !== null ||
+              update.key !== (previous?.key ?? null)
+            ) {
+              providers[update.index] = update;
+            }
           }
         });
         child.channel?.unref();
@@ -721,7 +730,6 @@ const runServer = async () => {
     }
     await refresh;
   };
-
   const readFooter = async (state: unknown, deadline: number) => {
     let branch = "";
     const lookupBranch = async () => {
@@ -781,7 +789,6 @@ const runServer = async () => {
       ]
     };
   };
-
   /**
    * @param {string} method MCP request method.
    * @param {unknown} rawParams MCP request parameters.
@@ -831,44 +838,41 @@ const runServer = async () => {
       }
     }
   };
-
   const handleRequest = async (line: string) => {
     const deadline = performance.now() + responseBudgetMs;
-    let request;
+    let request: Record<string, unknown> | null = null;
+    let reply = null;
     try {
       request = record(JSON.parse(line));
     } catch (error) {
       if (!(error instanceof SyntaxError)) {
         throw error;
       }
-      process.stdout.write(
-        `${JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32_700, message: "Parse error" } })}\n`
-      );
-      return;
+      reply = { error: { code: -32_700, message: "Parse error" } };
     }
-    let reply;
-    if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
-      reply = { error: { code: -32_600, message: "Invalid request" } };
-    } else if (Object.hasOwn(request, "id")) {
-      const result = await respond(request.method, request.params, deadline);
-      if (result !== null) {
-        reply = { result };
-      } else if (
-        request.method === "resources/read" ||
-        request.method === "tools/call"
-      ) {
-        reply = { error: { code: -32_602, message: "Invalid parameters" } };
-      } else {
-        reply = { error: { code: -32_601, message: "Method not found" } };
+    if (request !== null) {
+      if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
+        reply = { error: { code: -32_600, message: "Invalid request" } };
+      } else if (Object.hasOwn(request, "id")) {
+        const result = await respond(request.method, request.params, deadline);
+        if (result !== null) {
+          reply = { result };
+        } else if (
+          request.method === "resources/read" ||
+          request.method === "tools/call"
+        ) {
+          reply = { error: { code: -32_602, message: "Invalid parameters" } };
+        } else {
+          reply = { error: { code: -32_601, message: "Method not found" } };
+        }
       }
     }
-    if (reply !== undefined) {
+    if (reply !== null) {
       process.stdout.write(
-        `${JSON.stringify({ jsonrpc: "2.0", id: request.id ?? null, ...reply })}\n`
+        `${JSON.stringify({ jsonrpc: "2.0", id: request?.id ?? null, ...reply })}\n`
       );
     }
   };
-
   for await (const line of createInterface({
     input: process.stdin,
     crlfDelay: Number.POSITIVE_INFINITY
