@@ -1,0 +1,228 @@
+#!/usr/bin/env -S PATH=${HOME}/.local/bin:${HOME}/.asdf/shims:${HOME}/.asdf/bin:${HOME}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH} python3
+"""Fetch and fast-forward repositories found under the current directory."""
+
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class Result:
+    repo: str
+    project: str
+    status: str
+    before: str
+    after: str
+    log: Path
+
+
+def sync_repo(repo: str, project: str, log: Path, stop: threading.Event) -> Result:
+    def git(*args: str, capture: bool = False) -> tuple[int, str]:
+        with log.open("ab") as output:
+            process = subprocess.Popen(
+                ("git", "-C", repo, *args),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE if capture else output,
+                stderr=output,
+                start_new_session=os.name == "posix",
+            )
+            while True:
+                try:
+                    stdout, _ = process.communicate(timeout=0.2)
+                    return process.returncode, os.fsdecode(stdout or b"").rstrip("\n")
+                except subprocess.TimeoutExpired:
+                    if stop.is_set():
+                        if os.name == "posix":
+                            try:
+                                os.killpg(process.pid, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
+                        else:
+                            process.kill()
+                        process.communicate()
+                        return 1, ""
+
+    code, remotes = git("remote", capture=True)
+    if code:
+        return Result(repo, project, "FAILED", "", "", log)
+    if "origin" not in remotes.split("\n"):
+        return Result(repo, project, "SKIPPED (no origin)", "", "", log)
+    before_code, before = git("rev-parse", "--verify", "-q", "HEAD", capture=True)
+    if before_code:
+        before = "none"
+    for phase, command in (
+        ("FETCH", ("fetch", "--all", "--prune")),
+        ("PULL", ("pull", "--ff-only")),
+    ):
+        if stop.is_set():
+            return Result(repo, project, "FAILED", before, "", log)
+        print(f"[{phase}] {repo}", file=sys.stderr, flush=True)
+        code, _ = git(*command)
+        if code:
+            return Result(repo, project, "FAILED", before, "", log)
+    code, after = git("rev-parse", "--verify", "HEAD", capture=True)
+    if code:
+        return Result(repo, project, "FAILED", before, "", log)
+    return Result(
+        repo,
+        project,
+        "UP-TO-DATE" if before == after else "UPDATED",
+        before,
+        after,
+        log,
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "root",
+        nargs="?",
+        default=".",
+        help="directory to search (default: current directory)",
+    )
+    parser.add_argument(
+        "--jobs", help="maximum concurrent repositories (default: JOBS or CPU count)"
+    )
+    args = parser.parse_args()
+    jobs = (
+        args.jobs
+        if args.jobs is not None
+        else os.environ.get("JOBS") or str(os.cpu_count() or 1)
+    )
+    if not jobs.isascii() or not jobs.isdigit() or jobs.startswith("0"):
+        parser.error("jobs must be a positive integer, such as 4")
+    root = Path(args.root).expanduser().resolve()
+    if not root.is_dir():
+        print(f"Cannot search directory: {root}", file=sys.stderr)
+        return 1
+    fd = shutil.which("fd") or shutil.which("fdfind")
+    if fd is None:
+        print("Cannot find fd or fdfind on PATH", file=sys.stderr)
+        return 1
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    try:
+        found = subprocess.run(
+            (fd, "-H", "-s", "-t", "d", "-g", ".git", "--prune", "-0"),
+            cwd=root,
+            env=env,
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        print(f"Repository discovery failed: {exc}", file=sys.stderr)
+        return 1
+    repos = sorted(
+        os.path.dirname(os.fsdecode(path).rstrip("/")) or "."
+        for path in found.split(b"\0")
+        if path
+    )
+    # Discovered paths are relative to the search root; Git subprocesses inherit it.
+    os.chdir(root)
+    os.environ["GIT_TERMINAL_PROMPT"] = "0"
+    stop = threading.Event()
+    old_handlers = {}
+
+    def interrupt(signum, _frame):
+        stop.set()
+        raise KeyboardInterrupt
+
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        old_handlers[sig] = signal.signal(sig, interrupt)
+    print(
+        f"Syncing {len(repos)} repositories (up to {jobs} in parallel)",
+        file=sys.stderr,
+        flush=True,
+    )
+    results = []
+    try:
+        with tempfile.TemporaryDirectory(prefix="git-sync-") as tmp:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=int(jobs))
+            try:
+                futures = {}
+                for index, repo in enumerate(repos):
+                    relative = repo.removeprefix("./")
+                    project = "root" if repo == "." else relative.split("/", 1)[0]
+                    futures[
+                        executor.submit(
+                            sync_repo, repo, project, Path(tmp) / str(index), stop
+                        )
+                    ] = (repo, project)
+                for completed, future in enumerate(
+                    concurrent.futures.as_completed(futures), 1
+                ):
+                    repo, project = futures[future]
+                    try:
+                        result = future.result()
+                    except (OSError, subprocess.SubprocessError) as exc:
+                        log = Path(tmp) / f"error-{completed}"
+                        log.write_text(f"{exc}\n")
+                        result = Result(repo, project, "FAILED", "", "", log)
+                    results.append(result)
+                    print(
+                        f"[{completed}/{len(repos)}] {result.status} {repo}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+            except KeyboardInterrupt:
+                stop.set()
+                for future in futures:
+                    future.cancel()
+                print("Interrupted; stopping Git processes.", file=sys.stderr)
+                return 130
+            finally:
+                executor.shutdown(wait=True, cancel_futures=True)
+            results.sort(key=lambda result: (result.project, result.repo))
+            for project in sorted({result.project for result in results}):
+                print(f"## {project}")
+                for result in (item for item in results if item.project == project):
+                    detail = (
+                        f" ({result.before[:8]}..{result.after[:8]})"
+                        if result.status == "UPDATED"
+                        else ""
+                    )
+                    print(f"{result.repo}: {result.status}{detail}")
+                    if result.status == "FAILED" and result.log.exists():
+                        with result.log.open(
+                            "r", encoding="utf-8", errors="replace"
+                        ) as log:
+                            shutil.copyfileobj(log, sys.stdout)
+            print("## SUMMARY")
+            projects = sorted({result.project for result in results})
+            rows = [
+                (project, [item for item in results if item.project == project])
+                for project in projects
+            ]
+            rows.append(("All projects", results))
+            width = max(len("Project"), *(len(name) for name, _ in rows))
+            count_width = max(7, len(str(len(results))))
+            print(
+                f"{'Project':<{width}}  {'Total':>{count_width}}  {'Updated':>{count_width}}  {'Current':>{count_width}}  {'Skipped':>{count_width}}  {'Failed':>{count_width}}"
+            )
+            for project, group in rows:
+                print(
+                    f"{project:<{width}}  {len(group):>{count_width}}  {sum(item.status == 'UPDATED' for item in group):>{count_width}}  {sum(item.status == 'UP-TO-DATE' for item in group):>{count_width}}  {sum(item.status == 'SKIPPED (no origin)' for item in group):>{count_width}}  {sum(item.status == 'FAILED' for item in group):>{count_width}}"
+                )
+            failed = [result.repo for result in results if result.status == "FAILED"]
+            if failed:
+                print("## FAILED REPOSITORIES")
+                print("\n".join(failed))
+                return 1
+    finally:
+        for sig, handler in old_handlers.items():
+            signal.signal(sig, handler)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

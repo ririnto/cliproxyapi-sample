@@ -1,0 +1,1397 @@
+#!/usr/bin/env -S PATH=${HOME}/.local/bin:${HOME}/.asdf/shims:${HOME}/.asdf/bin:${HOME}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH} python3
+"""Refresh configured Claude Code and Codex plugins and prune unused caches.
+
+Requires Python 3.9+ and the relevant CLIs. Uses only the standard library.
+Both inventories come from the native JSON CLIs. Disabled Codex plugins are skipped.
+User installations take precedence over duplicate Claude project/local records.
+Missing-project registry entries are removed by atomic replacement without backups.
+The shebang adds common user, asdf, Cargo, Homebrew, and system executable paths.
+Marketplace and plugin commands run concurrently, with same-plugin scopes serialized.
+Reconcile lost updates serially and verify the final inventory before pruning.
+--no-prune skips this script's cleanup; native CLIs may still remove old caches.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import re
+import shlex
+import shutil
+import signal
+import stat
+import subprocess
+import tempfile
+import time
+from collections import defaultdict
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
+from dataclasses import dataclass
+from pathlib import Path
+from threading import Lock
+
+CODEX_RUNTIME_MARKETS = {"openai-bundled", "openai-primary-runtime"}
+DATA_ERRORS = (OSError, ValueError, KeyError, TypeError, RuntimeError)
+OUTPUT_LOCK = Lock()
+
+
+@dataclass(frozen=True)
+class Job:
+    stage: str
+    tool: str
+    target: str
+    args: tuple[str, ...] = ()
+    scope: str = ""
+    cwd: Path | None = None
+
+    @property
+    def command(self) -> tuple[str, ...]:
+        return (self.tool, "plugin", *self.args)
+
+    @property
+    def label(self) -> str:
+        location = f" [{self.scope}]" if self.scope else ""
+        if self.scope in {"project", "local"}:
+            location = f" [{self.scope}: {self.cwd}]"
+        return f"{self.tool} {self.target}{location}"
+
+
+def emit(message: str) -> None:
+    with OUTPUT_LOCK:
+        print(message, flush=True)
+
+
+def record(
+    results: list[dict],
+    job: Job,
+    status: str,
+    detail: str,
+    *,
+    quiet: bool = False,
+    progress: tuple[int, int] | None = None,
+    **fields,
+) -> None:
+    results.append(
+        {
+            "stage": job.stage,
+            "tool": job.tool,
+            "target": job.target,
+            "scope": job.scope,
+            "cwd": str(job.cwd) if job.cwd else None,
+            "command": list(job.command) if job.args else [],
+            "status": status,
+            "detail": detail,
+            **fields,
+        }
+    )
+    if not quiet:
+        prefix = ""
+        if progress is not None:
+            done, total = progress
+            prefix = f"[{done}/{total} {done / total:.0%}] "
+        emit(f"{prefix}[{status.upper()}] {job.stage} {job.label}: {detail}")
+
+
+def read_json(path: Path, *, optional: bool = False) -> dict:
+    try:
+        with path.open("rb") as stream:
+            data = json.load(stream)
+    except FileNotFoundError:
+        if optional:
+            return {}
+        raise
+    if not isinstance(data, dict):
+        raise TypeError(f"expected an object in {path}")
+    return data
+
+
+def segment(value: str) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and not value.startswith((".", "-"))
+        and not any(character in value for character in ("/", "\\", ":", "@", "\0"))
+    )
+
+
+def stop(process: subprocess.Popen) -> None:
+    try:
+        if os.name == "posix":
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
+    except ProcessLookupError:
+        pass
+
+
+def run(job: Job, timeout: int, env: dict[str, str]) -> dict | list:
+    started = time.monotonic()
+    logging.debug("%s (cwd: %s)", shlex.join(job.command), job.cwd)
+    with subprocess.Popen(
+        job.command,
+        cwd=job.cwd,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        start_new_session=os.name == "posix",
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            stop(process)
+            raise ValueError(f"timed out after {timeout} seconds") from None
+        except BaseException:
+            stop(process)
+            raise
+    logging.debug(
+        "%s %s: exit %d in %.1fs",
+        job.stage,
+        job.label,
+        process.returncode,
+        time.monotonic() - started,
+    )
+    try:
+        try:
+            data = json.loads(stdout)
+        except json.JSONDecodeError:
+            # Claude may print progress before its final JSON line. Never accept
+            # an earlier success object when the final line is not a result.
+            if job.tool != "claude" or not stdout.strip():
+                raise
+            data = json.loads(stdout.rstrip().splitlines()[-1])
+    except json.JSONDecodeError:
+        detail = stderr.strip() or "CLI returned invalid or missing JSON"
+        raise ValueError(f"exit {process.returncode}: {detail}") from None
+    if not isinstance(data, (dict, list)):
+        raise TypeError("unexpected CLI JSON result")
+    if process.returncode or (
+        isinstance(data, dict)
+        and (data.get("outcome") not in (None, "ok") or data.get("errors"))
+    ):
+        detail = (
+            (data.get("message") or data.get("errors"))
+            if isinstance(data, dict)
+            else None
+        )
+        raise ValueError(
+            f"exit {process.returncode}: {detail or stderr.strip() or 'command failed'}"
+        )
+    return data
+
+
+def inventory(tool: str, home: Path, timeout: int, env: dict[str, str]) -> dict:
+    data = run(
+        Job("inventory", tool, "installed", ("list", "--json"), cwd=home),
+        timeout,
+        env,
+    )
+    if tool == "claude":
+        if not isinstance(data, list):
+            raise TypeError("expected an array from claude plugin list --json")
+        plugins = defaultdict(list)
+        for row in data:
+            if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+                raise TypeError("invalid Claude plugin list entry")
+            plugins[row["id"]].append(row)
+    else:
+        if not isinstance(data, dict) or not isinstance(data.get("installed"), list):
+            raise TypeError("expected installed[] from codex plugin list --json")
+        plugins = {row["pluginId"]: row for row in data["installed"]}
+    return dict(plugins)
+
+
+def scope_key(row: dict) -> tuple[str, str | None]:
+    return row["scope"], (
+        row.get("projectPath") if row["scope"] in {"project", "local"} else None
+    )
+
+
+def scoped_row(job: Job, installed: dict) -> dict:
+    project = str(job.cwd) if job.scope in {"project", "local"} else None
+    return next(
+        (
+            row
+            for row in installed.get(job.target, [])
+            if scope_key(row) == (job.scope, project)
+        ),
+        {},
+    )
+
+
+def declarations(home: Path, scope: str, project: Path | None = None) -> dict:
+    path = home / "settings.json"
+    if scope in {"project", "local"}:
+        path = (
+            project
+            / ".claude"
+            / ("settings.local.json" if scope == "local" else "settings.json")
+        )
+    settings = read_json(path, optional=True).get("enabledPlugins", {})
+    if not isinstance(settings, dict):
+        raise TypeError(f"invalid enabledPlugins in {path}")
+    return settings
+
+
+def missing_project(path: Path) -> bool:
+    if not path.is_absolute():
+        raise ValueError(f"project path is not absolute: {path}")
+    try:
+        mode = path.stat().st_mode
+    except FileNotFoundError:
+        return True
+    if not stat.S_ISDIR(mode):
+        raise ValueError(f"project path is not a directory: {path}")
+    return False
+
+
+def plan_claude(home: Path, before: dict, allowed: set[str], results: list[dict]):
+    updates, stale, inherited = [], [], []
+    user_settings = declarations(home, "user")
+    for plugin, rows in sorted(before.items()):
+        name, separator, market = plugin.rpartition("@")
+        if not separator or market not in allowed or not segment(name):
+            continue
+        user = next((row for row in rows if row["scope"] == "user"), None)
+        for row in rows:
+            scope, project = scope_key(row)
+            cwd = Path(project) if project else home
+            job = Job(
+                "update",
+                "claude",
+                plugin,
+                ("update", plugin, "--scope", scope, "--json"),
+                scope,
+                cwd,
+            )
+            try:
+                if scope not in {"user", "project", "local"}:
+                    record(
+                        results, job, "skipped", f"externally managed scope: {scope}"
+                    )
+                    continue
+                if scope in {"project", "local"}:
+                    if not project:
+                        raise ValueError(
+                            "project-scoped installation has no projectPath"
+                        )
+                    if missing_project(cwd):
+                        stale.append((job, row))
+                        continue
+                    if user:
+                        explicit = any(
+                            plugin in declarations(home, level, cwd)
+                            for level in ("project", "local")
+                        )
+                        same_cache = row.get("installPath") == user.get(
+                            "installPath"
+                        ) and row.get("version") == user.get("version")
+                        if (
+                            not explicit
+                            and same_cache
+                            and user_settings.get(plugin) is True
+                        ):
+                            inherited.append((job, row))
+                        else:
+                            record(
+                                results,
+                                job,
+                                "skipped",
+                                "updated at user scope; explicit or independent project installation retained",
+                                quiet=True,
+                            )
+                        continue
+                    # Some Claude releases select the first record at a scope,
+                    # regardless of cwd. Do not update another project's record.
+                    live = [
+                        item
+                        for item in rows
+                        if item["scope"] == scope
+                        and item.get("projectPath")
+                        and not missing_project(Path(item["projectPath"]))
+                    ]
+                    if len(live) > 1 and scope_key(row) != scope_key(live[0]):
+                        record(
+                            results,
+                            job,
+                            "failed",
+                            "multiple projects at this scope; CLI cannot reliably target this registration",
+                        )
+                        continue
+                if job not in updates:
+                    updates.append(job)
+            except DATA_ERRORS as error:
+                record(results, job, "failed", str(error))
+    return updates, stale, inherited
+
+
+def remove_stale(home: Path, stale: list, results: list[dict]) -> None:
+    """Remove only exact native-listed rows whose project no longer exists.
+
+    The CLI has no project-path option for uninstalling a nonexistent cwd.
+    This is registry repair, never a substitute for native install/update.
+    """
+    if not stale:
+        return
+    registry = home / "plugins" / "installed_plugins.json"
+    job = Job("registry", "claude", str(registry))
+    try:
+        if registry.resolve() != registry:
+            raise ValueError("refusing to rewrite a symlinked registry")
+        original = registry.read_bytes()
+        data = json.loads(original)
+        if (
+            not isinstance(data, dict)
+            or data.get("version") != 2
+            or not isinstance(data.get("plugins"), dict)
+        ):
+            raise ValueError("unsupported Claude registry format; no entries removed")
+        removed = []
+        for target, expected in stale:
+            if not missing_project(target.cwd):
+                raise ValueError(f"project reappeared: {target.cwd}")
+            rows = data["plugins"].get(target.target, [])
+            matches = [
+                row
+                for row in rows
+                if scope_key(row) == scope_key(expected)
+                and row.get("version") == expected.get("version")
+                and row.get("installPath") == expected.get("installPath")
+            ]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"registration changed or is ambiguous: {target.label}"
+                )
+            rows.remove(matches[0])
+            if not rows:
+                data["plugins"].pop(target.target)
+            removed.append(target)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=registry.parent, prefix=".installed_plugins-", delete=False
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(
+                    (json.dumps(data, indent=2, ensure_ascii=False) + "\n").encode()
+                )
+                stream.flush()
+                os.fsync(stream.fileno())
+            if registry.resolve() != registry or registry.read_bytes() != original:
+                raise ValueError(
+                    "registry changed during cleanup; original left in place"
+                )
+            temporary.replace(registry)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        for target in removed:
+            record(
+                results,
+                Job(
+                    "registry",
+                    "claude",
+                    target.target,
+                    scope=target.scope,
+                    cwd=target.cwd,
+                ),
+                "unregistered",
+                "removed missing-project registration",
+            )
+    except DATA_ERRORS as error:
+        record(results, job, "failed", str(error))
+
+
+def verify(job: Job, data: dict, installed: dict) -> Path:
+    if data.get("pluginId") != job.target:
+        raise ValueError("CLI returned a different plugin")
+    if job.tool == "claude":
+        if data.get("scope") != job.scope or not data.get("newVersion"):
+            raise ValueError("CLI did not confirm the requested scope and version")
+        row = scoped_row(job, installed)
+        version = data["newVersion"]
+        path = row.get("installPath")
+    else:
+        row = installed.get(job.target, {})
+        version = data["version"]
+        path = data.get("installedPath")
+        if row.get("enabled") is not True:
+            raise ValueError("plugin no longer appears enabled")
+        name, market = job.target.rsplit("@", 1)
+        folder = (job.cwd / "plugins" / "cache").resolve() / market / name
+        if not path or Path(path).resolve().parent != folder:
+            raise ValueError("Codex returned a path outside the requested plugin cache")
+        if (
+            row.get("installedPath")
+            and Path(row["installedPath"]).resolve() != Path(path).resolve()
+        ):
+            raise ValueError("Codex installation path changed during verification")
+    if not row or row["version"] != version:
+        raise ValueError(
+            f"expected installed version {version}, found {row.get('version')}"
+        )
+    if not path or not Path(path).is_absolute() or not Path(path).is_dir():
+        raise ValueError(f"installed directory is missing: {path}")
+    return Path(path)
+
+
+def prune(
+    tool: str,
+    plugin: str,
+    home: Path,
+    keep: set[Path],
+    retired: set[Path],
+    results: list[dict],
+) -> None:
+    name, market = plugin.rsplit("@", 1)
+    folder = home / "plugins" / "cache" / market / name
+    job = Job("cache", tool, plugin)
+    try:
+        if folder.resolve() != folder or folder.is_symlink():
+            raise ValueError("cache path contains a symlink")
+        if not folder.exists():
+            return
+        if not folder.is_dir():
+            raise ValueError("cache path is not a directory")
+        retired = {
+            path
+            for path in retired
+            if path.is_absolute() and path.parent == folder and path.resolve() == path
+        }
+        # Missing references are not evidence that an unrelated cache is live.
+        # Keep their names reserved, but do not resolve(strict=True) and abort
+        # cleanup for every other version of this plugin.
+        if (not keep and not retired) or any(
+            not path.is_absolute() or path.parent != folder or path.resolve() != path
+            for path in keep
+        ):
+            record(
+                results, job, "skipped", "installation uses a different cache layout"
+            )
+            return
+        entries = sorted(folder.iterdir())
+        for path in entries:
+            if path.is_symlink():
+                try:
+                    relative = path.resolve().relative_to(folder)
+                    if not relative.parts:
+                        raise ValueError("link points to the cache root")
+                    keep.add(folder / relative.parts[0])
+                except DATA_ERRORS:
+                    record(
+                        results,
+                        job,
+                        "skipped",
+                        f"unresolved or external cache link: {path}",
+                    )
+                    return
+        for path in entries:
+            if (
+                path.name != "latest"
+                and not path.name.startswith(".")
+                and not path.is_symlink()
+                and path.is_dir()
+                and path not in keep
+            ):
+                candidate = (
+                    path in retired
+                    or re.fullmatch(
+                        r"(?:v?\d+(?:\.\d+){0,3}(?:[-+][A-Za-z0-9][A-Za-z0-9._+-]*)?|[0-9a-f]{7,64}|local)",
+                        path.name,
+                    )
+                    is not None
+                )
+                if not candidate:
+                    for manifest in (
+                        "plugin.json",
+                        ".claude-plugin/plugin.json",
+                        ".codex-plugin/plugin.json",
+                    ):
+                        if (path / manifest).is_file():
+                            try:
+                                candidate = (
+                                    read_json(path / manifest).get("name") == name
+                                )
+                            except DATA_ERRORS:
+                                pass
+                            break
+                if not candidate:
+                    record(results, job, "retained", f"unrecognized directory: {path}")
+                    continue
+                try:
+                    shutil.rmtree(path)
+                    record(results, job, "removed", str(path), path=str(path))
+                except OSError as error:
+                    record(results, job, "failed", f"{path}: {error}")
+    except DATA_ERRORS as error:
+        record(results, job, "failed", str(error))
+
+
+def repair_claude(job: Job, home: Path, timeout: int, env: dict[str, str]) -> dict:
+    enabled = declarations(home, job.scope, job.cwd).get(job.target)
+    if not isinstance(enabled, bool):
+        raise TypeError(
+            "missing cache; cannot repair without an explicit scope enabled state"
+        )
+    install = Job(
+        "repair",
+        "claude",
+        job.target,
+        ("install", job.target, "--scope", job.scope, "--json"),
+        job.scope,
+        job.cwd,
+    )
+    failure = None
+    try:
+        data = run(install, timeout, env)
+    except DATA_ERRORS as error:
+        failure = str(error)
+    finally:
+        # Install can enable an existing disabled installation even on a
+        # partial failure. Restore through the native CLI, never settings writes.
+        if not enabled:
+            try:
+                if declarations(home, job.scope, job.cwd).get(job.target) is not False:
+                    run(
+                        Job(
+                            "repair",
+                            "claude",
+                            job.target,
+                            ("disable", job.target, "--scope", job.scope, "--json"),
+                            job.scope,
+                            job.cwd,
+                        ),
+                        timeout,
+                        env,
+                    )
+                if declarations(home, job.scope, job.cwd).get(job.target) is not False:
+                    raise ValueError("disabled state was not restored")
+            except DATA_ERRORS as error:
+                raise ValueError(
+                    f"could not preserve disabled state: {error}; install: {failure or 'completed'}"
+                ) from error
+    if failure is not None:
+        raise ValueError(failure)
+    if not isinstance(data, dict) or data.get("outcome") != "ok":
+        raise ValueError("CLI did not confirm the repair")
+    installed = inventory("claude", home, timeout, env)
+    row = scoped_row(job, installed)
+    data = {**data, "newVersion": row.get("version")}
+    verify(job, data, installed)
+    return data
+
+
+def parallel_jobs(jobs: list[Job], pool: ThreadPoolExecutor, action, args, env):
+    if not jobs:
+        return
+    tool, stage = jobs[0].tool, jobs[0].stage
+    total = len(jobs)
+    done = 0
+    emit(
+        f"[{tool} {stage} 0/{total} 0%] Starting (up to {args.jobs} concurrent jobs)"
+    )
+    groups = defaultdict(list)
+    for job in jobs:
+        groups[job.target].append(job)
+    # Distinct targets may run together. A plugin's scopes share its cache.
+    while groups:
+        wave = [group.pop(0) for group in groups.values()]
+        groups = {target: group for target, group in groups.items() if group}
+        pending = {pool.submit(action, job, args, env): job for job in wave}
+        while pending:
+            finished, _ = wait(pending, timeout=10, return_when=FIRST_COMPLETED)
+            if not finished:
+                emit(
+                    f"[{tool} {stage} {done}/{total} {done / total:.0%}] "
+                    f"Waiting for {len(pending)} unfinished jobs"
+                )
+            for future in finished:
+                job = pending.pop(future)
+                done += 1
+                yield job, future, (done, total)
+
+
+def refresh_market(job: Job, args: argparse.Namespace, env: dict[str, str]) -> None:
+    data = run(job, args.timeout, env)
+    if not isinstance(data, dict):
+        raise TypeError("expected a marketplace refresh result")
+    if job.tool == "claude" and data.get("outcome") != "ok":
+        raise ValueError("CLI did not confirm marketplace refresh")
+    if job.tool == "codex" and (
+        job.target not in data["selectedMarketplaces"]
+        or not isinstance(data.get("upgradedRoots"), list)
+    ):
+        raise ValueError("Codex did not refresh the requested marketplace")
+
+
+def apply_update(
+    job: Job, args: argparse.Namespace, env: dict[str, str], *, repair: bool = False
+) -> dict | None:
+    home = Path(env["CLAUDE_CONFIG_DIR" if job.tool == "claude" else "CODEX_HOME"])
+    current = inventory(job.tool, home, args.timeout, env)
+    if job.tool == "codex":
+        enabled = current.get(job.target, {}).get("enabled")
+        if enabled is False:
+            return None
+        if enabled is not True:
+            raise ValueError("CLI did not confirm an enabled plugin")
+    else:
+        row = scoped_row(job, current)
+        if not row:
+            raise ValueError("registered installation is missing")
+        if job.scope in {"project", "local"}:
+            first = next(
+                item for item in current[job.target] if item["scope"] == job.scope
+            )
+            if scope_key(first) != scope_key(row):
+                raise ValueError("CLI would target another project registration")
+        if not row.get("installPath") or not Path(row["installPath"]).is_dir():
+            if not repair:
+                raise ValueError("missing cache; deferred to serial repair")
+            return {**repair_claude(job, home, args.timeout, env), "repaired": True}
+    data = run(job, args.timeout, env)
+    if not isinstance(data, dict) or (
+        job.tool == "claude" and data.get("outcome") != "ok"
+    ):
+        raise ValueError("CLI did not confirm the update")
+    if repair and job.tool == "claude":
+        row = scoped_row(job, inventory(job.tool, home, args.timeout, env))
+        if row and (not row.get("installPath") or not Path(row["installPath"]).is_dir()):
+            return {**repair_claude(job, home, args.timeout, env), "repaired": True}
+    return data
+
+
+def check_registrations(tool: str, baseline: dict, current: dict) -> None:
+    if tool == "claude":
+        for plugin, rows in baseline.items():
+            if not {scope_key(row) for row in rows} <= {
+                scope_key(row) for row in current.get(plugin, [])
+            }:
+                raise ValueError(f"registered scopes disappeared: {plugin}")
+    else:
+        for plugin, row in baseline.items():
+            if plugin not in current:
+                raise ValueError(f"previously installed plugin disappeared: {plugin}")
+            if row.get("enabled") != current[plugin].get("enabled"):
+                raise ValueError(f"enabled state changed: {plugin}")
+
+
+def update_tool(
+    tool: str,
+    home: Path,
+    markets: list[Job],
+    updates: list[Job],
+    before: dict,
+    stale: list,
+    inherited: list,
+    args: argparse.Namespace,
+    env: dict[str, str],
+    pool: ThreadPoolExecutor,
+) -> list[dict]:
+    results = []
+    retired = defaultdict(set)
+    for plugin, rows in before.items():
+        if tool == "claude":
+            retired[plugin].update(
+                Path(row["installPath"]) for row in rows if row.get("installPath")
+            )
+    if tool == "claude" and not args.no_prune:
+        remove_stale(home, stale, results)
+    try:
+        baseline = inventory(tool, home, args.timeout, env)
+    except DATA_ERRORS as error:
+        record(results, Job("inventory", tool, "installed"), "failed", str(error))
+        return results
+    bad_markets = set()
+    market_retries = []
+    for job, future, progress in parallel_jobs(markets, pool, refresh_market, args, env):
+        try:
+            future.result()
+            record(results, job, "ok", "refreshed", progress=progress)
+        except DATA_ERRORS as error:
+            market_retries.append(job)
+            record(results, job, "retry", str(error), progress=progress)
+
+    # The native CLIs may contend on shared registry files. Retry only failed
+    # operations, with no other marketplace writer for this tool running.
+    for job in market_retries:
+        try:
+            pool.submit(refresh_market, job, args, env).result()
+            record(results, job, "ok", "refreshed on serial retry")
+        except DATA_ERRORS as retry_error:
+            bad_markets.add(job.target)
+            record(results, job, "failed", str(retry_error))
+    if markets:
+        try:
+            listing = run(
+                Job(
+                    "inventory",
+                    tool,
+                    "marketplaces",
+                    ("marketplace", "list", "--json"),
+                    cwd=home,
+                ),
+                args.timeout,
+                env,
+            )
+            listed = {
+                row["name"]
+                for row in (listing if tool == "claude" else listing["marketplaces"])
+            }
+            for job in markets:
+                if job.target not in listed and job.target not in bad_markets:
+                    bad_markets.add(job.target)
+                    record(results, job, "failed", "marketplace missing after refresh")
+        except DATA_ERRORS as error:
+            bad_markets.update(job.target for job in markets)
+            record(
+                results, Job("verification", tool, "marketplaces"), "failed", str(error)
+            )
+
+    reported = {}
+    blocked = set()
+    native_before = {}
+    candidates = []
+    for job in updates:
+        name, market = job.target.rsplit("@", 1)
+        if market in bad_markets:
+            record(results, job, "skipped", "marketplace refresh failed")
+            blocked.add(job.target)
+            continue
+        folder = home / "plugins" / "cache" / market / name
+        try:
+            native_before.setdefault(
+                job.target,
+                {
+                    path
+                    for path in folder.iterdir()
+                    if path.is_dir() and not path.is_symlink()
+                }
+                if folder.is_dir() and folder.resolve() == folder
+                else set(),
+            )
+            candidates.append(job)
+        except DATA_ERRORS as error:
+            blocked.add(job.target)
+            record(results, job, "failed", str(error))
+
+    attempts = {}
+    for job, future, progress in parallel_jobs(candidates, pool, apply_update, args, env):
+        try:
+            data = future.result()
+            if data is None:
+                blocked.add(job.target)
+                record(results, job, "skipped", "disabled plugin", progress=progress)
+            else:
+                attempts[job] = (data, None)
+                version = data.get("newVersion", data.get("version"))
+                record(
+                    results,
+                    job,
+                    "completed",
+                    f"{version or 'CLI completed'}; awaiting verification",
+                    progress=progress,
+                )
+        except DATA_ERRORS as error:
+            attempts[job] = (None, str(error))
+            record(results, job, "retry", str(error), progress=progress)
+
+    # No writer for this tool is running now. A successful command is not proof
+    # that its version survived another command's registry write.
+    if attempts:
+        emit(f"[{tool} verification] Checking {len(attempts)} plugin updates")
+        try:
+            current = inventory(tool, home, args.timeout, env)
+        except DATA_ERRORS as error:
+            record(
+                results, Job("verification", tool, "installed"), "failed", str(error)
+            )
+            return results
+        for job, (data, error) in attempts.items():
+            if error is None:
+                try:
+                    verify(job, data, current)
+                    reported[job] = data
+                    continue
+                except DATA_ERRORS as mismatch:
+                    error = str(mismatch)
+            emit(f"[RETRY] {job.label}: {error}")
+            try:
+                data = pool.submit(apply_update, job, args, env, repair=True).result()
+                if data is None:
+                    blocked.add(job.target)
+                    record(results, job, "skipped", "disabled plugin")
+                    continue
+                current = inventory(tool, home, args.timeout, env)
+                verify(job, data, current)
+                reported[job] = data
+                if data.get("repaired"):
+                    record(
+                        results,
+                        Job(
+                            "repair",
+                            tool,
+                            job.target,
+                            ("install", job.target, "--scope", job.scope, "--json"),
+                            job.scope,
+                            job.cwd,
+                        ),
+                        "repaired",
+                        "missing cache restored; enabled state preserved",
+                    )
+                else:
+                    record(results, job, "completed", "serial retry verified")
+            except DATA_ERRORS as retry_error:
+                blocked.add(job.target)
+                record(results, job, "failed", str(retry_error))
+
+    # Do not remove registrations or caches if concurrent native writes lost
+    # other installations or changed an existing Codex enabled state.
+    try:
+        current = inventory(tool, home, args.timeout, env)
+        check_registrations(tool, baseline, current)
+        for job, data in reported.items():
+            verify(job, data, current)
+    except DATA_ERRORS as error:
+        record(
+            results, Job("verification", tool, "installed"), "failed", str(error)
+        )
+        return results
+
+    # Inherited records share user-managed content. Uninstall only a still
+    # undeclared, unchanged duplicate, after its user update has been verified.
+    if tool == "claude" and not args.no_prune:
+        for original, expected in inherited:
+            user_job = next(
+                (
+                    job
+                    for job in reported
+                    if job.target == original.target and job.scope == "user"
+                ),
+                None,
+            )
+            cleanup = Job(
+                "registry",
+                tool,
+                original.target,
+                (
+                    "uninstall",
+                    original.target,
+                    "--scope",
+                    original.scope,
+                    "--keep-data",
+                    "--json",
+                ),
+                original.scope,
+                original.cwd,
+            )
+            if not user_job:
+                record(
+                    results,
+                    cleanup,
+                    "skipped",
+                    "user update not verified; inherited registration retained",
+                    quiet=True,
+                )
+                continue
+            try:
+                current = inventory(tool, home, args.timeout, env)
+                verify(user_job, reported[user_job], current)
+                row = scoped_row(original, current)
+                if (
+                    not row
+                    or row.get("version") != expected.get("version")
+                    or row.get("installPath") != expected.get("installPath")
+                    or declarations(home, "user").get(original.target) is not True
+                    or any(
+                        original.target in declarations(home, level, original.cwd)
+                        for level in ("project", "local")
+                    )
+                ):
+                    raise ValueError("scope ownership changed; registration retained")
+                data = run(cleanup, args.timeout, env)
+                if (
+                    not isinstance(data, dict)
+                    or data.get("pluginId") != original.target
+                    or data.get("scope") != original.scope
+                    or data.get("outcome") != "ok"
+                ):
+                    raise ValueError("CLI did not confirm scoped uninstall")
+                current = inventory(tool, home, args.timeout, env)
+                if scoped_row(original, current):
+                    raise ValueError(
+                        "inherited registration still present after uninstall"
+                    )
+                verify(user_job, reported[user_job], current)
+                baseline[original.target] = [
+                    row
+                    for row in baseline[original.target]
+                    if scope_key(row) != scope_key(expected)
+                ]
+                record(
+                    results,
+                    cleanup,
+                    "unregistered",
+                    "removed inherited registration; user installation and data retained",
+                )
+            except DATA_ERRORS as error:
+                blocked.add(original.target)
+                record(results, cleanup, "failed", str(error))
+    for plugin, paths in native_before.items():
+        for path in sorted(paths):
+            if not path.exists():
+                record(
+                    results,
+                    Job("cache", tool, plugin),
+                    "native-removed",
+                    str(path),
+                    path=str(path),
+                )
+    try:
+        current = inventory(tool, home, args.timeout, env)
+        check_registrations(tool, baseline, current)
+        installed = current
+        verified = defaultdict(set)
+        for job, data in reported.items():
+            try:
+                path = verify(job, data, installed)
+                verified[job.target].add(path)
+                record(
+                    results,
+                    job,
+                    "verified",
+                    str(path),
+                    quiet=not args.debug,
+                    version=data.get("newVersion", data.get("version")),
+                )
+            except DATA_ERRORS as error:
+                blocked.add(job.target)
+                record(results, job, "failed", str(error))
+    except DATA_ERRORS as error:
+        if not reported:
+            record(
+                results, Job("verification", tool, "installed"), "failed", str(error)
+            )
+        for job in reported:
+            record(results, job, "failed", f"final inventory: {error}")
+        return results
+
+    emit(
+        f"[{tool} verification] "
+        f"{sum(row['status'] == 'verified' for row in results)}/{len(updates)} update targets verified"
+    )
+    if not args.no_prune:
+        # A plugin with no remaining registrations can have only retired caches.
+        if tool == "claude":
+            for result in results:
+                if (
+                    result["status"] == "unregistered"
+                    and result["target"] not in installed
+                ):
+                    verified.setdefault(result["target"], set())
+        for plugin, paths in sorted(verified.items()):
+            if plugin not in blocked:
+                try:
+                    keep = set(paths)
+                    if tool == "claude":
+                        rows = inventory(tool, home, args.timeout, env).get(plugin, [])
+                        if any(not row.get("installPath") for row in rows):
+                            record(
+                                results,
+                                Job("cache", tool, plugin),
+                                "skipped",
+                                "remaining registration has no installPath",
+                            )
+                            continue
+                        keep |= {
+                            Path(row["installPath"])
+                            for row in rows
+                            if row.get("installPath")
+                        }
+                    for path in sorted(keep - paths):
+                        record(
+                            results,
+                            Job("cache", tool, plugin),
+                            "retained",
+                            f"referenced by another scope: {path}",
+                            quiet=not args.debug,
+                        )
+                    prune(tool, plugin, home, keep, retired[plugin], results)
+                except DATA_ERRORS as error:
+                    record(results, Job("cache", tool, plugin), "failed", str(error))
+    return results
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--jobs",
+        "--workers",
+        type=positive_int,
+        default=6,
+        help="maximum concurrent marketplace or plugin jobs across both tools (default: 6)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=positive_int,
+        default=300,
+        help="seconds per CLI command (default: 300)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="inspect configuration and show targets without updating or pruning",
+    )
+    parser.add_argument(
+        "--skip-marketplaces", action="store_true", help="skip marketplace refresh"
+    )
+    parser.add_argument(
+        "--no-prune",
+        action="store_true",
+        help="skip registry/cache cleanup (native CLIs may still prune)",
+    )
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="write a JSON report without raw inventories or configuration",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="show native commands, timing, and verified paths",
+    )
+    args = parser.parse_args()
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.WARNING,
+        format="[%(levelname)s] %(message)s",
+    )
+    homes = {
+        "claude": Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+        .expanduser()
+        .resolve(),
+        "codex": Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+        .expanduser()
+        .resolve(),
+    }
+    env = {
+        **os.environ,
+        "CLAUDE_CONFIG_DIR": str(homes["claude"]),
+        "CODEX_HOME": str(homes["codex"]),
+    }
+    results = []
+    plans = {}
+    for tool, home in homes.items():
+        try:
+            before = {}
+            configured = (
+                (home / "config.toml").is_file()
+                if tool == "codex"
+                else (
+                    (home / "settings.json").is_file()
+                    or (home / "plugins" / "installed_plugins.json").is_file()
+                )
+            )
+            if not configured:
+                record(
+                    results,
+                    Job("inventory", tool, str(home)),
+                    "skipped",
+                    "no configuration",
+                )
+                continue
+            emit(f"[{tool} inventory] Discovering marketplaces and installed plugins")
+            executable = shutil.which(tool, path=env.get("PATH"))
+            if not executable:
+                raise ValueError(f"{tool} is not on PATH")
+            version = subprocess.run(
+                (executable, "--version"),
+                cwd=home,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=min(args.timeout, 15),
+                check=True,
+            ).stdout.strip()
+            record(
+                results,
+                Job("environment", tool, str(home)),
+                "info",
+                f"{version}; {executable}",
+            )
+            if tool == "claude":
+                configured_sources = read_json(
+                    home / "settings.json", optional=True
+                ).get("extraKnownMarketplaces", {})
+                if not isinstance(configured_sources, dict):
+                    raise TypeError("extraKnownMarketplaces must be an object")
+                data = run(
+                    Job(
+                        "inventory",
+                        tool,
+                        "marketplaces",
+                        ("marketplace", "list", "--json"),
+                        cwd=home,
+                    ),
+                    args.timeout,
+                    env,
+                )
+                if not isinstance(data, list):
+                    raise TypeError(
+                        "expected an array from claude plugin marketplace list --json"
+                    )
+                listed = {row["name"] for row in data}
+                sources = {
+                    name: source
+                    for name, source in configured_sources.items()
+                    if name in listed
+                }
+                for name in sorted(configured_sources.keys() - listed):
+                    record(
+                        results,
+                        Job("inventory", tool, name),
+                        "failed",
+                        "configured marketplace is absent from CLI inventory",
+                    )
+            elif (home / "config.toml").exists():
+                listing = Job(
+                    "inventory",
+                    tool,
+                    "marketplaces",
+                    ("marketplace", "list", "--json"),
+                    cwd=home,
+                )
+                try:
+                    data = run(listing, args.timeout, env)
+                except ValueError as error:
+                    raise ValueError(
+                        f"cannot enumerate marketplace names via CLI; "
+                        f"no bulk upgrade attempted: {error}"
+                    ) from error
+                sources = {
+                    row["name"]: {
+                        "source_type": (row.get("marketplaceSource") or {}).get(
+                            "sourceType"
+                        )
+                    }
+                    for row in data["marketplaces"]
+                }
+            else:
+                sources = {}
+            if not isinstance(sources, dict):
+                raise TypeError("configured marketplaces must be an object")
+            allowed = set()
+            markets = []
+            updates = []
+            before = (
+                inventory(tool, home, args.timeout, env)
+                if tool == "claude" or sources
+                else {}
+            )
+            for name, source in sorted(sources.items()):
+                if not segment(name) or not isinstance(source, dict):
+                    raise ValueError(f"invalid marketplace configuration: {name}")
+                if tool == "codex" and name in CODEX_RUNTIME_MARKETS:
+                    record(
+                        results,
+                        Job("inventory", tool, name),
+                        "skipped",
+                        "runtime-managed marketplace",
+                    )
+                else:
+                    if tool == "codex" and source.get("source_type") not in {
+                        "git",
+                        "local",
+                    }:
+                        fallback = {
+                            (row.get("marketplaceSource") or {}).get("sourceType")
+                            for plugin, row in before.items()
+                            if plugin.rpartition("@")[2] == name
+                        } - {None}
+                        if len(fallback) == 1:
+                            source["source_type"] = fallback.pop()
+                        if source.get("source_type") not in {"git", "local"}:
+                            record(
+                                results,
+                                Job("inventory", tool, name),
+                                "skipped",
+                                "CLI did not identify a configured marketplace source",
+                            )
+                            continue
+                    allowed.add(name)
+                    if (
+                        not args.skip_marketplaces
+                        and (tool == "claude" or source.get("source_type") == "git")
+                    ):
+                        verb = "update" if tool == "claude" else "upgrade"
+                        markets.append(
+                            Job(
+                                "marketplace",
+                                tool,
+                                name,
+                                ("marketplace", verb, name, "--json"),
+                                cwd=home,
+                            )
+                        )
+            print(
+                f"{tool} marketplaces: {', '.join(sorted(allowed)) or '(none)'}",
+                flush=True,
+            )
+            stale, inherited = [], []
+            if tool == "claude":
+                updates, stale, inherited = plan_claude(home, before, allowed, results)
+            for plugin, installation in (
+                sorted(before.items()) if tool == "codex" else []
+            ):
+                name, separator, market = plugin.rpartition("@")
+                if separator and market in allowed:
+                    if not segment(name):
+                        raise ValueError(f"invalid plugin name: {plugin}")
+                    if not isinstance(installation, dict):
+                        raise ValueError(f"invalid plugin configuration: {plugin}")
+                    job = Job(
+                        "update", tool, plugin, ("add", plugin, "--json"), cwd=home
+                    )
+                    if installation.get("enabled") is False:
+                        record(results, job, "skipped", "disabled plugin")
+                    elif installation.get("enabled") is True:
+                        updates.append(job)
+                    else:
+                        raise ValueError(f"invalid enabled state: {plugin}")
+            count = (
+                sum(len(rows) for rows in before.values())
+                if tool == "claude"
+                else len(before)
+            )
+            record(
+                results,
+                Job("inventory", tool, "installed"),
+                "info",
+                f"CLI listed {len(before)} plugins / {count} installations; {len(updates)} update targets",
+            )
+            plans[tool] = (markets, updates, before, stale, inherited)
+        except (*DATA_ERRORS, subprocess.SubprocessError) as error:
+            record(results, Job("inventory", tool, str(home)), "failed", str(error))
+
+    if args.dry_run:
+        for markets, updates, _, stale, inherited in plans.values():
+            for job in [*markets, *updates]:
+                detail = shlex.join(job.command)
+                if job.tool == "claude" and job.stage == "update":
+                    detail += "; repair missing cache with scoped install if needed, preserving enabled state"
+                record(results, job, "planned", detail)
+            if not args.no_prune:
+                for job, _ in stale:
+                    record(
+                        results,
+                        Job(
+                            "registry",
+                            "claude",
+                            job.target,
+                            scope=job.scope,
+                            cwd=job.cwd,
+                        ),
+                        "planned",
+                        "remove exact missing-project registration",
+                    )
+                for job, _ in inherited:
+                    record(
+                        results,
+                        Job(
+                            "registry",
+                            "claude",
+                            job.target,
+                            scope=job.scope,
+                            cwd=job.cwd,
+                        ),
+                        "planned",
+                        "remove inherited registration after verified user update",
+                    )
+    else:
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            with ThreadPoolExecutor(max_workers=2) as coordinators:
+                pending = {
+                    coordinators.submit(
+                        update_tool, tool, homes[tool], *plan, args, env, pool
+                    ): tool
+                    for tool, plan in plans.items()
+                }
+                for future in as_completed(pending):
+                    results.extend(future.result())
+
+    failures = [result for result in results if result["status"] == "failed"]
+    verified = sum(result["status"] == "verified" for result in results)
+    removed = [result["path"] for result in results if result["status"] == "removed"]
+    skipped = sum(result["status"] == "skipped" for result in results)
+    print("\nPLAN SUMMARY" if args.dry_run else "\nSUMMARY")
+    print(
+        f"{'Tool':<8} {'Plugins':>8} {'Targets':>8} {'Verified':>8} {'Skipped':>8} {'Failed':>8}"
+    )
+    for tool in homes:
+        records = [result for result in results if result["tool"] == tool]
+        targets = len(plans[tool][1]) if tool in plans else 0
+        print(
+            f"{tool:<8} {len({job.target for job in plans[tool][1]}) if tool in plans else 0:>8} {targets:>8} "
+            f"{sum(row['status'] == 'verified' for row in records):>8} "
+            f"{sum(row['status'] == 'skipped' for row in records):>8} "
+            f"{sum(row['status'] == 'failed' for row in records):>8}"
+        )
+    print(
+        f"\nCleanup: {sum(row['status'] == 'unregistered' for row in results)} registrations removed; {len(removed)} cache directories pruned."
+    )
+    print(
+        f"Native CLI: {sum(row['status'] == 'native-removed' for row in results)} cache directories disappeared during native operations."
+    )
+    if failures:
+        print("\nFAILURES")
+        for result in failures:
+            location = f" (cwd: {result['cwd']})" if result["cwd"] else ""
+            print(
+                f"- {result['stage']} {result['tool']} {result['target']}{location}: {result['detail']}"
+            )
+    if args.report:
+        try:
+            args.report.write_text(
+                json.dumps(
+                    {
+                        "dry_run": args.dry_run,
+                        "verified_installations": verified,
+                        "removed_caches": removed,
+                        "removed_registrations": [
+                            row for row in results if row["status"] == "unregistered"
+                        ],
+                        "native_removed_caches": [
+                            row["path"]
+                            for row in results
+                            if row["status"] == "native-removed"
+                        ],
+                        "skipped": skipped,
+                        "failures": failures,
+                        "results": results,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        except OSError as error:
+            print(f"FAIL report {args.report}: {error}")
+            return 1
+        print(f"\nReport: {args.report}")
+    return int(bool(failures))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
