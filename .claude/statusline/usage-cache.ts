@@ -3,6 +3,7 @@ import { closeSync, mkdirSync, openSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { setTimeout as delay } from "node:timers/promises";
 
 /**
  * @param {unknown} value Candidate object.
@@ -23,6 +24,8 @@ const DEFAULT_USAGE_CACHE_TTL_MS = 30_000;
 const REFRESH_LEASE_MS = 15_000;
 const REFRESH_DEADLINE_MS = 9000;
 const PUBLISH_WAIT_MS = 40;
+const CONTENTION_WAIT_MS = 4000;
+const CONTENTION_RETRY_MS = 100;
 
 /**
  * @param {unknown} value Untrusted metric.
@@ -162,25 +165,45 @@ const readRow = (db: DatabaseSync, key: string) =>
  */
 const readSnapshot = (
   row: ReturnType<typeof readRow>,
-  now: number
+  now: number,
+  maxAge: number
 ): import("./types.ts").Snapshot | undefined => {
-  let snapshot;
-  if (typeof row?.snapshot === "string" && isFiniteNumber(row.fetched_at)) {
+  if (
+    typeof row?.snapshot === "string" &&
+    isFiniteNumber(row.fetched_at) &&
+    Number.isFinite(new Date(row.fetched_at).getTime())
+  ) {
     try {
-      /** @type {unknown} */
       const parsed: unknown = JSON.parse(row.snapshot);
-      snapshot = isSnapshot(parsed)
+      return isSnapshot(parsed)
         ? adjustedSnapshot(
-            parsed,
+            { ...parsed, fetchedAt: row.fetched_at },
             Math.max(0, now - row.fetched_at),
-            MAX_STALE_MS
+            maxAge
           )
         : undefined;
     } catch {
-      snapshot = undefined;
+      return undefined;
     }
   }
-  return snapshot;
+  return undefined;
+};
+
+const isBusy = (error: unknown) =>
+  isRecord(error) &&
+  isFiniteNumber(error.errcode) &&
+  [5, 6].includes(error.errcode % 256);
+
+const retryBusy = async <T extends { busy: boolean }>(
+  attempt: () => T,
+  deadline: number
+): Promise<T> => {
+  const result = attempt();
+  if (result.busy && performance.now() < deadline) {
+    await delay(CONTENTION_RETRY_MS);
+    return await retryBusy(attempt, deadline);
+  }
+  return result;
 };
 
 /**
@@ -193,7 +216,8 @@ const claimRefresh = (
   file: string,
   key: string,
   now: number,
-  token: string
+  token: string,
+  maxAge: number
 ) => {
   let snapshot;
   let claimed = false;
@@ -203,7 +227,7 @@ const claimRefresh = (
     using db = new DatabaseSync(file, { timeout: 0 });
     db.exec(schema);
     const row = readRow(db, key);
-    snapshot = readSnapshot(row, now);
+    snapshot = readSnapshot(row, now, maxAge);
     const clock = Date.now();
     if (
       !row ||
@@ -224,13 +248,13 @@ const claimRefresh = (
         `)
           .run(key, token, clock + REFRESH_LEASE_MS, now, clock).changes === 1;
       if (!claimed) {
-        snapshot = readSnapshot(readRow(db, key), now);
+        snapshot = readSnapshot(readRow(db, key), now, maxAge);
       }
     }
-  } catch {
-    return { claimed: false, snapshot };
+  } catch (error) {
+    return { busy: isBusy(error), claimed: false, snapshot };
   }
-  return { claimed, snapshot };
+  return { busy: false, claimed, snapshot };
 };
 
 /**
@@ -247,7 +271,8 @@ const finishRefresh = (
   token: string,
   now: number,
   nextAttemptAt: number,
-  snapshot: import("./types.ts").Snapshot | undefined
+  snapshot: import("./types.ts").Snapshot | undefined,
+  maxAge: number
 ) => {
   try {
     using db = new DatabaseSync(file, { timeout: PUBLISH_WAIT_MS });
@@ -269,11 +294,15 @@ const finishRefresh = (
         token,
         Date.now()
       );
-    return result.changes === 1
-      ? snapshot
-      : readSnapshot(readRow(db, key), now);
-  } catch {
-    return snapshot;
+    return {
+      busy: false,
+      snapshot:
+        result.changes === 1
+          ? snapshot
+          : readSnapshot(readRow(db, key), now, maxAge)
+    };
+  } catch (error) {
+    return { busy: isBusy(error), snapshot };
   }
 };
 
@@ -283,7 +312,10 @@ export const withUsageCache: import("./types.ts").UsageRuntime["withUsageCache"]
     if (options.cache === false || !/^[a-z0-9_-]+$/u.test(provider)) {
       return await fetchSnapshot(options);
     }
-    const now = nowValue(options.now);
+    const { onCachedUsage } = options;
+    const keepLastKnown = onCachedUsage !== undefined;
+    const maxAge = keepLastKnown ? Number.POSITIVE_INFINITY : MAX_STALE_MS;
+    const contentionWait = keepLastKnown ? CONTENTION_WAIT_MS : 0;
     const ttl = isFiniteNumber(options.cacheTtlMs)
       ? Math.max(0, options.cacheTtlMs)
       : DEFAULT_USAGE_CACHE_TTL_MS;
@@ -296,13 +328,31 @@ export const withUsageCache: import("./types.ts").UsageRuntime["withUsageCache"]
       .update(JSON.stringify([provider, credentialIdentity]))
       .digest("hex");
     const token = randomUUID();
-    const prior = claimRefresh(file, key, now, token);
+    let cached: import("./types.ts").Snapshot | undefined;
+    onCachedUsage?.(key, undefined);
+    const prior = await retryBusy(() => {
+      const attempt = claimRefresh(
+        file,
+        key,
+        nowValue(options.now),
+        token,
+        maxAge
+      );
+      if (
+        attempt.snapshot !== undefined &&
+        attempt.snapshot.fetchedAt !== cached?.fetchedAt
+      ) {
+        cached = attempt.snapshot;
+        onCachedUsage?.(key, cached);
+      }
+      return attempt;
+    }, performance.now() + contentionWait);
     if (!prior.claimed) {
-      return prior.snapshot;
+      return cached;
     }
     let goodResponse = false;
     let usageError = false;
-    let retryAt = now;
+    let retryAt = nowValue(options.now);
     const fetch = options.fetch ?? globalThis.fetch;
     const deadline = AbortSignal.timeout(REFRESH_DEADLINE_MS);
     let snapshot;
@@ -339,13 +389,22 @@ export const withUsageCache: import("./types.ts").UsageRuntime["withUsageCache"]
     } catch {
       snapshot = undefined;
     }
-    const result = finishRefresh(
-      file,
-      key,
-      token,
-      now,
-      Math.max(nowValue(options.now) + ttl, retryAt),
-      snapshot
+    const fetchedAt = nowValue(options.now);
+    const nextAttemptAt = Math.max(fetchedAt + ttl, retryAt);
+    const result = await retryBusy(
+      () =>
+        finishRefresh(
+          file,
+          key,
+          token,
+          fetchedAt,
+          nextAttemptAt,
+          snapshot,
+          maxAge
+        ),
+      performance.now() + contentionWait
     );
-    return result ?? prior.snapshot;
+    return result.snapshot === snapshot && snapshot !== undefined
+      ? { ...snapshot, fetchedAt }
+      : (result.snapshot ?? cached);
   };

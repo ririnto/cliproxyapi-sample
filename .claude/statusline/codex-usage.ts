@@ -322,7 +322,17 @@ export const fetchUsage = async (
         await withUsageCache(
           "chatgpt",
           { accountId: selected.accountId, token: selected.token },
-          options,
+          {
+            ...options,
+            onCachedUsage:
+              options.onCachedUsage === undefined
+                ? undefined
+                : (key, snapshot) =>
+                    options.onCachedUsage?.(
+                      key,
+                      preserveNativeQuotaDeduplication(snapshot)
+                    )
+          },
           async (fetchOptions) =>
             await usageSnapshot(selected, fetchOptions, requestJson)
         )
